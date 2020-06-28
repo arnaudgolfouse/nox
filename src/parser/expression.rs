@@ -2,6 +2,7 @@ use super::{bytecode::Instruction, Constant, ParserError, ParserErrorKind};
 use crate::{
     error::Continue,
     lexer::{Keyword, Operation, Token, TokenKind},
+    Position, Range,
 };
 
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
@@ -38,38 +39,6 @@ pub enum ExpressionType {
     Variable,
 }
 
-pub enum InfixRule {
-    Call,
-    Binary,
-}
-
-fn get_infix(token: Option<&Token>) -> Option<(InfixRule, Precedence)> {
-    if let Some(token) = token {
-        match token.kind {
-            TokenKind::LPar => Some((InfixRule::Call, Precedence::None)),
-            TokenKind::Op(op) => match op {
-                Operation::Or | Operation::Xor => Some((InfixRule::Binary, Precedence::Or)),
-                Operation::And => Some((InfixRule::Binary, Precedence::And)),
-                Operation::Equal | Operation::NEqual => {
-                    Some((InfixRule::Binary, Precedence::Equality))
-                }
-                Operation::Less | Operation::More | Operation::LessEq | Operation::MoreEq => {
-                    Some((InfixRule::Binary, Precedence::Comparison))
-                }
-                Operation::Plus | Operation::Minus => Some((InfixRule::Binary, Precedence::Term)),
-                Operation::Multiply | Operation::Divide => {
-                    Some((InfixRule::Binary, Precedence::Factor))
-                }
-                Operation::Modulo => Some((InfixRule::Binary, Precedence::Modulo)),
-                Operation::Not => None,
-            },
-            _ => None,
-        }
-    } else {
-        None
-    }
-}
-
 /// Collection of methods for parsing expressions.
 ///
 /// This allow to implement every individual parsing block (constants, variables, ...), while having the default implementation handle putting them together.
@@ -84,13 +53,23 @@ pub trait ExpressionParser<'a> {
     fn parse_lambda(&mut self) -> Result<ExpressionType, ParserError<'a>>;
     /// Parse a unary operation.
     fn parse_unary(&mut self, operator: Operation) -> Result<(), ParserError<'a>>;
-    fn parse_binary(&mut self) -> Result<ExpressionType, ParserError<'a>>;
+    fn parse_binary(
+        &mut self,
+        operator: Operation,
+        precedence: Precedence,
+    ) -> Result<ExpressionType, ParserError<'a>>;
     fn parse_call(&mut self) -> Result<ExpressionType, ParserError<'a>>;
     fn parse_brackets(&mut self) -> Result<ExpressionType, ParserError<'a>>;
     fn parse_dot(&mut self) -> Result<ExpressionType, ParserError<'a>>;
     fn next(&mut self) -> Result<Option<Token>, ParserError<'a>>;
     fn peek(&self) -> Result<Option<&Token>, ParserError<'a>>;
-    fn emit_error(&self, kind: ParserErrorKind, continuable: Continue) -> ParserError<'a>;
+    fn emit_error(
+        &self,
+        kind: ParserErrorKind,
+        continuable: Continue,
+        range: Range,
+    ) -> ParserError<'a>;
+    fn current_position(&self) -> Position;
 
     /// Parse an expression.
     ///
@@ -138,45 +117,63 @@ pub trait ExpressionParser<'a> {
                 ..
             }) => self.parse_variable(id),
             // constant
-            Some(Token { kind, .. }) => match Constant::try_from(kind) {
+            Some(Token { kind, range }) => match Constant::try_from(kind) {
                 Ok(constant) => {
                     self.parse_constant(constant);
                     Ok(ExpressionType::Constant)
                 }
-                Err(token_kind) => {
-                    Err(self.emit_error(ParserErrorKind::Unexpected(token_kind), Continue::Stop))
-                }
+                Err(token_kind) => Err(self.emit_error(
+                    ParserErrorKind::Unexpected(token_kind),
+                    Continue::Stop,
+                    range,
+                )),
             },
-            None => return Err(self.emit_error(ParserErrorKind::ExpectExpression, Continue::Stop)),
+            None => {
+                return Err(self.emit_error(
+                    ParserErrorKind::ExpectExpression,
+                    Continue::Stop,
+                    Range::new(self.current_position(), self.current_position()),
+                ))
+            }
         }?;
 
         loop {
             if matches!(expression_type, ExpressionType::Assign(_)) {
                 return Ok(expression_type);
             }
-            expression_type = match self.peek()? {
-                Some(Token {
-                    kind: TokenKind::LBracket,
-                    ..
-                }) => self.parse_brackets(),
-                Some(Token {
-                    kind: TokenKind::Dot,
-                    ..
-                }) => self.parse_dot(),
-                token => {
-                    if let Some((infix, infix_precedence)) = get_infix(token) {
-                        if precedence > infix_precedence {
+            if let Some(token) = self.peek()? {
+                expression_type = match &token.kind {
+                    TokenKind::LBracket => self.parse_brackets(),
+                    TokenKind::Dot => self.parse_dot(),
+                    TokenKind::Op(op) => {
+                        let op = *op;
+                        let op_precedence = match op {
+                            Operation::Or | Operation::Xor => Precedence::Or,
+                            Operation::And => Precedence::And,
+                            Operation::Equal | Operation::NEqual => Precedence::Equality,
+                            Operation::Less
+                            | Operation::More
+                            | Operation::LessEq
+                            | Operation::MoreEq => Precedence::Comparison,
+                            Operation::Plus | Operation::Minus => Precedence::Term,
+                            Operation::Multiply | Operation::Divide => Precedence::Factor,
+                            Operation::Modulo => Precedence::Modulo,
+                            _ => {
+                                break;
+                            }
+                        };
+                        if precedence > op_precedence {
                             break;
                         }
-                        match infix {
-                            InfixRule::Binary => self.parse_binary(),
-                            InfixRule::Call => self.parse_call(),
-                        }
-                    } else {
-                        break;
+                        self.next()?;
+                        self.parse_binary(op, op_precedence)
                     }
-                }
-            }?;
+                    TokenKind::LPar => self.parse_call(),
+                    _ => break,
+                }?;
+            } else {
+                break;
+            }
         }
 
         Ok(expression_type)
@@ -236,6 +233,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
             _ => Err(self.emit_error(
                 ParserErrorKind::Expected(TokenKind::RPar),
                 Continue::Continue,
+                self.lexer.current_range(),
             )),
         }
     }
@@ -255,8 +253,33 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         Ok(())
     }
 
-    fn parse_binary(&mut self) -> Result<ExpressionType, ParserError<'a>> {
-        todo!()
+    fn parse_binary(
+        &mut self,
+        operator: Operation,
+        precedence: Precedence,
+    ) -> Result<ExpressionType, ParserError<'a>> {
+        let op_position = self.lexer.position;
+        let line = op_position.line;
+
+        self.parse_precedence(precedence)?;
+
+        match operator {
+            Operation::Plus => self.code.push_instruction(Instruction::Add, line),
+            Operation::Minus => self.code.push_instruction(Instruction::Subtract, line),
+            Operation::Multiply => self.code.push_instruction(Instruction::Multiply, line),
+            Operation::Divide => self.code.push_instruction(Instruction::Divide, line),
+            Operation::Modulo => self.code.push_instruction(Instruction::Modulo, line),
+            // Operation::Pow => self.code.push_instruction(Instruction::Pow, line),
+            Operation::Equal => self.code.push_instruction(Instruction::Equal, line),
+            Operation::NEqual => self.code.push_instruction(Instruction::NEqual, line),
+            Operation::Less => self.code.push_instruction(Instruction::Less, line),
+            Operation::LessEq => self.code.push_instruction(Instruction::LessEq, line),
+            Operation::More => self.code.push_instruction(Instruction::More, line),
+            Operation::MoreEq => self.code.push_instruction(Instruction::MoreEq, line),
+            Operation::Xor => self.code.push_instruction(Instruction::Xor, line),
+            _ => {}
+        }
+        Ok(ExpressionType::BinaryOp)
     }
 
     fn parse_call(&mut self) -> Result<ExpressionType, ParserError<'a>> {
@@ -279,12 +302,21 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         self.lexer.peek().map_err(ParserError::from)
     }
 
-    fn emit_error(&self, kind: ParserErrorKind, continuable: Continue) -> ParserError<'a> {
+    fn emit_error(
+        &self,
+        kind: ParserErrorKind,
+        continuable: Continue,
+        range: Range,
+    ) -> ParserError<'a> {
         ParserError {
             kind,
             continuable,
-            range: self.lexer.current_range(),
+            range,
             source: self.lexer.source.clone(),
         }
+    }
+
+    fn current_position(&self) -> Position {
+        self.lexer.position
     }
 }

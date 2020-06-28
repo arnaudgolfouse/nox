@@ -15,26 +15,26 @@ pub trait Operand: Sized + Default + Copy {
 }
 
 /// implement `Operand` for integer types
-macro_rules! implement_to_ne_bytes {
+macro_rules! implement_integer_operand {
     ($($t:ty)*) => {
         $(
         impl Operand for $t {
             type Extended = [Option<Instruction<u8>>; size_of::<$t>() - 1];
-            fn extended(self) -> (u8, <Self as Operand>::Extended) {
+            fn extended(mut self) -> (u8, <Self as Operand>::Extended) {
+                let u8_part = (self & 0xff) as u8;
+                self = self.rotate_right(8);
                 let mut extended = [None; size_of::<$t>() - 1];
-                let bytes = self.to_ne_bytes();
-                for (byte, extended) in bytes[..bytes.len() - 1].iter().zip(extended.iter_mut())
-                {
-                    if *byte != 0 {
-                        *extended = Some(Instruction::Extended(*byte));
+                for i in 0..extended.len() {
+                    let byte = (self & 0xff) as u8;
+                    if byte != 0 {
+                        extended[i] = Some(Instruction::Extended(byte));
                     }
+                    self = self.rotate_right(8);
                 }
-                (bytes[size_of::<$t>() - 1], extended)
+                (u8_part, extended)
             }
 
-            fn iter_extended(
-        extended: &<Self as Operand>::Extended,
-    ) -> std::iter::Copied<std::slice::Iter<Option<Instruction<u8>>>> {
+            fn iter_extended(extended: &<Self as Operand>::Extended) -> std::iter::Copied<std::slice::Iter<Option<Instruction<u8>>>> {
                 extended.into_iter().copied()
             }
         }
@@ -42,7 +42,7 @@ macro_rules! implement_to_ne_bytes {
     };
 }
 
-implement_to_ne_bytes!(u8 u16 u32 u64 usize);
+implement_integer_operand!(u8 u16 u32 u64 usize);
 
 /// Bytecode instructions
 ///
@@ -451,5 +451,31 @@ impl fmt::Display for Chunk {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn extended_conversion() {
+        let x: u8 = 5;
+        assert_eq!(x.extended(), (x, []));
+
+        let x: u16 = (4 << 8) + 2;
+        assert_eq!(x.extended(), (2, [Some(Instruction::Extended(4))]));
+
+        let x: u32 = (102 << 24) + (6 << 8) + 84;
+        assert_eq!(
+            x.extended(),
+            (
+                84,
+                [
+                    Some(Instruction::Extended(6)),
+                    None,
+                    Some(Instruction::Extended(102))
+                ]
+            )
+        );
     }
 }

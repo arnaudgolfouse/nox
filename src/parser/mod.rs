@@ -140,9 +140,9 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Return) => {
                 self.parse_expression()?;
                 self.code
-                    .emit_instruction::<u8>(Instruction::Return, self.lexer.position.line)
+                    .emit_instruction::<u8>(Instruction::Return, first_token.range.start.line)
             }
-            _ => unimplemented!(),
+            _ => unimplemented!("{:?}", first_token.kind),
         }
 
         Ok(Some(()))
