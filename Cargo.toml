@@ -1,0 +1,12 @@
+[package]
+name = "nox2"
+version = "0.1.0"
+authors = ["Arnaud <arnaud.golfouse@free.fr>"]
+edition = "2018"
+
+[dependencies]
+colored = "1.9"
+rustyline = "6.2"
+
+[profile.release]
+lto = true

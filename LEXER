@@ -1,0 +1,51 @@
+
+# keywords :
+	- def
+	- if
+	- then
+	- else
+	- for
+	- in
+	- while
+	- end
+	- continue
+	- break
+	- return
+
+# constants : 
+	- true
+	- false
+	- none
+	
+# operators :
+	- +
+	- -
+	- *
+	- /
+	- %
+	- =
+	- +=
+	- -=
+	- *=
+	- /=
+	- ==
+	- !=
+	- <
+	- >
+	- <=
+	- >=
+	- and
+	- or
+	- not
+
+# delimiters
+	- (
+	- )
+	- {
+	- }
+	- [
+	- ]
+	- .
+	- ,
+	- :
+	- ;

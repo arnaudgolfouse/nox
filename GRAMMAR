@@ -1,0 +1,55 @@
+/*************************************
+
+Notations :
+	- [ body ]    : means that 'body' is repeated any number of times (even 0)
+	- { body }    : means that 'body' is optional
+	- "name"      : means that 'name' must litteraly appear in the text
+	- x | y       : means that 'x' or 'y' may appear
+	- _anychar_   : means any character may appear
+	- _anyletter_ : means that any letter (for example, 'a' to 'z' and 'A' to 'Z' in ascii) may appear
+	- _anynumber_ : means that any number (for example, '0' to '9' in ascii) may appear
+
+*************************************/
+
+Number -> _anynumber_ [ _anynumber_ ] { "." [ _anynumber_ ] }
+
+String -> """ [ _anychar_ ] """
+
+Name -> ( _anyletter_ | "_" ) [ _anyletter_ | "_" | _anynumber_ ]
+
+ArgsList -> { Name [ "," Name ] { "," } }
+
+StatementList -> [ Statement { ";" } ]
+
+Statement -> "return" Expr
+			| CallExpr
+			| AssignableExpr ("=" | "+=" | "-=" | "*=" | "/=" | "%=") Expr
+			| "do" StatementList "end"
+			| "if" Expr StatementList { "else" StatementList } "end"
+			| "while" Expr StatementList "end"
+			| "for" Name [ "," Name ] "in" Expr StatementList "end"
+			| "fn" Name "(" ArgsList ")" StatementList "end"
+			| "break"
+			| "continue"
+
+Expr -> Number
+		| String
+		| Name
+		| Expr BinaryOp Expr
+		| UnaryOp Expr
+		| CallExpr
+		| LambdaExpr
+		| AssignableExpr
+		| TableExpr
+
+BinaryOp -> "==" | "!=" | "<" | ">" | "<=" | ">=" | "+" | "-" | "*" | "/" | "%" | "or" | "and" | "xor"
+
+UnaryOp -> "-" | "not"
+
+CallExpr -> Expr "(" { Expr [ "," Expr ] { "," } } ")"
+
+LambdaExpr -> "fn" "(" ArgsList ")" StatementList "end"
+
+AssignableExpr -> Name | Expr "." Name | Expr "[" Expr "]"
+
+TableExpr -> "{" [ Name "=" Expr "," ] { Name "=" Expr } "}"
