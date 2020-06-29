@@ -165,6 +165,10 @@ pub enum Instruction<Op: Operand> {
     ///
     /// Jump at the specified index in the instructions vector if `true` is at the top of the stack.
     JumpTrue(Op),
+    /// Conditional jump
+    ///
+    /// Jump at the specified index in the instructions vector if `true` is at the top of the stack, and pops the top of the stack.
+    JumpPopTrue(Op),
     /// Call a function.
     ///
     /// This interprets the top of the stack as the function, and the `operand` following values
@@ -194,6 +198,7 @@ impl<Op: Operand> Instruction<Op> {
             | Pop(operand)
             | Jump(operand)
             | JumpTrue(operand)
+            | JumpPopTrue(operand)
             | Call(operand)
             | Extended(operand) => Some(operand),
         }
@@ -233,6 +238,7 @@ impl<Op: Operand> Instruction<Op> {
             Self::Pop(_) => "POP",
             Self::Jump(_) => "JUMP",
             Self::JumpTrue(_) => "JUMP_TRUE",
+            Self::JumpPopTrue(_) => "JUMP_POP_TRUE",
             Self::Call(_) => "CALL",
             Self::Extended(_) => "EXTENDED",
         }
@@ -276,6 +282,7 @@ impl<Op: Operand> Instruction<Op> {
                 Pop(_) => Pop(operand),
                 Jump(_) => Jump(operand),
                 JumpTrue(_) => JumpTrue(operand),
+                JumpPopTrue(_) => JumpPopTrue(operand),
                 Call(_) => Call(operand),
                 Extended(_) => Extended(operand),
             },
@@ -381,6 +388,29 @@ impl Chunk {
         self.globals.len() as u32 - 1
     }
 
+    /// push an instruction (presumed to be a JUMP), and return its index in the bytecode for future modification
+    pub fn push_jump(&mut self) -> usize {
+        self.code.push(Instruction::Jump(0));
+        self.code.len() - 1
+    }
+
+    /// Write the (now known) operand at the given index.
+    ///
+    /// This function can be quite inneficient, as instruction bigger than `u8::MAX` will shift the entire code to make room for extended instructions.
+    pub fn write_jump<Op: Operand>(&mut self, instruction: Instruction<Op>, mut address: usize) {
+        // wow there cowboy !
+        let initial_instruction = &mut self.code[address];
+        assert_eq!(initial_instruction, &Instruction::Jump(0));
+        let (instruction, extended) = instruction.into_u8();
+        *initial_instruction = instruction;
+        for extended in Op::iter_extended(&extended) {
+            if let Some(extended) = extended {
+                self.code.insert(address, extended);
+                address += 1
+            }
+        }
+    }
+
     fn fmt_instruction(
         &self,
         instruction: Instruction<u8>,
@@ -410,7 +440,7 @@ impl Chunk {
 
 impl fmt::Display for Chunk {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        println!("Chunk {:?} :", self.name);
+        println!("{} :", self.name);
         print!(" - constants : [");
         for constant in &self.constants[..self.constants.len().saturating_sub(1)] {
             print!("{}, ", constant)
@@ -421,17 +451,22 @@ impl fmt::Display for Chunk {
         println!("]");
         println!(" - {} locals", self.locals_number);
         println!();
-        formatter.write_str("line       opcode            operand    operand value\n\n")?;
+        formatter
+            .write_str("line       index      opcode            operand    operand value\n\n")?;
         let mut lines = self.lines.iter();
-        let mut current_line = lines.next().unwrap();
+        let mut current_line = match lines.next() {
+            Some(line) => line,
+            None => return Ok(()),
+        };
         let mut lines_acc = 0;
         let mut extended = None;
-        for inst in &self.code {
+        for (i, inst) in self.code.iter().enumerate() {
             if lines_acc == 0 {
                 write!(formatter, "{:<10} ", current_line.0)
             } else {
                 formatter.write_str("|          ")
             }?;
+            write!(formatter, "{:<10} ", i)?;
             match inst {
                 Instruction::Extended(extend) => {
                     extended = Some((extended.unwrap_or(0) << 8) + *extend as u32);

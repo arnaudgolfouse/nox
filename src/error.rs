@@ -13,6 +13,8 @@ pub enum Continue {
     Continue,
     /// Continue on a new line
     ContinueWithNewline,
+    /// Continue with a space character
+    ContinueWithSpace,
     /// Hard error, stop
     Stop,
 }
@@ -50,9 +52,10 @@ pub fn display_error<F: Fn(&mut fmt::Formatter) -> Result<(), fmt::Error>>(
     display_message: F,
     range: Range,
     source: &Source,
+    warning: bool,
     formatter: &mut fmt::Formatter,
 ) -> Result<(), fmt::Error> {
-    display_error_internal(range, source, formatter)?;
+    display_error_internal(range, source, warning, formatter)?;
     display_message(formatter)
 }
 
@@ -60,26 +63,44 @@ pub fn display_error<F: Fn(&mut fmt::Formatter) -> Result<(), fmt::Error>>(
 fn display_error_internal(
     range: Range,
     source: &Source,
+    warning: bool,
     formatter: &mut fmt::Formatter,
 ) -> Result<(), fmt::Error> {
-    /// helper function to print a line with its number (and and optional error trail)
-    fn print_line(
-        formatter: &mut fmt::Formatter,
-        line: String,
-        line_number: usize,
-        number_width: usize,
-        error_trail: bool,
-    ) -> Result<(), fmt::Error> {
-        formatter.write_str(
-            &format!(
-                "{line:<width$} | ",
-                line = line_number + 1, // text usually start at line 1
-                width = number_width
-            )
-            .red(),
+    let color = |x| {
+        if warning {
+            <&str>::yellow(x)
+        } else {
+            <&str>::red(x)
+        }
+    };
+    // helper function to print a line with its number (and and optional error trail)
+    let print_line = |formatter: &mut fmt::Formatter,
+                      line: String,
+                      line_number: usize,
+                      number_width: usize,
+                      error_trail: bool|
+     -> Result<(), fmt::Error> {
+        write!(
+            formatter,
+            "{}",
+            if warning {
+                format!(
+                    "{line:<width$} | ",
+                    line = line_number + 1, // text usually start at line 1
+                    width = number_width
+                )
+                .yellow()
+            } else {
+                format!(
+                    "{line:<width$} | ",
+                    line = line_number + 1, // text usually start at line 1
+                    width = number_width
+                )
+                .red()
+            }
         )?;
         if error_trail {
-            formatter.write_str(&"| ".red())?
+            formatter.write_str(&color("| "))?
         }
         for c in line.chars() {
             if c == '\t' {
@@ -90,59 +111,76 @@ fn display_error_internal(
             }
         }
         writeln!(formatter)
-    }
+    };
 
-    /// helper function to print a line with its number (and and optional error trail), as well
-    /// as creating an underline of '^' between the specified bounds (`error_start` and
-    /// `error_end`).
-    fn print_line_underlined(
-        formatter: &mut fmt::Formatter,
-        line: String,
-        line_number: usize,
-        number_width: usize,
-        error_trail: bool,
-        error_start: usize,
-        error_end: usize,
-    ) -> Result<String, fmt::Error> {
+    // helper function to print a line with its number (and and optional error trail), as well
+    // as creating an underline of '^' between the specified bounds (`error_start` and
+    // `error_end`).
+    let print_line_underlined = |formatter: &mut fmt::Formatter,
+                                 line: String,
+                                 line_number: usize,
+                                 number_width: usize,
+                                 error_trail: bool,
+                                 error_start: usize,
+                                 error_end: usize|
+     -> Result<String, fmt::Error> {
         write!(
             formatter,
             "{}",
-            &format!(
-                "{line:<width$} | ",
-                line = line_number + 1, // text usually start at line 1
-                width = number_width
-            )
-            .red()
+            if warning {
+                format!(
+                    "{line:<width$} | ",
+                    line = line_number + 1, // text usually start at line 1
+                    width = number_width
+                )
+                .yellow()
+            } else {
+                format!(
+                    "{line:<width$} | ",
+                    line = line_number + 1, // text usually start at line 1
+                    width = number_width
+                )
+                .red()
+            }
         )?;
-        let mut underline = format!("{1:0$} {2} ", number_width, "", " ".red());
+        let mut underline = format!("{1:0$} {2} ", number_width, "", color(" "));
         if error_trail {
-            write!(formatter, "{}", "| ".red())?;
-            underline.push_str(&format!("{}, ", "|_".red()))
+            write!(formatter, "{}", color("| "))?;
+            underline.push_str(&format!("{}, ", color("|_")))
         }
+        let mut column_max = 0;
         for (i, c) in line.chars().enumerate() {
+            column_max += 1;
             if c == '\t' {
                 // tab as 4 spaces
                 formatter.write_str("    ")?;
                 if i < error_end && i >= error_start {
-                    underline.push_str(&"____".red())
+                    underline.push_str(&color("____"))
                 } else if i < error_start {
                     underline.push_str("    ")
                 }
             } else {
                 write!(formatter, "{}", c)?;
                 if i < error_end && i >= error_start {
-                    underline.push_str(&"_".red())
+                    underline.push_str(&color("_"))
                 } else if i < error_start {
                     underline.push(' ')
                 }
             }
             if i == error_end {
-                underline.push_str(&"^".red())
+                underline.push_str(&color("^"))
             }
+        }
+        while error_end > column_max {
+            column_max += 1;
+            underline.push_str(&color("_"))
+        }
+        if error_end == column_max {
+            underline.push_str(&color("^"))
         }
         writeln!(formatter)?;
         Ok(underline)
-    }
+    };
 
     writeln!(
         formatter,
@@ -218,9 +256,17 @@ fn display_error_internal(
             range.end.column as usize,
         )?
         .replace("_", "^");
-        writeln!(formatter, "{}", underline.red())?
+        writeln!(
+            formatter,
+            "{}",
+            if warning {
+                underline.yellow()
+            } else {
+                underline.red()
+            }
+        )?
     }
 
     writeln!(formatter)?;
-    write!(formatter, "{} : ", "error".red().bold())
+    write!(formatter, "{} : ", color("error").bold())
 }

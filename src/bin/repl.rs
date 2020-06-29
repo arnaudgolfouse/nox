@@ -52,6 +52,7 @@ impl Repl {
                     self.editor.add_history_entry(new_phrase);
                 }
                 Continue::ContinueWithNewline => self.current_phrase.push('\n'),
+                Continue::ContinueWithSpace => self.current_phrase.push(' '),
                 Continue::Continue => {}
             },
         }

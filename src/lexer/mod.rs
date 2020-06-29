@@ -152,6 +152,8 @@ impl<'a> Lexer<'a> {
                             self.parse_base(&word[2..], 2)?
                         } else if word.starts_with("0x") {
                             self.parse_base(&word[2..], 16)?
+                        } else if word.starts_with("0o") {
+                            self.parse_base(&word[2..], 8)?
                         } else {
                             self.parse_base(&word, 10)?
                         }
@@ -467,7 +469,7 @@ pub struct LexerError<'a> {
 impl<'a> fmt::Display for LexerError<'a> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let display_message = |formatter: &mut fmt::Formatter| write!(formatter, "{}", self.kind);
-        display_error(display_message, self.range, &self.source, formatter)
+        display_error(display_message, self.range, &self.source, false, formatter)
     }
 }
 
@@ -505,6 +507,7 @@ mod tests {
                 .kind,
             LexerErrorKind::Parsei64(_)
         ));
+        // TODO : the Rust parser is not very good with this error, make a custom one.
         assert!(matches!(
             Lexer::top_level("0xg").next().unwrap_err().kind,
             LexerErrorKind::Parsei64(_)

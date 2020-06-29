@@ -12,15 +12,13 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy)]
 enum Scope {
-    /// Body of the top-level / function
-    TopLevel,
-    /// if statement
-    If,
-    /// else statement
-    Else,
-    /// while statement
+    /// `if` statement. Contains the address of the `Jump` instruction.
+    If(usize),
+    /// `else` statement. Contains the address of the `Jump` instruction at the end of the `if` block.
+    Else(usize),
+    /// `while` statement
     While,
-    /// for statement
+    /// `for` statement
     For,
 }
 
@@ -32,11 +30,9 @@ pub struct Function {
 }
 
 impl Function {
-    fn scope(&self) -> Scope {
-        match self.scopes.last() {
-            Some(scope) => *scope,
-            None => Scope::TopLevel,
-        }
+    /// This function returns `None` if there is no opened scope in the function
+    fn scope(&self) -> Option<Scope> {
+        self.scopes.last().copied()
     }
 
     /// Return the index of the variable if it exists in the function
@@ -57,11 +53,9 @@ pub struct TopLevel {
 }
 
 impl TopLevel {
-    fn scope(&self) -> Scope {
-        match self.scopes.last() {
-            Some(scope) => *scope,
-            None => Scope::TopLevel,
-        }
+    /// This function returns `None` if there is no opened scope in the top-level
+    fn scope(&self) -> Option<Scope> {
+        self.scopes.last().copied()
     }
 }
 
@@ -118,10 +112,17 @@ impl<'a> Parser<'a> {
     }
 
     /// Returns the current scope.
-    fn scope(&self) -> Scope {
+    fn scope(&self) -> Option<Scope> {
         match self.function_stack.last() {
             Some(func) => func.scope(),
             None => self.top_level.scope(),
+        }
+    }
+
+    fn pop_scope(&mut self) -> Option<Scope> {
+        match self.function_stack.last_mut() {
+            Some(func) => func.scopes.pop(),
+            None => self.top_level.scopes.pop(),
         }
     }
 
@@ -133,7 +134,17 @@ impl<'a> Parser<'a> {
     fn parse_statements(&mut self) -> Result<Option<()>, ParserError<'a>> {
         let first_token = match self.lexer.next()? {
             Some(token) => token,
-            None => return Ok(None),
+            None => {
+                return if self.scope().is_some() || !self.function_stack.is_empty() {
+                    Err(self.emit_error(
+                        ParserErrorKind::Expected(TokenKind::Keyword(Keyword::End)),
+                        Continue::ContinueWithNewline,
+                        Range::new(self.lexer.position, self.lexer.position),
+                    ))
+                } else {
+                    Ok(None)
+                }
+            }
         };
 
         match &first_token.kind {
@@ -142,10 +153,66 @@ impl<'a> Parser<'a> {
                 self.code
                     .emit_instruction::<u8>(Instruction::Return, first_token.range.start.line)
             }
-            _ => unimplemented!("{:?}", first_token.kind),
+            TokenKind::Keyword(Keyword::End) => {
+                if let Some(scope) = self.pop_scope() {
+                    match scope {
+                        Scope::If(if_address) => self.code.write_jump(
+                            Instruction::JumpPopTrue(self.code.code.len() as u32),
+                            if_address,
+                        ),
+                        Scope::Else(else_address) => self.code.write_jump(
+                            Instruction::Jump(self.code.code.len() as u32),
+                            else_address,
+                        ),
+                        _ => todo!(),
+                    }
+                } else if let Some(_function) = self.function_stack.last() {
+                    todo!()
+                } else {
+                    return Err(self.emit_error(
+                        ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::End)),
+                        Continue::Stop,
+                        first_token.range,
+                    ));
+                }
+            }
+            TokenKind::Keyword(Keyword::If) => {
+                self.parse_expression()?;
+                let if_address = self.code.push_jump();
+                self.push_scope(Scope::If(if_address));
+            }
+            TokenKind::Keyword(Keyword::Else) => {
+                if let Some(Scope::If(if_address)) = self.pop_scope() {
+                    let else_address = self.code.push_jump();
+                    self.push_scope(Scope::Else(else_address));
+                    self.code
+                        .write_jump(Instruction::JumpPopTrue(self.code.code.len()), if_address);
+                } else {
+                    return Err(self.emit_error(
+                        ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::Else)),
+                        Continue::Stop,
+                        first_token.range,
+                    ));
+                }
+            }
+            _ => {
+                return Err(self.emit_error(
+                    ParserErrorKind::Unexpected(first_token.kind),
+                    Continue::Stop,
+                    first_token.range,
+                ))
+            }
         }
 
         Ok(Some(()))
+    }
+
+    fn push_scope(&mut self, scope: Scope) {
+        if let Some(func) = self.function_stack.last_mut() {
+            func.scopes.push(scope)
+        } else {
+            self.top_level.scopes.push(scope)
+        }
     }
 }
 
@@ -193,6 +260,7 @@ impl<'a> fmt::Display for ParserError<'a> {
             |f| write!(f, "{}", self.kind),
             self.range,
             &self.source,
+            false,
             formatter,
         )
     }

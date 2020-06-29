@@ -53,11 +53,10 @@ pub trait ExpressionParser<'a> {
     fn parse_lambda(&mut self) -> Result<ExpressionType, ParserError<'a>>;
     /// Parse a unary operation.
     fn parse_unary(&mut self, operator: Operation) -> Result<(), ParserError<'a>>;
-    fn parse_binary(
-        &mut self,
-        operator: Operation,
-        precedence: Precedence,
-    ) -> Result<ExpressionType, ParserError<'a>>;
+    /// Parse a binary operation.
+    ///
+    /// `range` is the range of the operator in the text.
+    fn parse_binary(&mut self, operator: Operation, range: Range) -> Result<(), ParserError<'a>>;
     fn parse_call(&mut self) -> Result<ExpressionType, ParserError<'a>>;
     fn parse_brackets(&mut self) -> Result<ExpressionType, ParserError<'a>>;
     fn parse_dot(&mut self) -> Result<ExpressionType, ParserError<'a>>;
@@ -85,58 +84,47 @@ pub trait ExpressionParser<'a> {
     ) -> Result<ExpressionType, ParserError<'a>> {
         use std::convert::TryFrom;
 
+        // prefix : '-', 'not', '(', ...
         let prefix_token = self.next()?;
-        let mut expression_type = match prefix_token {
-            // fn ...
-            Some(Token {
-                kind: TokenKind::Keyword(Keyword::Fn),
-                ..
-            }) => self.parse_lambda(),
-            // ( ...
-            Some(Token {
-                kind: TokenKind::LPar,
-                ..
-            }) => self.parse_grouping(),
-            // - ...
-            Some(Token {
-                kind: TokenKind::Op(Operation::Minus),
-                ..
-            }) => self
-                .parse_unary(Operation::Minus)
-                .map(|_| ExpressionType::UnaryOp),
-            // not ...
-            Some(Token {
-                kind: TokenKind::Op(Operation::Not),
-                ..
-            }) => self
-                .parse_unary(Operation::Not)
-                .map(|_| ExpressionType::UnaryOp),
-            // variable name
-            Some(Token {
-                kind: TokenKind::Id(id),
-                ..
-            }) => self.parse_variable(id),
-            // constant
-            Some(Token { kind, range }) => match Constant::try_from(kind) {
-                Ok(constant) => {
-                    self.parse_constant(constant);
-                    Ok(ExpressionType::Constant)
-                }
-                Err(token_kind) => Err(self.emit_error(
-                    ParserErrorKind::Unexpected(token_kind),
-                    Continue::Stop,
-                    range,
-                )),
-            },
-            None => {
-                return Err(self.emit_error(
-                    ParserErrorKind::ExpectExpression,
-                    Continue::Stop,
-                    Range::new(self.current_position(), self.current_position()),
-                ))
-            }
-        }?;
+        let mut expression_type = if let Some(token) = prefix_token {
+            match token.kind {
+                // fn ...
+                TokenKind::Keyword(Keyword::Fn) => self.parse_lambda(),
+                // ( ...
+                TokenKind::LPar => self.parse_grouping(),
+                // - ...
+                TokenKind::Op(Operation::Minus) => self
+                    .parse_unary(Operation::Minus)
+                    .map(|_| ExpressionType::UnaryOp),
+                // not ...
+                TokenKind::Op(Operation::Not) => self
+                    .parse_unary(Operation::Not)
+                    .map(|_| ExpressionType::UnaryOp),
+                // variable name
+                TokenKind::Id(id) => self.parse_variable(id),
+                // constant
+                kind => match Constant::try_from(kind) {
+                    Ok(constant) => {
+                        self.parse_constant(constant);
+                        Ok(ExpressionType::Constant)
+                    }
+                    Err(token_kind) => Err(self.emit_error(
+                        ParserErrorKind::Unexpected(token_kind),
+                        Continue::Stop,
+                        token.range,
+                    )),
+                },
+            }?
+        } else {
+            println!("here ?");
+            return Err(self.emit_error(
+                ParserErrorKind::ExpectExpression,
+                Continue::Stop,
+                Range::new(self.current_position(), self.current_position()),
+            ));
+        };
 
+        // infix operations : '+', '*', '/', ... but also 'a.b' and others !
         loop {
             if matches!(expression_type, ExpressionType::Assign(_)) {
                 return Ok(expression_type);
@@ -165,8 +153,11 @@ pub trait ExpressionParser<'a> {
                         if precedence > op_precedence {
                             break;
                         }
+                        let range = token.range;
                         self.next()?;
-                        self.parse_binary(op, op_precedence)
+                        self.parse_precedence(op_precedence)?;
+                        self.parse_binary(op, range)
+                            .map(|_| ExpressionType::BinaryOp)
                     }
                     TokenKind::LPar => self.parse_call(),
                     _ => break,
@@ -253,15 +244,8 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         Ok(())
     }
 
-    fn parse_binary(
-        &mut self,
-        operator: Operation,
-        precedence: Precedence,
-    ) -> Result<ExpressionType, ParserError<'a>> {
-        let op_position = self.lexer.position;
-        let line = op_position.line;
-
-        self.parse_precedence(precedence)?;
+    fn parse_binary(&mut self, operator: Operation, range: Range) -> Result<(), ParserError<'a>> {
+        let line = range.start.line;
 
         match operator {
             Operation::Plus => self.code.push_instruction(Instruction::Add, line),
@@ -277,9 +261,9 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
             Operation::More => self.code.push_instruction(Instruction::More, line),
             Operation::MoreEq => self.code.push_instruction(Instruction::MoreEq, line),
             Operation::Xor => self.code.push_instruction(Instruction::Xor, line),
-            _ => {}
+            _ => {} // technically unreacheable ? meh
         }
-        Ok(ExpressionType::BinaryOp)
+        Ok(())
     }
 
     fn parse_call(&mut self) -> Result<ExpressionType, ParserError<'a>> {
