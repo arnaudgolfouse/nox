@@ -3,7 +3,7 @@ mod expression;
 
 use crate::{
     error::{display_error, Continue},
-    lexer::{Assign, Keyword, Lexer, LexerError, LexerErrorKind, TokenKind},
+    lexer::{Assign, Keyword, Lexer, LexerError, LexerErrorKind, Token, TokenKind},
     Range, Source,
 };
 use bytecode::{Chunk, Constant, Instruction};
@@ -12,7 +12,7 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy)]
 enum Scope {
-    /// `if` statement. Contains the address of the `Jump` instruction.
+    /// `if` statement. Contains the address of the `JumpPopFalse` instruction.
     If(usize),
     /// `else` statement. Contains the address of the `Jump` instruction at the end of the `if` block.
     Else(usize),
@@ -22,14 +22,25 @@ enum Scope {
     For,
 }
 
-#[derive(Default, Debug)]
-pub struct Function {
-    name: String,
+/// Structure temporary used by the parser to parse a function.
+#[derive(Debug)]
+struct Function {
     variables: Vec<String>,
     scopes: Vec<Scope>,
+    code: Chunk,
+    arg_number: u32,
 }
 
 impl Function {
+    fn new(name: String) -> Self {
+        Self {
+            variables: Vec::new(),
+            scopes: Vec::new(),
+            code: Chunk::new(name),
+            arg_number: 0,
+        }
+    }
+
     /// This function returns `None` if there is no opened scope in the function
     fn scope(&self) -> Option<Scope> {
         self.scopes.last().copied()
@@ -83,14 +94,7 @@ impl<'a> Parser<'a> {
         let chunk_name = source.name().to_owned();
         Self {
             lexer: Lexer::new(source),
-            code: Chunk {
-                name: chunk_name,
-                lines: Vec::new(),
-                code: Vec::new(),
-                constants: Vec::new(),
-                globals: Vec::new(),
-                locals_number: 0,
-            },
+            code: Chunk::new(chunk_name),
             errors: Vec::new(),
             top_level: TopLevel::default(),
             function_stack: Vec::new(),
@@ -109,6 +113,16 @@ impl<'a> Parser<'a> {
     fn push_instruction(&mut self, instruction: Instruction<u8>) {
         self.code
             .push_instruction(instruction, self.lexer.position.line)
+    }
+
+    /// Emit a `Expected [token]` error at the curretn position, continuable.
+    #[inline]
+    fn expected_token<T>(&self, kind: TokenKind) -> Result<T, ParserError<'a>> {
+        Err(self.emit_error(
+            ParserErrorKind::Expected(kind),
+            Continue::ContinueWithNewline,
+            Range::new(self.lexer.position, self.lexer.position),
+        ))
     }
 
     /// Returns the current scope.
@@ -185,11 +199,7 @@ impl<'a> Parser<'a> {
             Some(token) => token,
             None => {
                 return if self.scope().is_some() || !self.function_stack.is_empty() {
-                    Err(self.emit_error(
-                        ParserErrorKind::Expected(TokenKind::Keyword(Keyword::End)),
-                        Continue::ContinueWithNewline,
-                        Range::new(self.lexer.position, self.lexer.position),
-                    ))
+                    self.expected_token(TokenKind::Keyword(Keyword::End))
                 } else {
                     Ok(None)
                 }
@@ -216,8 +226,11 @@ impl<'a> Parser<'a> {
                         ),
                         _ => todo!(),
                     }
-                } else if let Some(_function) = self.function_stack.last() {
-                    todo!()
+                } else if let Some(mut function) = self.function_stack.pop() {
+                    self.push_instruction(Instruction::PushNil);
+                    self.push_instruction(Instruction::Return);
+                    std::mem::swap(&mut self.code, &mut function.code);
+                    self.code.functions.push(function.code);
                 } else {
                     return Err(self.emit_error(
                         ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::End)),
@@ -227,7 +240,8 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenKind::Keyword(Keyword::If) => {
-                self.parse_expression(Some(first_token), true)?;
+                let token = self.next()?;
+                self.parse_expression(token, true)?;
                 let if_address = self.code.push_jump();
                 self.push_scope(Scope::If(if_address));
             }
@@ -247,6 +261,46 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Keyword(Keyword::While) => todo!(),
             TokenKind::Keyword(Keyword::For) => todo!(),
+            TokenKind::Keyword(Keyword::Fn) => {
+                let mut function = match self.next()? {
+                    Some(Token {
+                        kind: TokenKind::Id(func_name),
+                        ..
+                    }) => {
+                        match self.next()? {
+                            Some(Token {
+                                kind: TokenKind::LPar,
+                                ..
+                            }) => {}
+                            token => {
+                                return Err(self.emit_error(
+                                    ParserErrorKind::Expected(TokenKind::LPar),
+                                    Continue::Stop,
+                                    if let Some(token) = token {
+                                        token.range
+                                    } else {
+                                        Range::new(self.lexer.position, self.lexer.position)
+                                    },
+                                ))
+                            }
+                        };
+                        self.parse_prototype(func_name)?
+                    }
+                    token => {
+                        return Err(self.emit_error(
+                            ParserErrorKind::ExpectedId,
+                            Continue::Stop,
+                            if let Some(token) = token {
+                                token.range
+                            } else {
+                                Range::new(self.lexer.position, self.lexer.position)
+                            },
+                        ))
+                    }
+                };
+                std::mem::swap(&mut self.code, &mut function.code);
+                self.function_stack.push(function);
+            }
             TokenKind::Id(_) => {
                 let range = first_token.range;
                 // TODO : make `parse_expression` eat the first token.
@@ -314,6 +368,68 @@ impl<'a> Parser<'a> {
 
         Ok(())
     }
+
+    /// Parse a function prototype, e.g. 'fn f(a, b)'
+    fn parse_prototype(&mut self, name: String) -> Result<Function, ParserError<'a>> {
+        let mut args = Vec::new();
+        loop {
+            if let Some(token) = self.next()? {
+                match token.kind {
+                    TokenKind::RPar => break,
+                    TokenKind::Id(arg) => {
+                        args.push(arg);
+                        if let Some(token) = self.next()? {
+                            match token.kind {
+                                TokenKind::Comma => {}
+                                TokenKind::RPar => break,
+                                _ => {
+                                    return Err(self.emit_error(
+                                        ParserErrorKind::Unexpected(token.kind),
+                                        Continue::Stop,
+                                        token.range,
+                                    ))
+                                }
+                            }
+                        } else {
+                            return self.expected_token(TokenKind::RPar);
+                        }
+                    }
+                    _ => {
+                        return Err(self.emit_error(
+                            ParserErrorKind::Unexpected(token.kind),
+                            Continue::Stop,
+                            token.range,
+                        ))
+                    }
+                }
+            } else {
+                return self.expected_token(TokenKind::RPar);
+            }
+        }
+        self.emit_instruction(Instruction::PushFunction(self.code.functions.len() as u32));
+        match self.function_stack.last() {
+            Some(func) => {
+                if let Some(local_index) = func.find_variable(&name) {
+                    self.emit_instruction(Instruction::WriteLocal(local_index))
+                } else {
+                    // TODO : captures or globals.
+                    todo!()
+                }
+            }
+            None => {
+                let global_index = self.code.add_global(name.clone());
+                self.emit_instruction(Instruction::WriteGlobal(global_index));
+            }
+        }
+
+        let arg_number = args.len() as _;
+        Ok(Function {
+            variables: args,
+            arg_number,
+            scopes: Vec::new(),
+            code: Chunk::new(name),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -322,6 +438,7 @@ pub enum ParserErrorKind {
     ExpectExpression,
     Expected(TokenKind),
     Unexpected(TokenKind),
+    ExpectedId,
     UnexpectedId,
 }
 
@@ -333,6 +450,7 @@ impl fmt::Display for ParserErrorKind {
             Self::Expected(token) => write!(formatter, "expected '{}'", token),
             Self::Unexpected(token) => write!(formatter, "unexpected token : '{}'", token),
             Self::UnexpectedId => formatter.write_str("unexpected identifier"),
+            Self::ExpectedId => formatter.write_str("expected identifier"),
         }
     }
 }
@@ -364,6 +482,166 @@ impl<'a> fmt::Display for ParserError<'a> {
             &self.source,
             false,
             formatter,
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn errors() {
+        // no expression after 'return'
+        let parser = Parser::new(Source::TopLevel("return"));
+        assert!(parser.parse_top_level().is_err());
+
+        // no 'end' to close this 'if'
+        let parser = Parser::new(Source::TopLevel("if true return 0 else return 1"));
+        assert!(parser.parse_top_level().is_err());
+    }
+
+    #[test]
+    fn simple_statements() {
+        let parser = Parser::new(Source::TopLevel("return 1"));
+        let chunk = parser.parse_top_level().unwrap();
+        assert_eq!(chunk.constants, [Constant::Int(1)]);
+        assert_eq!(
+            chunk.code,
+            [Instruction::ReadConstant(0), Instruction::Return]
+        );
+
+        let parser = Parser::new(Source::TopLevel("if 1 + 2 return 3 end"));
+        let chunk = parser.parse_top_level().unwrap();
+        assert_eq!(
+            chunk.constants,
+            [Constant::Int(1), Constant::Int(2), Constant::Int(3)]
+        );
+        assert_eq!(
+            chunk.code,
+            [
+                Instruction::ReadConstant(0),
+                Instruction::ReadConstant(1),
+                Instruction::Add,
+                Instruction::JumpPopFalse(6),
+                Instruction::ReadConstant(2),
+                Instruction::Return
+            ]
+        );
+
+        let parser = Parser::new(Source::TopLevel(
+            "
+        if (\"hello\" + \"world\") == \"hello world\"
+            return f(2, true)
+        else
+            return 5 - (f - g)(6) * 8
+        end",
+        ));
+        let chunk = parser.parse_top_level().unwrap();
+        assert_eq!(
+            chunk.constants,
+            [
+                Constant::String("hello".to_owned()),
+                Constant::String("world".to_owned()),
+                Constant::String("hello world".to_owned()),
+                Constant::Int(2),
+                Constant::Int(5),
+                Constant::Int(6),
+                Constant::Int(8),
+            ]
+        );
+        assert_eq!(chunk.globals, [String::from("f"), String::from("g")]);
+        assert_eq!(
+            chunk.code,
+            [
+                Instruction::ReadConstant(0),
+                Instruction::ReadConstant(1),
+                Instruction::Add,
+                Instruction::ReadConstant(2),
+                Instruction::Equal,
+                Instruction::JumpPopFalse(12),
+                Instruction::ReadGlobal(0),
+                Instruction::ReadConstant(3),
+                Instruction::PushTrue,
+                Instruction::Call(2),
+                Instruction::Return,
+                Instruction::Jump(22),
+                Instruction::ReadConstant(4),
+                Instruction::ReadGlobal(0),
+                Instruction::ReadGlobal(1),
+                Instruction::Subtract,
+                Instruction::ReadConstant(5),
+                Instruction::Call(1),
+                Instruction::ReadConstant(6),
+                Instruction::Multiply,
+                Instruction::Subtract,
+                Instruction::Return,
+            ]
+        );
+    }
+
+    #[test]
+    fn tables() {
+        let parser = Parser::new(Source::TopLevel("t = {}"));
+        let chunk = parser.parse_top_level().unwrap();
+        assert_eq!(chunk.constants, []);
+        assert_eq!(chunk.globals, [String::from("t")]);
+        assert_eq!(
+            chunk.code,
+            [Instruction::MakeTable(0), Instruction::WriteGlobal(0)]
+        );
+
+        let parser = Parser::new(Source::TopLevel("t = { x = 1 + 2, y = \"hello\" }"));
+        let chunk = parser.parse_top_level().unwrap();
+        assert_eq!(
+            chunk.constants,
+            [
+                Constant::String("x".to_owned()),
+                Constant::Int(1),
+                Constant::Int(2),
+                Constant::String("y".to_owned()),
+                Constant::String("hello".to_owned())
+            ]
+        );
+        assert_eq!(chunk.globals, [String::from("t")]);
+        assert_eq!(
+            chunk.code,
+            [
+                Instruction::ReadConstant(0),
+                Instruction::ReadConstant(1),
+                Instruction::ReadConstant(2),
+                Instruction::Add,
+                Instruction::ReadConstant(3),
+                Instruction::ReadConstant(4),
+                Instruction::MakeTable(2),
+                Instruction::WriteGlobal(0)
+            ]
+        );
+    }
+
+    #[test]
+    fn functions() {
+        let parser = Parser::new(Source::TopLevel("fn f() return 0 end x = f()"));
+        let chunk = parser.parse_top_level().unwrap();
+        assert_eq!(chunk.constants, []);
+        assert_eq!(chunk.globals, [String::from("f"), String::from("x")]);
+        assert_eq!(
+            chunk.code,
+            [
+                Instruction::PushFunction(0),
+                Instruction::WriteGlobal(0),
+                Instruction::ReadGlobal(0),
+                Instruction::Call(0),
+                Instruction::WriteGlobal(1)
+            ]
+        );
+        assert_eq!(
+            chunk.functions[0].code,
+            [
+                Instruction::ReadConstant(0),
+                Instruction::Return,
+                Instruction::PushNil,
+                Instruction::Return
+            ]
         )
     }
 }

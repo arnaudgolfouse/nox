@@ -183,16 +183,28 @@ impl convert::TryFrom<&str> for Keyword {
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenKind {
     Keyword(Keyword),
+    /// `(`
     LPar,
+    /// `)`
     RPar,
+    /// `[`
     LBracket,
+    /// `]`
     RBracket,
+    /// `{`
     LBrace,
+    /// `}`
     RBrace,
+    /// `.`
     Dot,
+    /// `,`
     Comma,
+    /// `;`
     SemiColon,
+    /// `!`
     Exclamation,
+    /// `?`
+    Interrogation,
     Assign(Assign),
     Placeholder,
     Int(i64),
@@ -230,6 +242,7 @@ impl Display for TokenKind {
             Self::Comma => formatter.write_char(','),
             Self::SemiColon => formatter.write_char(';'),
             Self::Exclamation => formatter.write_char('!'),
+            Self::Interrogation => formatter.write_char('?'),
             Self::Assign(a) => match a {
                 Assign::Equal => formatter.write_char('='),
                 Assign::Plus => formatter.write_str("+="),

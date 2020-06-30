@@ -132,6 +132,10 @@ pub enum Instruction<Op: Operand> {
     PushTrue,
     /// Push `false` on the stack.
     PushFalse,
+    /// Push a function on the stack.
+    ///
+    /// The function is designated by its index in the `functions` field of the chunk.
+    PushFunction(Op),
     /// Push a constant on the stack.
     ///
     /// The constant is designated by its index in the `constants` field of the chunk.
@@ -182,6 +186,10 @@ pub enum Instruction<Op: Operand> {
     /// This interprets the top of the stack as the function, and the `operand` following values
     /// as the arguments.
     Call(Op),
+    /// Creates a new table.
+    ///
+    /// This will use 2*Op elements of the stack to make this table (pair by pair).
+    MakeTable(Op),
     /// Argument extension
     ///
     /// Allow for instructions with u16 / u24 / u32 operands : this always precede the concerned
@@ -196,7 +204,8 @@ impl<Op: Operand> Instruction<Op> {
             Return | Equal | NEqual | Less | LessEq | More | MoreEq | Add | Subtract | Multiply
             | Divide | Modulo | Pow | Or | And | Xor | Negative | Not | PushNil | PushTrue
             | PushFalse => None,
-            ReadConstant(operand)
+            PushFunction(operand)
+            | ReadConstant(operand)
             | ReadGlobal(operand)
             | WriteGlobal(operand)
             | ReadLocal(operand)
@@ -210,6 +219,7 @@ impl<Op: Operand> Instruction<Op> {
             | JumpPopTrue(operand)
             | JumpPopFalse(operand)
             | Call(operand)
+            | MakeTable(operand)
             | Extended(operand) => Some(operand),
         }
     }
@@ -238,6 +248,7 @@ impl<Op: Operand> Instruction<Op> {
             Self::PushNil => "PUSH_NIL",
             Self::PushTrue => "PUSH_TRUE",
             Self::PushFalse => "PUSH_FALSE",
+            Self::PushFunction(_) => "PUSH_FUNCTION",
             Self::ReadConstant(_) => "READ_CONSTANT",
             Self::ReadGlobal(_) => "READ_GLOBAL",
             Self::ReadLocal(_) => "READ_LOCAL",
@@ -252,6 +263,7 @@ impl<Op: Operand> Instruction<Op> {
             Self::JumpPopTrue(_) => "JUMP_POP_TRUE",
             Self::JumpPopFalse(_) => "JUMP_POP_FALSE",
             Self::Call(_) => "CALL",
+            Self::MakeTable(_) => "MAKE_TABLE",
             Self::Extended(_) => "EXTENDED",
         }
     }
@@ -284,6 +296,7 @@ impl<Op: Operand> Instruction<Op> {
                 PushNil => PushNil,
                 PushTrue => PushTrue,
                 PushFalse => PushFalse,
+                PushFunction(_) => PushFunction(operand),
                 ReadConstant(_) => ReadConstant(operand),
                 ReadGlobal(_) => ReadGlobal(operand),
                 WriteGlobal(_) => WriteGlobal(operand),
@@ -298,6 +311,7 @@ impl<Op: Operand> Instruction<Op> {
                 JumpPopTrue(_) => JumpPopTrue(operand),
                 JumpPopFalse(_) => JumpPopFalse(operand),
                 Call(_) => Call(operand),
+                MakeTable(_) => MakeTable(operand),
                 Extended(_) => Extended(operand),
             },
             extended,
@@ -357,9 +371,22 @@ pub struct Chunk {
     pub globals: Vec<String>,
     /// Number of locals needed when loading the function
     pub locals_number: u16,
+    /// functions inside this chunk
+    pub functions: Vec<Chunk>,
 }
 
 impl Chunk {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            lines: Vec::new(),
+            code: Vec::new(),
+            constants: Vec::new(),
+            globals: Vec::new(),
+            locals_number: 0,
+            functions: Vec::new(),
+        }
+    }
     /// Emit the new instruction.
     ///
     /// Multiple `u8` instructions will actually be emmited if the operand is bigger than `u8::MAX`.
@@ -442,6 +469,7 @@ impl Chunk {
             Instruction::ReadGlobal(_) | Instruction::WriteGlobal(_) => {
                 self.globals[operand.unwrap() as usize].clone()
             }
+            Instruction::PushFunction(_) => self.functions[operand.unwrap() as usize].name.clone(),
             _ => String::new(),
         };
         let operand = if let Some(operand) = instruction.operand() {
@@ -457,17 +485,25 @@ impl Chunk {
 impl fmt::Display for Chunk {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         println!("{} :", self.name);
-        print!(" - constants : [");
+        write!(formatter, " - constants : [")?;
         for constant in &self.constants[..self.constants.len().saturating_sub(1)] {
-            print!("{}, ", constant)
+            write!(formatter, "{}, ", constant)?
         }
         if let Some(last) = self.constants.last() {
-            print!("{}", last)
+            write!(formatter, "{}", last)?
         }
-        println!("]");
-        println!(" - globals : {:?}", self.globals);
-        println!(" - {} locals", self.locals_number);
-        println!();
+        writeln!(formatter, "]")?;
+        writeln!(formatter, " - globals : {:?}", self.globals)?;
+        write!(formatter, " - functions : [")?;
+        for function in &self.functions[..self.functions.len().saturating_sub(1)] {
+            write!(formatter, "{}, ", function.name)?
+        }
+        if let Some(last) = self.functions.last() {
+            write!(formatter, "{}", last.name)?
+        }
+        writeln!(formatter, "]")?;
+        writeln!(formatter, " - {} locals", self.locals_number)?;
+        writeln!(formatter,)?;
         formatter
             .write_str("line       index      opcode            operand    operand value\n\n")?;
         let mut lines = self.lines.iter();
@@ -500,6 +536,14 @@ impl fmt::Display for Chunk {
                 current_line = lines.next().unwrap_or(&(0, 0));
                 lines_acc = 0
             }
+        }
+
+        for function in &self.functions {
+            writeln!(
+                formatter,
+                "\n================================================================"
+            )?;
+            writeln!(formatter, "{}", function)?;
         }
 
         Ok(())
