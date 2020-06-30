@@ -167,8 +167,16 @@ pub enum Instruction<Op: Operand> {
     JumpTrue(Op),
     /// Conditional jump
     ///
+    /// Jump at the specified index in the instructions vector if `false` is at the top of the stack.
+    JumpFalse(Op),
+    /// Conditional jump
+    ///
     /// Jump at the specified index in the instructions vector if `true` is at the top of the stack, and pops the top of the stack.
     JumpPopTrue(Op),
+    /// Conditional jump
+    ///
+    /// Jump at the specified index in the instructions vector if `false` is at the top of the stack, and pops the top of the stack.
+    JumpPopFalse(Op),
     /// Call a function.
     ///
     /// This interprets the top of the stack as the function, and the `operand` following values
@@ -198,7 +206,9 @@ impl<Op: Operand> Instruction<Op> {
             | Pop(operand)
             | Jump(operand)
             | JumpTrue(operand)
+            | JumpFalse(operand)
             | JumpPopTrue(operand)
+            | JumpPopFalse(operand)
             | Call(operand)
             | Extended(operand) => Some(operand),
         }
@@ -230,15 +240,17 @@ impl<Op: Operand> Instruction<Op> {
             Self::PushFalse => "PUSH_FALSE",
             Self::ReadConstant(_) => "READ_CONSTANT",
             Self::ReadGlobal(_) => "READ_GLOBAL",
-            Self::ReadLocal(_) => "WRITE_GLOBAL",
-            Self::WriteGlobal(_) => "READ_LOCAL",
+            Self::ReadLocal(_) => "READ_LOCAL",
+            Self::WriteGlobal(_) => "WRITE_GLOBAL",
             Self::WriteLocal(_) => "WRITE_LOCAL",
             Self::ReadCaptured(_) => "READ_CAPTURED",
             Self::WriteCaptured(_) => "WRITE_CAPTURED",
             Self::Pop(_) => "POP",
             Self::Jump(_) => "JUMP",
             Self::JumpTrue(_) => "JUMP_TRUE",
+            Self::JumpFalse(_) => "JUMP_FALSE",
             Self::JumpPopTrue(_) => "JUMP_POP_TRUE",
+            Self::JumpPopFalse(_) => "JUMP_POP_FALSE",
             Self::Call(_) => "CALL",
             Self::Extended(_) => "EXTENDED",
         }
@@ -282,7 +294,9 @@ impl<Op: Operand> Instruction<Op> {
                 Pop(_) => Pop(operand),
                 Jump(_) => Jump(operand),
                 JumpTrue(_) => JumpTrue(operand),
+                JumpFalse(_) => JumpFalse(operand),
                 JumpPopTrue(_) => JumpPopTrue(operand),
+                JumpPopFalse(_) => JumpPopFalse(operand),
                 Call(_) => Call(operand),
                 Extended(_) => Extended(operand),
             },
@@ -425,7 +439,9 @@ impl Chunk {
             Instruction::ReadConstant(_) => {
                 format!("{}", self.constants[operand.unwrap() as usize])
             }
-            Instruction::ReadGlobal(_) => self.globals[operand.unwrap() as usize].clone(),
+            Instruction::ReadGlobal(_) | Instruction::WriteGlobal(_) => {
+                self.globals[operand.unwrap() as usize].clone()
+            }
             _ => String::new(),
         };
         let operand = if let Some(operand) = instruction.operand() {
@@ -449,6 +465,7 @@ impl fmt::Display for Chunk {
             print!("{}", last)
         }
         println!("]");
+        println!(" - globals : {:?}", self.globals);
         println!(" - {} locals", self.locals_number);
         println!();
         formatter

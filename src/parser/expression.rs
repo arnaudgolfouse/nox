@@ -1,7 +1,7 @@
 use super::{bytecode::Instruction, Constant, ParserError, ParserErrorKind};
 use crate::{
     error::Continue,
-    lexer::{Keyword, Operation, Token, TokenKind},
+    lexer::{Assign, Keyword, Operation, Token, TokenKind},
     Position, Range,
 };
 
@@ -32,7 +32,7 @@ pub enum Precedence {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExpressionType {
     Constant,
-    Assign(String),
+    Assign(String, Assign, Range),
     UnaryOp,
     BinaryOp,
     Call,
@@ -46,7 +46,11 @@ pub trait ExpressionParser<'a> {
     /// Parse a constant.
     fn parse_constant(&mut self, constant: Constant);
     /// Parse a variable name.
-    fn parse_variable(&mut self, variable: String) -> Result<ExpressionType, ParserError<'a>>;
+    fn parse_variable(
+        &mut self,
+        variable: String,
+        read_only: bool,
+    ) -> Result<ExpressionType, ParserError<'a>>;
     /// Parse a parenthesised expression. The opening `(` token has already been eaten.
     fn parse_grouping(&mut self) -> Result<ExpressionType, ParserError<'a>>;
     /// Parse a lambda. The opening `fn` token has already been eaten.
@@ -70,22 +74,27 @@ pub trait ExpressionParser<'a> {
     ) -> ParserError<'a>;
     fn current_position(&self) -> Position;
 
-    /// Parse an expression.
+    /// Parse an expression, with `token` as its first Token.
     ///
     /// Equivalent with `parse_precedence(Precendence::None)`.
-    fn parse_expression(&mut self) -> Result<ExpressionType, ParserError<'a>> {
-        self.parse_precedence(Precedence::None)
+    fn parse_expression(
+        &mut self,
+        token: Option<Token>,
+        read_only: bool,
+    ) -> Result<ExpressionType, ParserError<'a>> {
+        self.parse_precedence(Precedence::None, token, read_only)
     }
 
-    /// Parse an expression with the given precedence.
+    /// Parse an expression with the given precedence, with `prefix_token` as its first Token.
     fn parse_precedence(
         &mut self,
         precedence: Precedence,
+        // prefix : '-', 'not', '(', ...
+        prefix_token: Option<Token>,
+        read_only: bool,
     ) -> Result<ExpressionType, ParserError<'a>> {
         use std::convert::TryFrom;
 
-        // prefix : '-', 'not', '(', ...
-        let prefix_token = self.next()?;
         let mut expression_type = if let Some(token) = prefix_token {
             match token.kind {
                 // fn ...
@@ -101,7 +110,7 @@ pub trait ExpressionParser<'a> {
                     .parse_unary(Operation::Not)
                     .map(|_| ExpressionType::UnaryOp),
                 // variable name
-                TokenKind::Id(id) => self.parse_variable(id),
+                TokenKind::Id(id) => self.parse_variable(id, read_only),
                 // constant
                 kind => match Constant::try_from(kind) {
                     Ok(constant) => {
@@ -126,7 +135,7 @@ pub trait ExpressionParser<'a> {
 
         // infix operations : '+', '*', '/', ... but also 'a.b' and others !
         loop {
-            if matches!(expression_type, ExpressionType::Assign(_)) {
+            if matches!(expression_type, ExpressionType::Assign(_, _, _)) {
                 return Ok(expression_type);
             }
             if let Some(token) = self.peek()? {
@@ -155,7 +164,8 @@ pub trait ExpressionParser<'a> {
                         }
                         let range = token.range;
                         self.next()?;
-                        self.parse_precedence(op_precedence)?;
+                        let token = self.next()?;
+                        self.parse_precedence(op_precedence, token, read_only)?;
                         self.parse_binary(op, range)
                             .map(|_| ExpressionType::BinaryOp)
                     }
@@ -189,17 +199,31 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         }
     }
 
-    fn parse_variable(&mut self, variable: String) -> Result<ExpressionType, ParserError<'a>> {
+    fn parse_variable(
+        &mut self,
+        variable: String,
+        read_only: bool,
+    ) -> Result<ExpressionType, ParserError<'a>> {
         if let Some(Token {
-            kind: TokenKind::Assign(_),
-            ..
+            kind: TokenKind::Assign(ass),
+            range,
         }) = self.lexer.peek()?
         {
-            return Ok(ExpressionType::Assign(variable));
+            let (ass, range) = (*ass, *range);
+            return if read_only {
+                Err(self.emit_error(
+                    ParserErrorKind::Unexpected(TokenKind::Assign(ass)),
+                    Continue::Stop,
+                    range,
+                ))
+            } else {
+                self.lexer.next()?;
+                Ok(ExpressionType::Assign(variable, ass, range))
+            };
         }
 
         match self.function_stack.last() {
-            Some(function) => match function.variable_exists(&variable) {
+            Some(function) => match function.find_variable(&variable) {
                 Some(index) => self.emit_instruction(Instruction::ReadLocal(index)),
                 None => {
                     todo!() // TODO : capture
@@ -215,7 +239,8 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
     }
 
     fn parse_grouping(&mut self) -> Result<ExpressionType, ParserError<'a>> {
-        let expression_type = self.parse_expression()?;
+        let token = self.lexer.next()?;
+        let expression_type = self.parse_expression(token, true)?;
         match self.lexer.next()? {
             Some(Token {
                 kind: TokenKind::RPar,
@@ -235,7 +260,8 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
 
     fn parse_unary(&mut self, operator: Operation) -> Result<(), ParserError<'a>> {
         let op_line = self.lexer.position.line;
-        self.parse_precedence(Precedence::Unary)?;
+        let token = self.lexer.next()?;
+        self.parse_precedence(Precedence::Unary, token, true)?;
         match operator {
             Operation::Minus => self.code.push_instruction(Instruction::Negative, op_line),
             Operation::Not => self.code.push_instruction(Instruction::Not, op_line),

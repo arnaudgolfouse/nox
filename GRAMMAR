@@ -24,8 +24,8 @@ StatementList -> [ Statement { ";" } ]
 Statement -> "return" Expr
 			| CallExpr
 			| AssignableExpr ("=" | "+=" | "-=" | "*=" | "/=" | "%=") Expr
-			| "do" StatementList "end"
 			| "if" Expr StatementList { "else" StatementList } "end"
+			// Expr JMP_TRUE StatementList { }
 			| "while" Expr StatementList "end"
 			| "for" Name [ "," Name ] "in" Expr StatementList "end"
 			| "fn" Name "(" ArgsList ")" StatementList "end"

@@ -1,7 +1,4 @@
-use crate::{
-    lexer::Lexer,
-    parser::{Parser, ParserError},
-};
+use crate::parser::{Parser, ParserError};
 
 pub struct RuntimeError {}
 
@@ -13,7 +10,7 @@ impl VM {
         Self
     }
 
-    pub fn parse_top_level<'a>(&mut self, source: &'a str) -> Result<(), ParserError<'a>> {
+    pub fn parse_top_level<'a>(&mut self, source: &'a str) -> Result<(), Vec<ParserError<'a>>> {
         let parser = Parser::new(crate::Source::TopLevel(source));
         let chunk = parser.parse_top_level()?;
         println!("{}", chunk);
