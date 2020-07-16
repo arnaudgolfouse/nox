@@ -14,10 +14,12 @@ use std::fmt;
 enum Scope {
     /// `if` statement. Contains the address of the `JumpPopFalse` instruction.
     If(usize),
-    /// `else` statement. Contains the address of the `Jump` instruction at the end of the `if` block.
+    /// `else` statement. Contains the address of the `Jump` instruction at the
+    /// end of the `if` block.
     Else(usize),
-    /// `while` statement
-    While,
+    /// `while` statement. Contains the address of the expression , and the
+    /// address of the conditional jump instruction.
+    While(usize, usize),
     /// `for` statement
     For,
 }
@@ -32,15 +34,6 @@ struct Function {
 }
 
 impl Function {
-    fn new(name: String) -> Self {
-        Self {
-            variables: Vec::new(),
-            scopes: Vec::new(),
-            code: Chunk::new(name),
-            arg_number: 0,
-        }
-    }
-
     /// This function returns `None` if there is no opened scope in the function
     fn scope(&self) -> Option<Scope> {
         self.scopes.last().copied()
@@ -110,9 +103,9 @@ impl<'a> Parser<'a> {
 
     /// emit a new u8 instruction at the current line. Same as `emit_instruction::<u8>`.
     #[inline(always)]
-    fn push_instruction(&mut self, instruction: Instruction<u8>) {
+    fn emit_instruction_u8(&mut self, instruction: Instruction<u8>) {
         self.code
-            .push_instruction(instruction, self.lexer.position.line)
+            .emit_instruction_u8(instruction, self.lexer.position.line)
     }
 
     /// Emit a `Expected [token]` error at the curretn position, continuable.
@@ -178,9 +171,11 @@ impl<'a> Parser<'a> {
                 Ok(Some(token)) => match token.kind {
                     TokenKind::Keyword(Keyword::Return)
                     | TokenKind::Keyword(Keyword::If)
+                    | TokenKind::Keyword(Keyword::Else)
                     | TokenKind::Keyword(Keyword::While)
                     | TokenKind::Keyword(Keyword::For)
                     | TokenKind::Keyword(Keyword::Fn)
+                    | TokenKind::Keyword(Keyword::End)
                     | TokenKind::Id(_) => return false,
                     _ => {}
                 },
@@ -217,18 +212,28 @@ impl<'a> Parser<'a> {
                 if let Some(scope) = self.pop_scope() {
                     match scope {
                         Scope::If(if_address) => self.code.write_jump(
-                            Instruction::JumpPopFalse(self.code.code.len() as u32),
                             if_address,
+                            Instruction::JumpPopFalse((self.code.code.len() - if_address) as u64),
                         ),
                         Scope::Else(else_address) => self.code.write_jump(
-                            Instruction::Jump(self.code.code.len() as u32),
                             else_address,
+                            Instruction::Jump((self.code.code.len() - else_address) as u64),
                         ),
+                        Scope::While(expression_address, while_address) => {
+                            let mut offset_1 = (self.code.code.len() - while_address + 1) as u64;
+                            let mut offset_2 = (self.code.code.len() - expression_address) as u64;
+                            bytecode::right_jump_operands(&mut offset_1, &mut offset_2);
+                            self.code
+                                .write_jump(while_address, Instruction::JumpPopFalse(offset_1));
+                            let end_address = self.code.push_jump();
+                            self.code
+                                .write_jump(end_address, Instruction::JumpBack(offset_2));
+                        }
                         _ => todo!(),
                     }
                 } else if let Some(mut function) = self.function_stack.pop() {
-                    self.push_instruction(Instruction::PushNil);
-                    self.push_instruction(Instruction::Return);
+                    self.emit_instruction_u8(Instruction::PushNil);
+                    self.emit_instruction_u8(Instruction::Return);
                     std::mem::swap(&mut self.code, &mut function.code);
                     self.code.functions.push(function.code);
                 } else {
@@ -249,8 +254,10 @@ impl<'a> Parser<'a> {
                 if let Some(Scope::If(if_address)) = self.pop_scope() {
                     let else_address = self.code.push_jump();
                     self.push_scope(Scope::Else(else_address));
-                    self.code
-                        .write_jump(Instruction::JumpPopFalse(self.code.code.len()), if_address);
+                    self.code.write_jump(
+                        if_address,
+                        Instruction::JumpPopFalse((self.code.code.len() - if_address) as u64),
+                    );
                 } else {
                     return Err(self.emit_error(
                         ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::Else)),
@@ -259,7 +266,13 @@ impl<'a> Parser<'a> {
                     ));
                 }
             }
-            TokenKind::Keyword(Keyword::While) => todo!(),
+            TokenKind::Keyword(Keyword::While) => {
+                let expression_address = self.code.code.len();
+                let token = self.next()?;
+                self.parse_expression(token, true)?;
+                let while_address = self.code.push_jump();
+                self.push_scope(Scope::While(expression_address, while_address))
+            }
             TokenKind::Keyword(Keyword::For) => todo!(),
             TokenKind::Keyword(Keyword::Fn) => {
                 let mut function = match self.next()? {
@@ -303,11 +316,10 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Id(_) => {
                 let range = first_token.range;
-                // TODO : make `parse_expression` eat the first token.
                 let expression_type = self.parse_expression(Some(first_token), false)?;
                 match expression_type {
                     ExpressionType::Assign(var, ass, _) => self.write_variable(var, ass)?,
-                    ExpressionType::Call => todo!(),
+                    ExpressionType::Call => todo!(), // TODO : parse_args function
                     _ => {
                         return Err(self.emit_error(
                             ParserErrorKind::UnexpectedId,
@@ -344,11 +356,11 @@ impl<'a> Parser<'a> {
         self.parse_expression(token, true)?;
         match assignement {
             Assign::Equal => {}
-            Assign::Plus => self.push_instruction(Instruction::Add),
-            Assign::Minus => self.push_instruction(Instruction::Subtract),
-            Assign::Multiply => self.push_instruction(Instruction::Multiply),
-            Assign::Divide => self.push_instruction(Instruction::Divide),
-            Assign::Modulo => self.push_instruction(Instruction::Modulo),
+            Assign::Plus => self.emit_instruction_u8(Instruction::Add),
+            Assign::Minus => self.emit_instruction_u8(Instruction::Subtract),
+            Assign::Multiply => self.emit_instruction_u8(Instruction::Multiply),
+            Assign::Divide => self.emit_instruction_u8(Instruction::Divide),
+            Assign::Modulo => self.emit_instruction_u8(Instruction::Modulo),
         }
 
         match self.function_stack.last() {
@@ -522,7 +534,7 @@ mod tests {
                 Instruction::ReadConstant(0),
                 Instruction::ReadConstant(1),
                 Instruction::Add,
-                Instruction::JumpPopFalse(6),
+                Instruction::JumpPopFalse(3),
                 Instruction::ReadConstant(2),
                 Instruction::Return
             ]
@@ -558,13 +570,13 @@ mod tests {
                 Instruction::Add,
                 Instruction::ReadConstant(2),
                 Instruction::Equal,
-                Instruction::JumpPopFalse(12),
+                Instruction::JumpPopFalse(7),
                 Instruction::ReadGlobal(0),
                 Instruction::ReadConstant(3),
                 Instruction::PushTrue,
                 Instruction::Call(2),
                 Instruction::Return,
-                Instruction::Jump(22),
+                Instruction::Jump(11),
                 Instruction::ReadConstant(4),
                 Instruction::ReadGlobal(0),
                 Instruction::ReadGlobal(1),
@@ -576,6 +588,70 @@ mod tests {
                 Instruction::Subtract,
                 Instruction::Return,
             ]
+        );
+    }
+
+    #[test]
+    fn loops() {
+        let parser = Parser::new(Source::TopLevel("while x > y x -= 1 end"));
+        let chunk = parser.parse_top_level().unwrap();
+        assert_eq!(chunk.constants, [Constant::Int(1)]);
+        assert_eq!(chunk.globals, [String::from("x"), String::from("y")]);
+        assert_eq!(
+            chunk.code,
+            [
+                Instruction::ReadGlobal(0),
+                Instruction::ReadGlobal(1),
+                Instruction::More,
+                Instruction::JumpPopFalse(6),
+                Instruction::ReadGlobal(0),
+                Instruction::ReadConstant(0),
+                Instruction::Subtract,
+                Instruction::WriteGlobal(0),
+                Instruction::JumpBack(8)
+            ]
+        );
+
+        // while extended operands
+        let parser = Parser::new(Source::TopLevel(
+            "while x > y
+                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+            end",
+        ));
+        let chunk = parser.parse_top_level().unwrap();
+        assert_eq!(chunk.constants, [Constant::Int(1)]);
+        assert_eq!(chunk.globals, [String::from("x"), String::from("y")]);
+        assert_eq!(
+            chunk.code[0..5],
+            [
+                Instruction::ReadGlobal(0),
+                Instruction::ReadGlobal(1),
+                Instruction::More,
+                Instruction::Extended(1),
+                Instruction::JumpPopFalse(3),
+            ]
+        );
+        for i in 1..65 {
+            assert_eq!(
+                chunk.code[(i * 4 + 1)..(i + 1) * 4 + 1],
+                [
+                    Instruction::ReadGlobal(0),
+                    Instruction::ReadConstant(0),
+                    Instruction::Subtract,
+                    Instruction::WriteGlobal(0),
+                ]
+            );
+        }
+        assert_eq!(
+            chunk.code[261..],
+            [Instruction::Extended(1), Instruction::JumpBack(6)]
         );
     }
 

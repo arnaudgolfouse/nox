@@ -325,7 +325,9 @@ impl<'a> Lexer<'a> {
         loop {
             match self.iterator.peek() {
                 Some(c) if c.is_alphanumeric() || *c == '_' => {
-                    result.push(self.next_char().unwrap())
+                    if let Some(c) = self.next_char() {
+                        result.push(c)
+                    }
                 }
                 _ => break,
             }

@@ -145,7 +145,6 @@ pub trait ExpressionParser<'a>: Sized {
                 },
             }?
         } else {
-            println!("here ?");
             return Err(self.emit_error(
                 ParserErrorKind::ExpectExpression,
                 Continue::Stop,
@@ -254,12 +253,12 @@ fn parse_call_internal<'a, P: ExpressionParser<'a>>(
 impl<'a> ExpressionParser<'a> for super::Parser<'a> {
     fn parse_constant(&mut self, constant: Constant) {
         match constant {
-            Constant::Bool(true) => self.push_instruction(Instruction::PushTrue),
+            Constant::Bool(true) => self.emit_instruction_u8(Instruction::PushTrue),
             Constant::Bool(false) => {
-                self.push_instruction(Instruction::PushFalse);
+                self.emit_instruction_u8(Instruction::PushFalse);
             }
             Constant::Nil => {
-                self.push_instruction(Instruction::PushNil);
+                self.emit_instruction_u8(Instruction::PushNil);
             }
             constant => {
                 let index = self.code.add_constant(constant);
@@ -332,8 +331,10 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         let token = self.lexer.next()?;
         self.parse_precedence(Precedence::Unary, token, true)?;
         match operator {
-            Operation::Minus => self.code.push_instruction(Instruction::Negative, op_line),
-            Operation::Not => self.code.push_instruction(Instruction::Not, op_line),
+            Operation::Minus => self
+                .code
+                .emit_instruction_u8(Instruction::Negative, op_line),
+            Operation::Not => self.code.emit_instruction_u8(Instruction::Not, op_line),
             _ => {} // technically unreacheable ? meh
         }
         Ok(())
@@ -400,22 +401,25 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
     fn parse_binary(&mut self, operator: Operation, range: Range) -> Result<(), ParserError<'a>> {
         let line = range.start.line;
 
-        match operator {
-            Operation::Plus => self.code.push_instruction(Instruction::Add, line),
-            Operation::Minus => self.code.push_instruction(Instruction::Subtract, line),
-            Operation::Multiply => self.code.push_instruction(Instruction::Multiply, line),
-            Operation::Divide => self.code.push_instruction(Instruction::Divide, line),
-            Operation::Modulo => self.code.push_instruction(Instruction::Modulo, line),
-            // Operation::Pow => self.code.push_instruction(Instruction::Pow, line),
-            Operation::Equal => self.code.push_instruction(Instruction::Equal, line),
-            Operation::NEqual => self.code.push_instruction(Instruction::NEqual, line),
-            Operation::Less => self.code.push_instruction(Instruction::Less, line),
-            Operation::LessEq => self.code.push_instruction(Instruction::LessEq, line),
-            Operation::More => self.code.push_instruction(Instruction::More, line),
-            Operation::MoreEq => self.code.push_instruction(Instruction::MoreEq, line),
-            Operation::Xor => self.code.push_instruction(Instruction::Xor, line),
-            _ => {} // technically unreacheable ? meh
-        }
+        self.code.emit_instruction_u8(
+            match operator {
+                Operation::Plus => Instruction::Add,
+                Operation::Minus => Instruction::Subtract,
+                Operation::Multiply => Instruction::Multiply,
+                Operation::Divide => Instruction::Divide,
+                Operation::Modulo => Instruction::Modulo,
+                // Operation::Pow => self.code.push_instruction(Instruction::Pow,
+                Operation::Equal => Instruction::Equal,
+                Operation::NEqual => Instruction::NEqual,
+                Operation::Less => Instruction::Less,
+                Operation::LessEq => Instruction::LessEq,
+                Operation::More => Instruction::More,
+                Operation::MoreEq => Instruction::MoreEq,
+                Operation::Xor => Instruction::Xor,
+                _ => Instruction::Add, // technically unreacheable ? meh
+            },
+            line,
+        );
         Ok(())
     }
 

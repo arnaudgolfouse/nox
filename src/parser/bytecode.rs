@@ -3,7 +3,7 @@ use std::{convert::TryFrom, fmt, mem::size_of};
 
 /// Helper trait : this should not be derived by any actual type other than u8, u16, usize... (which is already done in this library).
 #[doc(hidden)]
-pub trait Operand: Sized + Default + Copy {
+pub trait Operand: Sized + Default + Copy + std::convert::Into<u64> {
     /// data for the `Extended` instructions. In theory, this is `[Option<u8>; n]`.
     type Extended;
     /// Return the operand and the slice of (eventual) extended operands.
@@ -26,7 +26,7 @@ macro_rules! implement_integer_operand {
                 let mut extended = [None; size_of::<$t>() - 1];
                 for i in 0..extended.len() {
                     let byte = (self & 0xff) as u8;
-                    if byte != 0 {
+                    if byte > 0 {
                         extended[i] = Some(Instruction::Extended(byte));
                     }
                     self = self.rotate_right(8);
@@ -42,7 +42,7 @@ macro_rules! implement_integer_operand {
     };
 }
 
-implement_integer_operand!(u8 u16 u32 u64 usize);
+implement_integer_operand!(u8 u16 u32 u64);
 
 /// Bytecode instructions
 ///
@@ -163,24 +163,28 @@ pub enum Instruction<Op: Operand> {
     Pop(Op),
     /// Raw jump
     ///
-    /// Jump at the specified index in the instructions vector.
+    /// Jump the specified offst in the instructions vector.
     Jump(Op),
     /// Conditional jump
     ///
-    /// Jump at the specified index in the instructions vector if `true` is at the top of the stack.
+    /// Jump the specified offset in the instructions vector if `true` is at the top of the stack.
     JumpTrue(Op),
     /// Conditional jump
     ///
-    /// Jump at the specified index in the instructions vector if `false` is at the top of the stack.
+    /// Jump the specified offset in the instructions vector if `false` is at the top of the stack.
     JumpFalse(Op),
     /// Conditional jump
     ///
-    /// Jump at the specified index in the instructions vector if `true` is at the top of the stack, and pops the top of the stack.
+    /// Jump the specified offset in the instructions vector if `true` is at the top of the stack, and pops the top of the stack.
     JumpPopTrue(Op),
     /// Conditional jump
     ///
-    /// Jump at the specified index in the instructions vector if `false` is at the top of the stack, and pops the top of the stack.
+    /// Jump the specified offset in the instructions vector if `false` is at the top of the stack, and pops the top of the stack.
     JumpPopFalse(Op),
+    /// Raw back Jump
+    ///
+    /// Jump backward the specified offset in the instructions vector.
+    JumpBack(Op),
     /// Call a function.
     ///
     /// This interprets the top of the stack as the function, and the `operand` following values
@@ -218,6 +222,7 @@ impl<Op: Operand> Instruction<Op> {
             | JumpFalse(operand)
             | JumpPopTrue(operand)
             | JumpPopFalse(operand)
+            | JumpBack(operand)
             | Call(operand)
             | MakeTable(operand)
             | Extended(operand) => Some(operand),
@@ -262,6 +267,7 @@ impl<Op: Operand> Instruction<Op> {
             Self::JumpFalse(_) => "JUMP_FALSE",
             Self::JumpPopTrue(_) => "JUMP_POP_TRUE",
             Self::JumpPopFalse(_) => "JUMP_POP_FALSE",
+            Self::JumpBack(_) => "JUMP_BACK",
             Self::Call(_) => "CALL",
             Self::MakeTable(_) => "MAKE_TABLE",
             Self::Extended(_) => "EXTENDED",
@@ -310,6 +316,7 @@ impl<Op: Operand> Instruction<Op> {
                 JumpFalse(_) => JumpFalse(operand),
                 JumpPopTrue(_) => JumpPopTrue(operand),
                 JumpPopFalse(_) => JumpPopFalse(operand),
+                JumpBack(_) => JumpBack(operand),
                 Call(_) => Call(operand),
                 MakeTable(_) => MakeTable(operand),
                 Extended(_) => Extended(operand),
@@ -394,16 +401,16 @@ impl Chunk {
         let (instruction, extended) = instruction.into_u8();
         for extended in Op::iter_extended(&extended) {
             if let Some(extended) = extended {
-                self.push_instruction(extended, line)
+                self.emit_instruction_u8(extended, line)
             }
         }
-        self.push_instruction(instruction, line)
+        self.emit_instruction_u8(instruction, line)
     }
 
     /// Directly push an instruction.
     ///
     /// If you want to use bigger operands than `u8`, consider using `emit_instruction` instead.
-    pub fn push_instruction(&mut self, instruction: Instruction<u8>, line: u32) {
+    pub fn emit_instruction_u8(&mut self, instruction: Instruction<u8>, line: u32) {
         match self.lines.last_mut() {
             Some((l, nb)) if *l == line => *nb += 1,
             _ => self.lines.push((line, 1)),
@@ -414,17 +421,30 @@ impl Chunk {
 
     /// Add a constant to the Chunk, and return it's index for future reference.
     pub fn add_constant(&mut self, constant: Constant) -> u32 {
+        if let Some((index, _)) = self
+            .constants
+            .iter()
+            .enumerate()
+            .find(|(_, cst)| **cst == constant)
+        {
+            return index as u32;
+        }
+
         self.constants.push(constant);
         self.constants.len() as u32 - 1
     }
 
     /// Add a global to the Chunk, and return it's index for future reference.
     pub fn add_global(&mut self, global: String) -> u32 {
-        for (i, glob) in self.globals.iter().enumerate() {
-            if global == *glob {
-                return i as u32;
-            }
+        if let Some((index, _)) = self
+            .globals
+            .iter()
+            .enumerate()
+            .find(|(_, glob)| **glob == global)
+        {
+            return index as u32;
         }
+
         self.globals.push(global);
         self.globals.len() as u32 - 1
     }
@@ -437,14 +457,14 @@ impl Chunk {
 
     /// Write the (now known) operand at the given index.
     ///
-    /// This function can be quite inneficient, as instruction bigger than `u8::MAX` will shift the entire code to make room for extended instructions.
-    pub fn write_jump<Op: Operand>(&mut self, instruction: Instruction<Op>, mut address: usize) {
+    /// This function can be quite inneficient, as operands bigger than `u8::MAX` will shift the entire code to make room for extended instructions.
+    pub fn write_jump(&mut self, mut address: usize, instruction: Instruction<u64>) {
         // wow there cowboy !
         let initial_instruction = &mut self.code[address];
         assert_eq!(initial_instruction, &Instruction::Jump(0));
         let (instruction, extended) = instruction.into_u8();
         *initial_instruction = instruction;
-        for extended in Op::iter_extended(&extended) {
+        for extended in u64::iter_extended(&extended) {
             if let Some(extended) = extended {
                 self.code.insert(address, extended);
                 address += 1
@@ -464,12 +484,14 @@ impl Chunk {
         write!(formatter, "{:<14}    ", instruction.name())?;
         let operand_value = match instruction {
             Instruction::ReadConstant(_) => {
-                format!("{}", self.constants[operand.unwrap() as usize])
+                format!("{}", self.constants[operand.unwrap_or_default() as usize])
             }
             Instruction::ReadGlobal(_) | Instruction::WriteGlobal(_) => {
-                self.globals[operand.unwrap() as usize].clone()
+                self.globals[operand.unwrap_or_default() as usize].clone()
             }
-            Instruction::PushFunction(_) => self.functions[operand.unwrap() as usize].name.clone(),
+            Instruction::PushFunction(_) => self.functions[operand.unwrap_or_default() as usize]
+                .name
+                .clone(),
             _ => String::new(),
         };
         let operand = if let Some(operand) = instruction.operand() {
@@ -484,7 +506,7 @@ impl Chunk {
 
 impl fmt::Display for Chunk {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        println!("{} :", self.name);
+        write!(formatter, "{} :", self.name)?;
         write!(formatter, " - constants : [")?;
         for constant in &self.constants[..self.constants.len().saturating_sub(1)] {
             write!(formatter, "{}, ", constant)?
@@ -503,7 +525,7 @@ impl fmt::Display for Chunk {
         }
         writeln!(formatter, "]")?;
         writeln!(formatter, " - {} locals", self.locals_number)?;
-        writeln!(formatter,)?;
+        writeln!(formatter)?;
         formatter
             .write_str("line       index      opcode            operand    operand value\n\n")?;
         let mut lines = self.lines.iter();
@@ -550,6 +572,33 @@ impl fmt::Display for Chunk {
     }
 }
 
+/// Compute the right operand for two interleaving JUMP instruction, accounting
+/// for the extended arguments.
+pub(super) fn right_jump_operands(offset_1: &mut u64, offset_2: &mut u64) {
+    let (mut offset_1_limit, mut offset_2_limit, mut changed_1, mut changed_2) =
+        (u8::MAX as u64, u8::MAX as u64, true, true);
+    while changed_1 || changed_2 {
+        changed_1 = false;
+        changed_2 = false;
+        if *offset_1 > offset_1_limit {
+            *offset_2 += 1;
+            changed_2 = true;
+            if offset_1_limit != u64::MAX {
+                offset_1_limit = (offset_1_limit << 8) | 0xff;
+            }
+        }
+        if *offset_2 > offset_2_limit {
+            *offset_1 += 1;
+            *offset_2 += 1;
+            changed_1 = true;
+            changed_2 = true;
+            if offset_2_limit != u64::MAX {
+                offset_2_limit = (offset_1_limit << 8) | 0xff;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,5 +622,28 @@ mod tests {
                 ]
             )
         );
+    }
+
+    #[test]
+    fn right_jump_operands_test() {
+        let (mut offset_1, mut offset_2) = (4, 6);
+        right_jump_operands(&mut offset_1, &mut offset_2);
+        assert_eq!(offset_1, 4);
+        assert_eq!(offset_2, 6);
+
+        let (mut offset_1, mut offset_2) = (255, 256);
+        right_jump_operands(&mut offset_1, &mut offset_2);
+        assert_eq!(offset_1, 256);
+        assert_eq!(offset_2, 258);
+
+        let (mut offset_1, mut offset_2) = ((1 << 8) - 1, (1 << 16) - 2);
+        right_jump_operands(&mut offset_1, &mut offset_2);
+        assert_eq!(offset_1, (1 << 8) + 1);
+        assert_eq!(offset_2, (1 << 16) + 1);
+
+        let (mut offset_1, mut offset_2) = ((1 << 16) - 1, (1 << 8) - 1);
+        right_jump_operands(&mut offset_1, &mut offset_2);
+        assert_eq!(offset_1, (1 << 16));
+        assert_eq!(offset_2, (1 << 8) + 2);
     }
 }
