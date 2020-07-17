@@ -1,4 +1,4 @@
-pub mod bytecode;
+mod bytecode;
 mod expression;
 
 use crate::{
@@ -6,7 +6,7 @@ use crate::{
     lexer::{Assign, Keyword, Lexer, LexerError, LexerErrorKind, Token, TokenKind},
     Range, Source,
 };
-use bytecode::{Chunk, Constant, Instruction};
+pub use bytecode::{Chunk, Constant, Instruction};
 use expression::{ExpressionParser, ExpressionType};
 use std::fmt;
 
@@ -319,6 +319,7 @@ impl<'a> Parser<'a> {
                 let expression_type = self.parse_expression(Some(first_token), false)?;
                 match expression_type {
                     ExpressionType::Assign(var, ass, _) => self.write_variable(var, ass)?,
+                    ExpressionType::TableWrite(ass) => self.write_table(ass)?,
                     ExpressionType::Call => todo!(), // TODO : parse_args function
                     _ => {
                         return Err(self.emit_error(
@@ -373,10 +374,37 @@ impl<'a> Parser<'a> {
                 }
             }
             None => {
-                let global_index = self.code.add_global(variable);
+                let global_index = self.code.add_string(variable);
                 self.emit_instruction(Instruction::WriteGlobal(global_index));
             }
         }
+
+        Ok(())
+    }
+
+    /// Write a table member
+    fn write_table(&mut self, assignement: Assign) -> Result<(), ParserError<'a>> {
+        match assignement {
+            Assign::Equal => {}
+            _ => {
+                self.emit_instruction_u8(Instruction::DuplicateTop(1));
+                self.emit_instruction_u8(Instruction::ReadTable);
+            }
+        }
+
+        let token = self.lexer.next()?;
+        self.parse_expression(token, true)?;
+
+        match assignement {
+            Assign::Equal => {}
+            Assign::Plus => self.emit_instruction_u8(Instruction::Add),
+            Assign::Minus => self.emit_instruction_u8(Instruction::Subtract),
+            Assign::Multiply => self.emit_instruction_u8(Instruction::Multiply),
+            Assign::Divide => self.emit_instruction_u8(Instruction::Divide),
+            Assign::Modulo => self.emit_instruction_u8(Instruction::Modulo),
+        }
+
+        self.emit_instruction_u8(Instruction::WriteTable);
 
         Ok(())
     }
@@ -418,7 +446,7 @@ impl<'a> Parser<'a> {
                 return self.expected_token(TokenKind::RPar);
             }
         }
-        self.emit_instruction(Instruction::PushFunction(self.code.functions.len() as u32));
+        self.emit_instruction(Instruction::ReadFunction(self.code.functions.len() as u32));
         match self.function_stack.last() {
             Some(func) => {
                 if let Some(local_index) = func.find_variable(&name) {
@@ -429,7 +457,7 @@ impl<'a> Parser<'a> {
                 }
             }
             None => {
-                let global_index = self.code.add_global(name.clone());
+                let global_index = self.code.add_string(name.clone());
                 self.emit_instruction(Instruction::WriteGlobal(global_index));
             }
         }
@@ -561,7 +589,7 @@ mod tests {
                 Constant::Int(8),
             ]
         );
-        assert_eq!(chunk.globals, [String::from("f"), String::from("g")]);
+        assert_eq!(chunk.strings, [String::from("f"), String::from("g")]);
         assert_eq!(
             chunk.code,
             [
@@ -596,7 +624,7 @@ mod tests {
         let parser = Parser::new(Source::TopLevel("while x > y x -= 1 end"));
         let chunk = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, [Constant::Int(1)]);
-        assert_eq!(chunk.globals, [String::from("x"), String::from("y")]);
+        assert_eq!(chunk.strings, [String::from("x"), String::from("y")]);
         assert_eq!(
             chunk.code,
             [
@@ -627,7 +655,7 @@ mod tests {
         ));
         let chunk = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, [Constant::Int(1)]);
-        assert_eq!(chunk.globals, [String::from("x"), String::from("y")]);
+        assert_eq!(chunk.strings, [String::from("x"), String::from("y")]);
         assert_eq!(
             chunk.code[0..5],
             [
@@ -660,7 +688,7 @@ mod tests {
         let parser = Parser::new(Source::TopLevel("t = {}"));
         let chunk = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, []);
-        assert_eq!(chunk.globals, [String::from("t")]);
+        assert_eq!(chunk.strings, [String::from("t")]);
         assert_eq!(
             chunk.code,
             [Instruction::MakeTable(0), Instruction::WriteGlobal(0)]
@@ -678,7 +706,7 @@ mod tests {
                 Constant::String("hello".to_owned())
             ]
         );
-        assert_eq!(chunk.globals, [String::from("t")]);
+        assert_eq!(chunk.strings, [String::from("t")]);
         assert_eq!(
             chunk.code,
             [
@@ -692,6 +720,49 @@ mod tests {
                 Instruction::WriteGlobal(0)
             ]
         );
+
+        let parser = Parser::new(Source::TopLevel("t1[t1.a + f()] -= t2.b[t3[2]]"));
+        let chunk = parser.parse_top_level().unwrap();
+        assert_eq!(
+            chunk.constants,
+            [
+                Constant::String("a".to_owned()),
+                Constant::String("b".to_owned()),
+                Constant::Int(2)
+            ]
+        );
+        assert_eq!(
+            chunk.strings,
+            [
+                String::from("t1"),
+                String::from("f"),
+                String::from("t2"),
+                String::from("t3")
+            ]
+        );
+        assert_eq!(
+            chunk.code,
+            [
+                Instruction::ReadGlobal(0),
+                Instruction::ReadGlobal(0),
+                Instruction::ReadConstant(0),
+                Instruction::ReadTable,
+                Instruction::ReadGlobal(1),
+                Instruction::Call(0),
+                Instruction::Add,
+                Instruction::DuplicateTop(1),
+                Instruction::ReadTable,
+                Instruction::ReadGlobal(2),
+                Instruction::ReadConstant(1),
+                Instruction::ReadTable,
+                Instruction::ReadGlobal(3),
+                Instruction::ReadConstant(2),
+                Instruction::ReadTable,
+                Instruction::ReadTable,
+                Instruction::Subtract,
+                Instruction::WriteTable
+            ]
+        );
     }
 
     #[test]
@@ -699,11 +770,11 @@ mod tests {
         let parser = Parser::new(Source::TopLevel("fn f() return 0 end x = f()"));
         let chunk = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, []);
-        assert_eq!(chunk.globals, [String::from("f"), String::from("x")]);
+        assert_eq!(chunk.strings, [String::from("f"), String::from("x")]);
         assert_eq!(
             chunk.code,
             [
-                Instruction::PushFunction(0),
+                Instruction::ReadFunction(0),
                 Instruction::WriteGlobal(0),
                 Instruction::ReadGlobal(0),
                 Instruction::Call(0),

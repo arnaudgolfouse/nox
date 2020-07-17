@@ -38,6 +38,8 @@ pub enum ExpressionType {
     Call,
     Variable,
     Table,
+    TableRead,
+    TableWrite(Assign),
 }
 
 /// Collection of methods for parsing expressions.
@@ -77,11 +79,11 @@ pub trait ExpressionParser<'a>: Sized {
     /// Parse an indexing operation, e.g. `table[x]`
     ///
     /// The opening `[` token has already been eaten.
-    fn parse_brackets(&mut self) -> Result<ExpressionType, ParserError<'a>>;
+    fn parse_brackets(&mut self, read_only: bool) -> Result<ExpressionType, ParserError<'a>>;
     /// Parse an dot operation, e.g. `table.x`
     ///
     /// Assumes we already ate the dot (`.`) token.
-    fn parse_dot(&mut self) -> Result<ExpressionType, ParserError<'a>>;
+    fn parse_dot(&mut self, read_only: bool) -> Result<ExpressionType, ParserError<'a>>;
     fn next(&mut self) -> Result<Option<Token>, ParserError<'a>>;
     fn peek(&self) -> Result<Option<&Token>, ParserError<'a>>;
     fn emit_error(
@@ -159,8 +161,14 @@ pub trait ExpressionParser<'a>: Sized {
             }
             if let Some(token) = self.peek()? {
                 expression_type = match &token.kind {
-                    TokenKind::LBracket => self.parse_brackets(),
-                    TokenKind::Dot => self.parse_dot(),
+                    TokenKind::LBracket => {
+                        self.next()?;
+                        self.parse_brackets(read_only)
+                    }
+                    TokenKind::Dot => {
+                        self.next()?;
+                        self.parse_dot(read_only)
+                    }
                     TokenKind::Op(op) => {
                         let op = *op;
                         let op_precedence = match op {
@@ -298,7 +306,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                 }
             },
             None => {
-                let index = self.code.add_global(variable);
+                let index = self.code.add_string(variable);
                 self.emit_instruction(Instruction::ReadGlobal(index))
             }
         }
@@ -428,22 +436,117 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         Ok(())
     }
 
-    fn parse_brackets(&mut self) -> Result<ExpressionType, ParserError<'a>> {
-        todo!()
+    fn parse_brackets(&mut self, read_only: bool) -> Result<ExpressionType, ParserError<'a>> {
+        let next_token = self.next()?;
+        self.parse_expression(next_token, true)?;
+        let range = if let Some(token) = self.next()? {
+            match token.kind {
+                TokenKind::RBracket => token.range,
+                kind => {
+                    return Err(self.emit_error(
+                        ParserErrorKind::Unexpected(kind),
+                        Continue::Stop,
+                        token.range,
+                    ))
+                }
+            }
+        } else {
+            return Err(self.emit_error(
+                ParserErrorKind::Expected(TokenKind::RBracket),
+                Continue::Continue,
+                Range::new(self.current_position(), self.current_position()),
+            ));
+        };
+
+        match self.peek()? {
+            Some(Token {
+                kind: TokenKind::Assign(ass),
+                ..
+            }) => {
+                let ass = *ass;
+                if read_only {
+                    Err(self.emit_error(
+                        ParserErrorKind::Unexpected(TokenKind::Assign(ass)),
+                        Continue::Stop,
+                        range,
+                    ))
+                } else {
+                    self.lexer.next()?;
+                    Ok(ExpressionType::TableWrite(ass))
+                }
+            }
+            _ => {
+                self.code
+                    .emit_instruction_u8(Instruction::ReadTable, range.start.line);
+                Ok(ExpressionType::TableRead)
+            }
+        }
     }
 
-    fn parse_dot(&mut self) -> Result<ExpressionType, ParserError<'a>> {
-        todo!()
+    fn parse_dot(&mut self, read_only: bool) -> Result<ExpressionType, ParserError<'a>> {
+        let range = if let Some(token) = self.next()? {
+            match token.kind {
+                TokenKind::Id(member) => {
+                    let member_index = self.code.add_constant(Constant::String(member));
+                    self.code.emit_instruction(
+                        Instruction::ReadConstant(member_index),
+                        token.range.start.line,
+                    );
+
+                    token.range
+                }
+                kind => {
+                    return Err(self.emit_error(
+                        ParserErrorKind::Unexpected(kind),
+                        Continue::Continue,
+                        token.range,
+                    ));
+                }
+            }
+        } else {
+            return Err(self.emit_error(
+                ParserErrorKind::ExpectedId,
+                Continue::Continue,
+                Range::new(self.current_position(), self.current_position()),
+            ));
+        };
+
+        match self.peek()? {
+            Some(Token {
+                kind: TokenKind::Assign(ass),
+                ..
+            }) => {
+                let ass = *ass;
+                if read_only {
+                    Err(self.emit_error(
+                        ParserErrorKind::Unexpected(TokenKind::Assign(ass)),
+                        Continue::Stop,
+                        range,
+                    ))
+                } else {
+                    self.lexer.next()?;
+                    Ok(ExpressionType::TableWrite(ass))
+                }
+            }
+            _ => {
+                self.code
+                    .emit_instruction_u8(Instruction::ReadTable, range.start.line);
+                Ok(ExpressionType::TableRead)
+            }
+        }
     }
 
+    #[inline]
     fn next(&mut self) -> Result<Option<Token>, ParserError<'a>> {
         self.lexer.next().map_err(ParserError::from)
     }
 
+    #[inline]
     fn peek(&self) -> Result<Option<&Token>, ParserError<'a>> {
         self.lexer.peek().map_err(ParserError::from)
     }
 
+    #[inline]
     fn emit_error(
         &self,
         kind: ParserErrorKind,
@@ -458,6 +561,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         }
     }
 
+    #[inline]
     fn current_position(&self) -> Position {
         self.lexer.position
     }
