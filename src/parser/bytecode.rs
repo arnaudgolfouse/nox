@@ -44,233 +44,61 @@ macro_rules! implement_integer_operand {
 
 implement_integer_operand!(u8 u16 u32 u64);
 
+/// This macro helps implementing methods on `Instruction` easily.
+macro_rules! instructions {
+    (
+        $(
+            $(#[$code1_doc:meta])*
+            $code1:ident => $name1:literal,
+        )*
+        ---
+        $(
+            $(#[$code2_doc:meta])*
+            $code2:ident(Op) => $name2:literal,
+        )*
+    ) => {
 /// Bytecode instructions
 ///
 /// # Notes
 ///
-/// This structure is generic over the argument type to facilitate parsing (where instructions can
-/// have up to u32 operands). Only the `u8` variant will effectively be used at the end.
+/// This structure is generic over the argument type to facilitate parsing
+/// (where instructions can have up to u32 operands). Only the `u8` variant will
+/// effectively be used at the end.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum Instruction<Op: Operand> {
-    /// Return from the current function
-    ///
-    /// This leaves the stack unchanged.
-    Return,
-    /// Equality test (`==`)
-    ///
-    /// Pop two values from the stack, compare them and push the result.
-    Equal,
-    /// Inequality test (`!=`)
-    ///
-    /// Pop two values from the stack, compare them and push the result.
-    NEqual,
-    /// Inferior test (`<`)
-    ///
-    /// Pop two values from the stack, compare them and push the result.
-    Less,
-    /// Inferior or equal test (`<=`)
-    ///
-    /// Pop two values from the stack, compare them and push the result.
-    LessEq,
-    /// Superior test (`>`)
-    ///
-    /// Pop two values from the stack, compare them and push the result.
-    More,
-    /// Superior or equal test (`>=`)
-    ///
-    /// Pop two values from the stack, compare them and push the result.
-    MoreEq,
-    /// Addition (`+`)
-    ///
-    /// Pop two values from the stack, add them and push the result.
-    Add,
-    /// Subtraction (`-`)
-    ///
-    /// Pop two values from the stack, subtract on with the other, and push the result.
-    Subtract,
-    /// Multiplication (`*`)
-    ///
-    /// Pop two values from the stack, multiply them and push the result.
-    Multiply,
-    /// Division (`/`)
-    ///
-    /// Pop two values from the stack, divide of with the other, and push the result.
-    Divide,
-    /// Modulo (`%`)
-    ///
-    /// Pop two values from the stack, take one modulo the other,and push the result.
-    Modulo,
-    /// Power (`^`)
-    ///
-    /// Pop two values from the stack, take one to the power of the other, and push the
-    /// result.
-    Pow,
-    /// `or`
-    ///
-    /// Pop two values from the stack, 'or' them, and push the result.
-    Or,
-    /// `and`
-    ///
-    /// Pop two values from the stack, 'and' them, and push the result.
-    And,
-    /// `xor`
-    ///
-    /// Pop two values from the stack, 'xor' them, and push the result.
-    Xor,
-    /// Negation (-)
-    ///
-    /// Pop one value from the stack, negate it, and push it back.
-    Negative,
-    /// Logical negation (not)
-    ///
-    /// Pop one value from the stack, negate it logically, and push it back.
-    Not,
-    /// Push `nil` on the stack.
-    PushNil,
-    /// Push `true` on the stack.
-    PushTrue,
-    /// Push `false` on the stack.
-    PushFalse,
-    /// Push a function on the stack.
-    ///
-    /// The function is designated by its index in the `functions` field of the chunk.
-    PushFunction(Op),
-    /// Push a constant on the stack.
-    ///
-    /// The constant is designated by its index in the `constants` field of the chunk.
-    ReadConstant(Op),
-    /// Push a global on the stack.
-    ///
-    /// The global's name is designated by its index in the `globals` field of the chunk.
-    ReadGlobal(Op),
-    /// Write a global variable.
-    ///
-    /// Pop the variable at the top of the stack, and write it at the global name, designated by its
-    /// index in the `globals` field of the chunk.
-    WriteGlobal(Op),
-    /// Push a local on the stack.
-    ///
-    /// The local is designated by its index in the stack.
-    ReadLocal(Op),
-    /// Write a local variable.
-    ///
-    /// Pop the variable at the top of the stack, and write it at the given index in the stack.
-    WriteLocal(Op),
-    ReadCaptured(Op),
-    WriteCaptured(Op),
-    /// Pop the indicated number of values from the stack.
-    Pop(Op),
-    /// Raw jump
-    ///
-    /// Jump the specified offst in the instructions vector.
-    Jump(Op),
-    /// Conditional jump
-    ///
-    /// Jump the specified offset in the instructions vector if `true` is at the top of the stack.
-    JumpTrue(Op),
-    /// Conditional jump
-    ///
-    /// Jump the specified offset in the instructions vector if `false` is at the top of the stack.
-    JumpFalse(Op),
-    /// Conditional jump
-    ///
-    /// Jump the specified offset in the instructions vector if `true` is at the top of the stack, and pops the top of the stack.
-    JumpPopTrue(Op),
-    /// Conditional jump
-    ///
-    /// Jump the specified offset in the instructions vector if `false` is at the top of the stack, and pops the top of the stack.
-    JumpPopFalse(Op),
-    /// Raw back Jump
-    ///
-    /// Jump backward the specified offset in the instructions vector.
-    JumpBack(Op),
-    /// Call a function.
-    ///
-    /// This interprets the top of the stack as the function, and the `operand` following values
-    /// as the arguments.
-    Call(Op),
-    /// Creates a new table.
-    ///
-    /// This will use 2*Op elements of the stack to make this table (pair by pair).
-    MakeTable(Op),
-    /// Argument extension
-    ///
-    /// Allow for instructions with u16 / u24 / u32 operands : this always precede the concerned
-    /// instruction.
-    Extended(Op),
+    $(
+        $(#[$code1_doc])*
+        $code1,
+    )*
+    $(
+        $(#[$code2_doc])*
+        $code2(Op),
+    )*
 }
 
 impl<Op: Operand> Instruction<Op> {
     pub fn operand(self) -> Option<Op> {
         use Instruction::*;
         match self {
-            Return | Equal | NEqual | Less | LessEq | More | MoreEq | Add | Subtract | Multiply
-            | Divide | Modulo | Pow | Or | And | Xor | Negative | Not | PushNil | PushTrue
-            | PushFalse => None,
-            PushFunction(operand)
-            | ReadConstant(operand)
-            | ReadGlobal(operand)
-            | WriteGlobal(operand)
-            | ReadLocal(operand)
-            | WriteLocal(operand)
-            | ReadCaptured(operand)
-            | WriteCaptured(operand)
-            | Pop(operand)
-            | Jump(operand)
-            | JumpTrue(operand)
-            | JumpFalse(operand)
-            | JumpPopTrue(operand)
-            | JumpPopFalse(operand)
-            | JumpBack(operand)
-            | Call(operand)
-            | MakeTable(operand)
-            | Extended(operand) => Some(operand),
+            $(
+                $code1 => None,
+            )*
+            $(
+                $code2(operand) => Some(operand),
+            )*
         }
     }
 
     /// Returns the printable name of the instruction.
     pub fn name(self) -> &'static str {
         match self {
-            Self::Return => "RETURN",
-            Self::Equal => "EQUAL",
-            Self::NEqual => "NEQUAL",
-            Self::Less => "LESS",
-            Self::LessEq => "LESS_EQ",
-            Self::More => "MORE",
-            Self::MoreEq => "MORE_EQ",
-            Self::Add => "ADD",
-            Self::Subtract => "SUBTRACT",
-            Self::Multiply => "MULTIPLY",
-            Self::Divide => "DIVIDE",
-            Self::Modulo => "MODULO",
-            Self::Pow => "POW",
-            Self::Or => "OR",
-            Self::And => "AND",
-            Self::Xor => "XOR",
-            Self::Negative => "NEGATIVE",
-            Self::Not => "NOT",
-            Self::PushNil => "PUSH_NIL",
-            Self::PushTrue => "PUSH_TRUE",
-            Self::PushFalse => "PUSH_FALSE",
-            Self::PushFunction(_) => "PUSH_FUNCTION",
-            Self::ReadConstant(_) => "READ_CONSTANT",
-            Self::ReadGlobal(_) => "READ_GLOBAL",
-            Self::ReadLocal(_) => "READ_LOCAL",
-            Self::WriteGlobal(_) => "WRITE_GLOBAL",
-            Self::WriteLocal(_) => "WRITE_LOCAL",
-            Self::ReadCaptured(_) => "READ_CAPTURED",
-            Self::WriteCaptured(_) => "WRITE_CAPTURED",
-            Self::Pop(_) => "POP",
-            Self::Jump(_) => "JUMP",
-            Self::JumpTrue(_) => "JUMP_TRUE",
-            Self::JumpFalse(_) => "JUMP_FALSE",
-            Self::JumpPopTrue(_) => "JUMP_POP_TRUE",
-            Self::JumpPopFalse(_) => "JUMP_POP_FALSE",
-            Self::JumpBack(_) => "JUMP_BACK",
-            Self::Call(_) => "CALL",
-            Self::MakeTable(_) => "MAKE_TABLE",
-            Self::Extended(_) => "EXTENDED",
+            $(
+                Self::$code1 => $name1,
+            )*
+            $(
+                Self::$code2(_) => $name2,
+            )*
         }
     }
 
@@ -281,49 +109,179 @@ impl<Op: Operand> Instruction<Op> {
         use Instruction::*;
         (
             match self {
-                Return => Return,
-                Equal => Equal,
-                NEqual => NEqual,
-                Less => Less,
-                LessEq => LessEq,
-                More => More,
-                MoreEq => MoreEq,
-                Add => Add,
-                Subtract => Subtract,
-                Multiply => Multiply,
-                Divide => Divide,
-                Modulo => Modulo,
-                Pow => Pow,
-                Or => Or,
-                And => And,
-                Xor => Xor,
-                Negative => Negative,
-                Not => Not,
-                PushNil => PushNil,
-                PushTrue => PushTrue,
-                PushFalse => PushFalse,
-                PushFunction(_) => PushFunction(operand),
-                ReadConstant(_) => ReadConstant(operand),
-                ReadGlobal(_) => ReadGlobal(operand),
-                WriteGlobal(_) => WriteGlobal(operand),
-                ReadLocal(_) => ReadLocal(operand),
-                WriteLocal(_) => WriteLocal(operand),
-                ReadCaptured(_) => ReadCaptured(operand),
-                WriteCaptured(_) => WriteCaptured(operand),
-                Pop(_) => Pop(operand),
-                Jump(_) => Jump(operand),
-                JumpTrue(_) => JumpTrue(operand),
-                JumpFalse(_) => JumpFalse(operand),
-                JumpPopTrue(_) => JumpPopTrue(operand),
-                JumpPopFalse(_) => JumpPopFalse(operand),
-                JumpBack(_) => JumpBack(operand),
-                Call(_) => Call(operand),
-                MakeTable(_) => MakeTable(operand),
-                Extended(_) => Extended(operand),
+                $(
+                    $code1 => $code1,
+                )*
+                $(
+                    $code2(_) => $code2(operand),
+                )*
             },
             extended,
         )
     }
+}
+    };
+}
+
+instructions! {
+    /// Return from the current function
+    ///
+    /// This leaves the stack unchanged.
+    Return => "RETURN",
+    /// Equality test (`==`)
+    ///
+    /// Pop two values from the stack, compare them and push the result.
+    Equal => "EQUAL",
+    /// Inequality test (`!=`)
+    ///
+    /// Pop two values from the stack, compare them and push the result.
+    NEqual => "NOT_EQUAL",
+    /// Inferior test (`<`)
+    ///
+    /// Pop two values from the stack, compare them and push the result.
+    Less => "LESS",
+    /// Inferior or equal test (`<=`)
+    ///
+    /// Pop two values from the stack, compare them and push the result.
+    LessEq => "LESS_EQ",
+    /// Superior test (`>`)
+    ///
+    /// Pop two values from the stack, compare them and push the result.
+    More => "MORE",
+    /// Superior or equal test (`>=`)
+    ///
+    /// Pop two values from the stack, compare them and push the result.
+    MoreEq => "MORE_EQ",
+    /// Addition (`+`)
+    ///
+    /// Pop two values from the stack, add them and push the result.
+    Add => "ADD",
+    /// Subtraction (`-`)
+    ///
+    /// Pop two values from the stack, subtract on with the other, and push the result.
+    Subtract => "SUBTRACT",
+    /// Multiplication (`*`)
+    ///
+    /// Pop two values from the stack, multiply them and push the result.
+    Multiply => "MULTIPLY",
+    /// Division (`/`)
+    ///
+    /// Pop two values from the stack, divide of with the other, and push the result.
+    Divide => "DIVIDE",
+    /// Modulo (`%`)
+    ///
+    /// Pop two values from the stack, take one modulo the other,and push the result.
+    Modulo => "MODULO",
+    /// Power (`^`)
+    ///
+    /// Pop two values from the stack, take one to the power of the other, and push the
+    /// result.
+    Pow => "POW",
+    /// `or`
+    ///
+    /// Pop two values from the stack, 'or' them, and push the result.
+    Or => "OR",
+    /// `and`
+    ///
+    /// Pop two values from the stack, 'and' them, and push the result.
+    And => "AND",
+    /// `xor`
+    ///
+    /// Pop two values from the stack, 'xor' them, and push the result.
+    Xor => "XOR",
+    /// Negation (-)
+    ///
+    /// Pop one value from the stack, negate it, and push it back.
+    Negative => "NEG",
+    /// Logical negation (not)
+    ///
+    /// Pop one value from the stack, negate it logically, and push it back.
+    Not => "NOT",
+    /// Push `nil` on the stack.
+    PushNil => "PUSH_NIL",
+    /// Push `true` on the stack.
+    PushTrue => "PUSH_TRUE",
+    /// Push `false` on the stack.
+    PushFalse => "PUSH_FALSE",
+    /// Read a table element
+    ///
+    /// The key is at the top of the stack, and the table right behind it.
+    ReadTable => "READ_TABLE",
+    /// Write a table element
+    ///
+    /// The element to write is at the top of the stack, then the key, and then
+    /// the table.
+    WriteTable => "WRITE_TABLE",
+    ---
+    /// Push a function on the stack.
+    ///
+    /// The function is designated by its index in the `functions` field of the chunk.
+    ReadFunction(Op) => "READ_FUNCTION",
+    /// Push a constant on the stack.
+    ///
+    /// The constant is designated by its index in the `constants` field of the chunk.
+    ReadConstant(Op) => "READ_CONSTANT",
+    /// Push a global on the stack.
+    ///
+    /// The global's name is designated by its index in the `globals` field of the chunk.
+    ReadGlobal(Op) => "READ_GLOBAL",
+    /// Write a global variable.
+    ///
+    /// Pop the variable at the top of the stack, and write it at the global name, designated by its
+    /// index in the `globals` field of the chunk.
+    WriteGlobal(Op) => "WRITE_GLOBAL",
+    /// Push a local on the stack.
+    ///
+    /// The local is designated by its index in the stack.
+    ReadLocal(Op) => "READ_LOCAL",
+    /// Write a local variable.
+    ///
+    /// Pop the variable at the top of the stack, and write it at the given index in the stack.
+    WriteLocal(Op) => "WRITE_LOCAL",
+    ReadCaptured(Op) => "READ_CAPTURED",
+    WriteCaptured(Op) => "WRITE_CAPTURED",
+    /// Pop the indicated number of values from the stack.
+    Pop(Op) => "POP",
+    /// Raw jump
+    ///
+    /// Jump the specified offst in the instructions vector.
+    Jump(Op) => "JUMP",
+    /// Conditional jump
+    ///
+    /// Jump the specified offset in the instructions vector if `true` is at the top of the stack.
+    JumpTrue(Op) => "JUMP_TRUE",
+    /// Conditional jump
+    ///
+    /// Jump the specified offset in the instructions vector if `false` is at the top of the stack.
+    JumpFalse(Op) => "JUMP_FALSE",
+    /// Conditional jump
+    ///
+    /// Jump the specified offset in the instructions vector if `true` is at the top of the stack, and pops the top of the stack.
+    JumpPopTrue(Op) => "JUMP_POP_TRUE",
+    /// Conditional jump
+    ///
+    /// Jump the specified offset in the instructions vector if `false` is at the top of the stack, and pops the top of the stack.
+    JumpPopFalse(Op) => "JUMP_POP_FALSE",
+    /// Raw back Jump
+    ///
+    /// Jump backward the specified offset in the instructions vector.
+    JumpBack(Op) => "JUMP_BACK",
+    /// Call a function.
+    ///
+    /// This interprets the top of the stack as the function, and the `operand` following values
+    /// as the arguments.
+    Call(Op) => "CALL",
+    /// Creates a new table.
+    ///
+    /// This will use 2*Op elements of the stack to make this table (pair by pair).
+    MakeTable(Op) => "MAKE_TABLE",
+    /// Duplicate the first `Op+1` elements of the stack.
+    DuplicateTop(Op) => "DUPLICATE_TOP",
+    /// Argument extension
+    ///
+    /// Allow for instructions with u16 / u24 / u32 operands : this always precede the concerned
+    /// instruction.
+    Extended(Op) => "EXTENDED",
 }
 
 /// Constants of a program
@@ -364,7 +322,7 @@ impl fmt::Display for Constant {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Chunk {
     /// Name of this chunk
     pub name: String,
@@ -375,7 +333,7 @@ pub struct Chunk {
     /// Constants associated with the chunk
     pub constants: Vec<Constant>,
     /// Global names associated with the chunk
-    pub globals: Vec<String>,
+    pub strings: Vec<String>,
     /// Number of locals needed when loading the function
     pub locals_number: u16,
     /// functions inside this chunk
@@ -389,7 +347,7 @@ impl Chunk {
             lines: Vec::new(),
             code: Vec::new(),
             constants: Vec::new(),
-            globals: Vec::new(),
+            strings: Vec::new(),
             locals_number: 0,
             functions: Vec::new(),
         }
@@ -434,10 +392,10 @@ impl Chunk {
         self.constants.len() as u32 - 1
     }
 
-    /// Add a global to the Chunk, and return it's index for future reference.
-    pub fn add_global(&mut self, global: String) -> u32 {
+    /// Add a string to the Chunk, and return it's index for future reference.
+    pub fn add_string(&mut self, global: String) -> u32 {
         if let Some((index, _)) = self
-            .globals
+            .strings
             .iter()
             .enumerate()
             .find(|(_, glob)| **glob == global)
@@ -445,8 +403,8 @@ impl Chunk {
             return index as u32;
         }
 
-        self.globals.push(global);
-        self.globals.len() as u32 - 1
+        self.strings.push(global);
+        self.strings.len() as u32 - 1
     }
 
     /// push an instruction (presumed to be a JUMP), and return its index in the bytecode for future modification
@@ -487,9 +445,9 @@ impl Chunk {
                 format!("{}", self.constants[operand.unwrap_or_default() as usize])
             }
             Instruction::ReadGlobal(_) | Instruction::WriteGlobal(_) => {
-                self.globals[operand.unwrap_or_default() as usize].clone()
+                self.strings[operand.unwrap_or_default() as usize].clone()
             }
-            Instruction::PushFunction(_) => self.functions[operand.unwrap_or_default() as usize]
+            Instruction::ReadFunction(_) => self.functions[operand.unwrap_or_default() as usize]
                 .name
                 .clone(),
             _ => String::new(),
@@ -515,7 +473,7 @@ impl fmt::Display for Chunk {
             write!(formatter, "{}", last)?
         }
         writeln!(formatter, "]")?;
-        writeln!(formatter, " - globals : {:?}", self.globals)?;
+        writeln!(formatter, " - strings : {:?}", self.strings)?;
         write!(formatter, " - functions : [")?;
         for function in &self.functions[..self.functions.len().saturating_sub(1)] {
             write!(formatter, "{}, ", function.name)?
