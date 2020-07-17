@@ -21,6 +21,7 @@ pub struct Lexer<'a> {
     current_start: Position,
     pub(crate) position: Position,
     next_position: Position,
+    pub(crate) previous_position: Position,
 }
 
 impl<'a> Lexer<'a> {
@@ -32,6 +33,7 @@ impl<'a> Lexer<'a> {
             current_start: Position::default(),
             position: Position::default(),
             next_position: Position::default(),
+            previous_position: Position::default(),
             source,
         };
         lexer.next_token = lexer.advance();
@@ -46,6 +48,7 @@ impl<'a> Lexer<'a> {
             current_start: Position::default(),
             position: Position::default(),
             next_position: Position::default(),
+            previous_position: Position::default(),
             source: Source::TopLevel(source),
         };
         lexer.next_token = lexer.advance();
@@ -377,6 +380,7 @@ impl<'a> Lexer<'a> {
 
     /// Gives next char with side-effects : it skips whitespace and advance the position.
     fn next_char(&mut self) -> Option<char> {
+        self.previous_position = self.position;
         self.position = self.next_position;
         match self.iterator.next() {
             None => None,

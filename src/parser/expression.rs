@@ -1,4 +1,4 @@
-use super::{bytecode::Instruction, Constant, ParserError, ParserErrorKind};
+use super::{bytecode::Instruction, Constant, ParserError, ParserErrorKind, VariableLocation};
 use crate::{
     error::Continue,
     lexer::{Assign, Keyword, Operation, Token, TokenKind},
@@ -293,21 +293,30 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                     range,
                 ))
             } else {
-                self.lexer.next()?;
                 Ok(ExpressionType::Assign(variable, ass, range))
             };
         }
 
-        match self.function_stack.last() {
-            Some(function) => match function.find_variable(&variable) {
-                Some(index) => self.emit_instruction(Instruction::ReadLocal(index)),
-                None => {
-                    todo!() // TODO : capture
-                }
-            },
-            None => {
+        match self.find_variable(&variable) {
+            VariableLocation::Undefined => {
                 let index = self.code.add_string(variable);
                 self.emit_instruction(Instruction::ReadGlobal(index))
+            }
+            VariableLocation::Local(index) => {
+                self.emit_instruction(Instruction::ReadLocal(index as u32))
+            }
+            VariableLocation::Global(index) => {
+                self.emit_instruction(Instruction::ReadGlobal(index as u32))
+            }
+            VariableLocation::Captured(index) => {
+                self.emit_instruction(Instruction::ReadCaptured(index as u32))
+            }
+            VariableLocation::OtherFunc(func_index, var_index) => {
+                if let Some(func) = self.function_stack.last_mut() {
+                    let index = func.captures.len() as u32;
+                    func.captures.push((func_index, var_index));
+                    self.emit_instruction(Instruction::ReadCaptured(index as u32))
+                }
             }
         }
 
@@ -471,7 +480,6 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                         range,
                     ))
                 } else {
-                    self.lexer.next()?;
                     Ok(ExpressionType::TableWrite(ass))
                 }
             }
@@ -524,7 +532,6 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                         range,
                     ))
                 } else {
-                    self.lexer.next()?;
                     Ok(ExpressionType::TableWrite(ass))
                 }
             }

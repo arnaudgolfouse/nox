@@ -24,12 +24,28 @@ enum Scope {
     For,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum VariableLocation {
+    Undefined,
+    Local(usize),
+    Global(usize),
+    Captured(usize),
+    /// (function index, variable index)
+    OtherFunc(usize, usize),
+}
+
 /// Structure temporary used by the parser to parse a function.
 #[derive(Debug)]
 struct Function {
+    /// Local variables of this function
     variables: Vec<String>,
+    /// Variables that the function captures : the first index is the function's, and the second is the variable's.
+    captures: Vec<(usize, usize)>,
+    /// Stack of scopes
     scopes: Vec<Scope>,
+    /// Bytecode
     code: Chunk,
+    /// number of arguments
     arg_number: u32,
 }
 
@@ -52,7 +68,7 @@ impl Function {
 
 #[derive(Default, Debug)]
 pub struct TopLevel {
-    variables: String,
+    variables: Vec<String>,
     scopes: Vec<Scope>,
 }
 
@@ -318,15 +334,34 @@ impl<'a> Parser<'a> {
                 let range = first_token.range;
                 let expression_type = self.parse_expression(Some(first_token), false)?;
                 match expression_type {
-                    ExpressionType::Assign(var, ass, _) => self.write_variable(var, ass)?,
-                    ExpressionType::TableWrite(ass) => self.write_table(ass)?,
-                    ExpressionType::Call => todo!(), // TODO : parse_args function
+                    ExpressionType::Assign(var, ass, _) => {
+                        self.lexer.next()?;
+                        self.assign_variable(var, ass)?
+                    }
+                    ExpressionType::TableWrite(ass) => {
+                        self.lexer.next()?;
+                        self.assign_table(ass)?
+                    }
+                    ExpressionType::Call => self.emit_instruction_u8(Instruction::Pop(1)),
                     _ => {
-                        return Err(self.emit_error(
-                            ParserErrorKind::UnexpectedId,
-                            Continue::Stop,
-                            range,
-                        ))
+                        let range = Range::new(range.start, self.lexer.previous_position);
+                        return if let Some(Token {
+                            kind: TokenKind::Assign(_),
+                            ..
+                        }) = self.lexer.peek()?
+                        {
+                            Err(self.emit_error(
+                                ParserErrorKind::NonAssignable,
+                                Continue::Stop,
+                                range,
+                            ))
+                        } else {
+                            Err(self.emit_error(
+                                ParserErrorKind::UnexpectedExpr,
+                                Continue::Stop,
+                                range,
+                            ))
+                        };
                     }
                 }
             }
@@ -342,7 +377,75 @@ impl<'a> Parser<'a> {
         Ok(Some(()))
     }
 
-    pub fn write_variable(
+    /// Attempt to determine the given variable location relative to the current
+    /// function.
+    fn find_variable(&self, variable: &str) -> VariableLocation {
+        if let Some(func) = self.function_stack.last() {
+            // local ?
+            for (index, var) in func.variables.iter().enumerate() {
+                if var == variable {
+                    return VariableLocation::Local(index);
+                }
+            }
+
+            // already captured ?
+            for (index, (func_index, var_index)) in func.captures.iter().copied().enumerate() {
+                if self.function_stack[func_index].variables[var_index] == variable {
+                    return VariableLocation::Captured(index);
+                }
+            }
+
+            // in another function ?
+            for (func_index, func) in self.function_stack.iter().enumerate().rev().skip(1) {
+                for (index, var) in func.variables.iter().enumerate() {
+                    if var == variable {
+                        return VariableLocation::OtherFunc(func_index, index);
+                    }
+                }
+            }
+
+            VariableLocation::Undefined
+        } else {
+            for (index, var) in self.top_level.variables.iter().enumerate() {
+                if var == variable {
+                    return VariableLocation::Global(index);
+                }
+            }
+            VariableLocation::Undefined
+        }
+    }
+
+    /// Emit the correct instruction to write a variable, assuming everything else has already been parsed.
+    fn write_variable(&mut self, variable: String) {
+        let instruction = match self.find_variable(&variable) {
+            VariableLocation::Undefined => match self.function_stack.last_mut() {
+                Some(func) => {
+                    let index = func.variables.len() as u32;
+                    func.variables.push(variable);
+                    Instruction::WriteLocal(index)
+                }
+                None => {
+                    let index = self.code.add_string(variable);
+                    Instruction::WriteGlobal(index)
+                }
+            },
+            VariableLocation::Local(index) => Instruction::WriteLocal(index as u32),
+            VariableLocation::Global(index) => Instruction::WriteGlobal(index as u32),
+            VariableLocation::Captured(index) => Instruction::WriteCaptured(index as u32),
+            VariableLocation::OtherFunc(func_index, var_index) => {
+                if let Some(func) = self.function_stack.last_mut() {
+                    let index = func.captures.len() as u32;
+                    func.captures.push((func_index, var_index));
+                    Instruction::WriteCaptured(index as u32)
+                } else {
+                    Instruction::Return // we don't care
+                }
+            }
+        };
+        self.emit_instruction(instruction);
+    }
+
+    pub fn assign_variable(
         &mut self,
         variable: String,
         assignement: Assign,
@@ -364,26 +467,12 @@ impl<'a> Parser<'a> {
             Assign::Modulo => self.emit_instruction_u8(Instruction::Modulo),
         }
 
-        match self.function_stack.last() {
-            Some(func) => {
-                if let Some(local_index) = func.find_variable(&variable) {
-                    self.emit_instruction(Instruction::WriteLocal(local_index))
-                } else {
-                    // TODO : captures or globals.
-                    todo!()
-                }
-            }
-            None => {
-                let global_index = self.code.add_string(variable);
-                self.emit_instruction(Instruction::WriteGlobal(global_index));
-            }
-        }
-
+        self.write_variable(variable);
         Ok(())
     }
 
     /// Write a table member
-    fn write_table(&mut self, assignement: Assign) -> Result<(), ParserError<'a>> {
+    fn assign_table(&mut self, assignement: Assign) -> Result<(), ParserError<'a>> {
         match assignement {
             Assign::Equal => {}
             _ => {
@@ -447,24 +536,13 @@ impl<'a> Parser<'a> {
             }
         }
         self.emit_instruction(Instruction::ReadFunction(self.code.functions.len() as u32));
-        match self.function_stack.last() {
-            Some(func) => {
-                if let Some(local_index) = func.find_variable(&name) {
-                    self.emit_instruction(Instruction::WriteLocal(local_index))
-                } else {
-                    // TODO : captures or globals.
-                    todo!()
-                }
-            }
-            None => {
-                let global_index = self.code.add_string(name.clone());
-                self.emit_instruction(Instruction::WriteGlobal(global_index));
-            }
-        }
+
+        self.write_variable(name.clone());
 
         let arg_number = args.len() as _;
         Ok(Function {
             variables: args,
+            captures: Vec::new(),
             arg_number,
             scopes: Vec::new(),
             code: Chunk::new(name),
@@ -479,7 +557,8 @@ pub enum ParserErrorKind {
     Expected(TokenKind),
     Unexpected(TokenKind),
     ExpectedId,
-    UnexpectedId,
+    UnexpectedExpr,
+    NonAssignable,
 }
 
 impl fmt::Display for ParserErrorKind {
@@ -489,8 +568,9 @@ impl fmt::Display for ParserErrorKind {
             Self::ExpectExpression => formatter.write_str("expected expression"),
             Self::Expected(token) => write!(formatter, "expected '{}'", token),
             Self::Unexpected(token) => write!(formatter, "unexpected token : '{}'", token),
-            Self::UnexpectedId => formatter.write_str("unexpected identifier"),
+            Self::UnexpectedExpr => formatter.write_str("unexpected expression"),
             Self::ExpectedId => formatter.write_str("expected identifier"),
+            Self::NonAssignable => formatter.write_str("this expression cannot be assigned to"),
         }
     }
 }
