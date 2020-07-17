@@ -1,5 +1,8 @@
 use crate::parser::{Parser, ParserError};
 
+pub mod gc;
+pub mod values;
+
 pub struct RuntimeError {}
 
 #[derive(Default)]

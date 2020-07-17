@@ -1,0 +1,379 @@
+use super::values::Value;
+use crate::parser::Chunk;
+use std::{collections::HashMap, mem::size_of, ptr::NonNull, sync::Arc};
+
+#[derive(Debug, Clone)]
+pub struct GCHeader {
+    next: Option<NonNull<Collectable>>,
+    marked: bool,
+    roots: u16,
+}
+
+impl GCHeader {
+    pub fn new(next: Option<NonNull<Collectable>>) -> Self {
+        Self {
+            next,
+            marked: false,
+            roots: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CollectableObject {
+    Table(HashMap<Value, Value>),
+    Captured(Value),
+    Function {
+        chunk: Arc<Chunk>,
+        args_nb: u8,
+        captured_variables: Vec<Value>,
+    },
+}
+
+impl Eq for CollectableObject {}
+
+#[derive(Debug, Clone)]
+pub struct Collectable {
+    pub header: GCHeader,
+    pub object: CollectableObject,
+}
+
+impl PartialEq for Collectable {
+    fn eq(&self, other: &Collectable) -> bool {
+        self.object == other.object
+    }
+}
+
+impl Collectable {
+    fn new_function(
+        next: Option<NonNull<Collectable>>,
+        chunk: Arc<Chunk>,
+        args_nb: u8,
+        captured_variables: Vec<Value>,
+    ) -> Self {
+        Self {
+            header: GCHeader::new(next),
+            object: CollectableObject::Function {
+                chunk,
+                args_nb,
+                captured_variables,
+            },
+        }
+    }
+
+    #[inline]
+    pub fn root(&mut self) {
+        self.header.roots += 1
+    }
+
+    #[inline]
+    pub fn unroot(&mut self) {
+        self.header.roots -= 1
+    }
+
+    fn to_mark(&self) -> Vec<&Collectable> {
+        match &self.object {
+            CollectableObject::Captured(value) => match value.as_collectable() {
+                None => vec![],
+                Some(collectable) => vec![collectable],
+            },
+            CollectableObject::Function {
+                captured_variables, ..
+            } => {
+                let mut to_mark = Vec::new();
+                for captured in captured_variables {
+                    match captured.as_collectable() {
+                        None => {}
+                        Some(collectable) => to_mark.push(collectable),
+                    }
+                }
+                to_mark
+            }
+            CollectableObject::Table(table) => {
+                let mut to_mark = Vec::new();
+                for (key, value) in table {
+                    match key.as_collectable() {
+                        None => {}
+                        Some(collectable) => to_mark.push(collectable),
+                    }
+                    match value.as_collectable() {
+                        None => {}
+                        Some(collectable) => to_mark.push(collectable),
+                    }
+                }
+                to_mark
+            }
+        }
+    }
+
+    fn size(&self) -> usize {
+        let size = size_of::<Collectable>();
+        match &self.object {
+            CollectableObject::Table(table) => {
+                size + size_of::<(Value, Value)>() * table.capacity()
+            }
+            CollectableObject::Function {
+                captured_variables, ..
+            } => size + size_of::<Value>() * captured_variables.capacity(),
+            CollectableObject::Captured(_) => size,
+        }
+    }
+}
+
+const INITIAL_THRESHOLD: usize = 10000;
+
+#[derive(Debug, Default)]
+pub struct GC {
+    allocated: usize,
+    threshold: usize,
+    first: Option<NonNull<Collectable>>,
+}
+
+impl GC {
+    pub fn new() -> Self {
+        Self {
+            allocated: 0,
+            threshold: INITIAL_THRESHOLD,
+            first: None,
+        }
+    }
+
+    fn drop_value(&mut self, value: &mut Collectable) {
+        self.allocated -= value.size();
+        unsafe { std::ptr::drop_in_place(value as *mut _) };
+    }
+
+    fn check(&mut self, additional: usize) {
+        if self.allocated + additional > self.threshold {
+            println!(
+                "=========\nthreshold ({}) reached, sweeping...",
+                self.threshold
+            );
+            let old_allocated = self.allocated;
+            self.mark_and_sweep();
+            println!("freed {} bytes", old_allocated - self.allocated);
+            loop {
+                self.threshold = std::cmp::max(
+                    self.threshold,
+                    ((self.allocated + additional) as f64 * 1.7) as usize,
+                );
+                if self.allocated + additional <= self.threshold {
+                    break;
+                }
+            }
+            println!("new threshold = {}\n=========", self.threshold);
+        }
+    }
+
+    /// Clones a collectable value, creating a new, fresh one (aka a different pointer).
+    /// Does not clone the GC properties (typically roots), but share any internal collectable value, such as captured variables and table keys/values.
+    /// # Remarks
+    /// The old value must not be collectable.
+    /// The new value will not be rooted.
+    /// If the value is not collectable, simply clones it
+    pub fn clone_value(&mut self, value: &Value) -> Value {
+        match value {
+            Value::Collectable(ptr) => {
+                match &unsafe { ptr.as_ref() }.object {
+                    CollectableObject::Table(table) => {
+                        let mut new_table = self.new_table();
+                        new_table.root(); // avoid collection while we add elements
+                        for (key, value) in table {
+                            self.add_table_element(&mut new_table, key.clone(), value.clone())
+                                .unwrap();
+                        }
+                        new_table.unroot();
+                        new_table
+                    }
+                    CollectableObject::Function {
+                        captured_variables,
+                        chunk,
+                        args_nb,
+                    } => self.new_function(chunk.clone(), *args_nb, captured_variables.clone()),
+                    CollectableObject::Captured(value) => self.new_captured(value.clone()),
+                }
+            }
+            _ => value.clone(),
+        }
+    }
+
+    /// Creates a new garbage collected function
+    pub fn new_function(
+        &mut self,
+        chunk: Arc<Chunk>,
+        args_nb: u8,
+        mut captured_variables: Vec<Value>,
+    ) -> Value {
+        captured_variables.shrink_to_fit();
+        let mut collectable = Collectable::new_function(None, chunk, args_nb, captured_variables);
+        let additional = collectable.size();
+        self.check(additional);
+        collectable.header.next = self.first.take();
+        let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(collectable))) };
+        self.first = Some(ptr);
+        self.allocated += additional;
+        Value::Collectable(ptr)
+    }
+
+    pub fn new_captured(&mut self, value: Value) -> Value {
+        if value.as_captured().is_some() {
+            value
+        } else {
+            let mut collectable = Collectable {
+                header: GCHeader::new(None),
+                object: CollectableObject::Captured(value),
+            };
+            let additional = collectable.size();
+            self.check(additional);
+            collectable.header.next = self.first.take();
+            let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(collectable))) };
+            self.first = Some(ptr);
+            self.allocated += additional;
+            Value::Collectable(ptr)
+        }
+    }
+
+    pub fn new_table(&mut self) -> Value {
+        let mut collectable = Collectable {
+            header: GCHeader::new(None),
+            object: CollectableObject::Table(HashMap::new()),
+        };
+        let additional = collectable.size();
+        self.check(additional);
+        collectable.header.next = self.first.take();
+        let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(collectable))) };
+        self.first = Some(ptr);
+        self.allocated += additional;
+        Value::Collectable(ptr)
+    }
+
+    // returns 'table' in case of failure
+    pub fn add_table_element(
+        &mut self,
+        table: &mut Value,
+        key: Value,
+        value: Value,
+    ) -> Result<(), Value> {
+        match table.as_table_mut() {
+            None => Err(table.clone()),
+            Some(table) => {
+                let old_capacity = table.capacity() * size_of::<(Value, Value)>();
+                table.insert(key, value);
+                let additional = table.capacity() * size_of::<(Value, Value)>() - old_capacity;
+                self.check(additional);
+                self.allocated += additional;
+                Ok(())
+            }
+        }
+    }
+
+    pub fn remove_table_element(&mut self, table: &mut Value, key: Value) -> Result<(), Value> {
+        match table.as_table_mut() {
+            None => Err(table.clone()),
+            Some(table) => {
+                let old_capacity = table.capacity() * size_of::<(Value, Value)>();
+                table.remove(&key);
+                let new_capacity = table.capacity() * size_of::<(Value, Value)>();
+                self.allocated -= old_capacity - new_capacity;
+                Ok(())
+            }
+        }
+    }
+
+    pub fn unmark_all(&mut self) {
+        let mut to_unmark = self.first;
+
+        while let Some(mut value) = to_unmark {
+            unsafe { value.as_mut() }.header.marked = false;
+            to_unmark = unsafe { value.as_mut() }.header.next;
+        }
+    }
+
+    pub fn mark(&mut self) {
+        let mut to_mark = Vec::new();
+        let mut next = self.first;
+        while let Some(current_ptr) = next {
+            let current = unsafe { current_ptr.as_ref() };
+            if current.header.roots > 0 {
+                to_mark.push(current_ptr)
+            }
+            next = current.header.next;
+        }
+        while let Some(mut current) = to_mark.pop() {
+            let current = unsafe { current.as_mut() };
+            if !current.header.marked {
+                current.header.marked = true;
+                for elem in current.to_mark() {
+                    if !elem.header.marked {
+                        to_mark.push(NonNull::from(elem))
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn sweep(&mut self) {
+        while let Some(mut value) = self.first {
+            let value = unsafe { value.as_mut() };
+            if value.header.marked {
+                break;
+            }
+            self.first = value.header.next;
+            self.drop_value(value);
+        }
+        let mut current = self.first;
+        while let Some(mut value) = current {
+            let value = unsafe { value.as_mut() };
+            if let Some(mut next) = value.header.next {
+                let next = unsafe { next.as_mut() };
+                if !next.header.marked {
+                    value.header.next = next.header.next;
+                    self.drop_value(next);
+                } else {
+                    current = value.header.next;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    pub fn mark_and_sweep(&mut self) {
+        self.unmark_all();
+        self.mark();
+        self.sweep();
+    }
+
+    /// # Safety
+    /// this is incredibely unsafe, as any pointer to a gc value becomes invalid. Only use if you ABSOLUTELY need it !
+    pub unsafe fn force_empty(&mut self) {
+        while let Some(mut ptr) = self.first {
+            let value = ptr.as_mut();
+            self.first = value.header.next.take();
+            self.drop_value(value);
+        }
+    }
+
+    pub fn print_all_allocated(&self) {
+        let mut ptr = self.first;
+        let mut i = 0;
+        while let Some(to_print_ptr) = ptr {
+            let to_print = unsafe { to_print_ptr.as_ref() };
+            println!(" {} - at {:?} - {:?}", i, to_print_ptr, to_print);
+            i += 1;
+            ptr = to_print.header.next;
+        }
+    }
+}
+
+impl Drop for GC {
+    fn drop(&mut self) {
+        while let Some(mut ptr) = self.first {
+            let value = unsafe { ptr.as_mut() };
+            self.first = value.header.next.take();
+            self.drop_value(value);
+        }
+        #[cfg(debug)]
+        assert_eq!(self.allocated, 0)
+    }
+}
