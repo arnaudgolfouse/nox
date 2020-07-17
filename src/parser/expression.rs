@@ -1,4 +1,6 @@
-use super::{bytecode::Instruction, Constant, ParserError, ParserErrorKind, VariableLocation};
+use super::{
+    bytecode::Instruction, Constant, ParseReturn, ParserError, ParserErrorKind, VariableLocation,
+};
 use crate::{
     error::Continue,
     lexer::{Assign, Keyword, Operation, Token, TokenKind},
@@ -340,7 +342,34 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
     }
 
     fn parse_lambda(&mut self) -> Result<ExpressionType, ParserError<'a>> {
-        todo!()
+        if let Some(Token {
+            kind: TokenKind::LPar,
+            ..
+        }) = self.next()?
+        {
+        } else {
+            return Err(self.emit_error(
+                ParserErrorKind::Expected(TokenKind::LPar),
+                Continue::Stop,
+                Range::new(self.current_position(), self.current_position()),
+            ));
+        }
+        let mut function = self.parse_prototype(String::from("<closure>"), true)?;
+        std::mem::swap(&mut self.code, &mut function.code);
+        self.function_stack.push(function);
+        loop {
+            match self.parse_statements()? {
+                ParseReturn::Continue => {}
+                ParseReturn::StopClosure => break Ok(ExpressionType::Constant),
+                ParseReturn::Stop => {
+                    return Err(self.emit_error(
+                        ParserErrorKind::Expected(TokenKind::Keyword(Keyword::End)),
+                        Continue::Continue,
+                        Range::new(self.current_position(), self.current_position()),
+                    ))
+                }
+            }
+        }
     }
 
     fn parse_unary(&mut self, operator: Operation) -> Result<(), ParserError<'a>> {

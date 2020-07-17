@@ -10,6 +10,17 @@ pub use bytecode::{Chunk, Constant, Instruction};
 use expression::{ExpressionParser, ExpressionType};
 use std::fmt;
 
+/// Indicate what to do after successfully parsing a statement.
+#[derive(Debug, Clone, Copy)]
+enum ParseReturn {
+    /// Stop parsing, as there are no more tokens
+    Stop,
+    /// Stop parsing the current closure
+    StopClosure,
+    /// Continue parsing
+    Continue,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum Scope {
     /// `if` statement. Contains the address of the `JumpPopFalse` instruction.
@@ -17,7 +28,7 @@ enum Scope {
     /// `else` statement. Contains the address of the `Jump` instruction at the
     /// end of the `if` block.
     Else(usize),
-    /// `while` statement. Contains the address of the expression , and the
+    /// `while` statement. Contains the address of the expression, and the
     /// address of the conditional jump instruction.
     While(usize, usize),
     /// `for` statement
@@ -45,6 +56,8 @@ struct Function {
     scopes: Vec<Scope>,
     /// Bytecode
     code: Chunk,
+    /// Indicate if this function is a closure.
+    closure: bool,
     /// number of arguments
     arg_number: u32,
 }
@@ -53,16 +66,6 @@ impl Function {
     /// This function returns `None` if there is no opened scope in the function
     fn scope(&self) -> Option<Scope> {
         self.scopes.last().copied()
-    }
-
-    /// Return the index of the variable if it exists in the function
-    fn find_variable(&self, variable: &str) -> Option<u32> {
-        for (i, var) in self.variables.iter().enumerate() {
-            if var == variable {
-                return Some(i as u32);
-            }
-        }
-        None
     }
 }
 
@@ -166,8 +169,18 @@ impl<'a> Parser<'a> {
                         break;
                     }
                 }
-                Ok(Some(())) => {}
-                Ok(None) => break,
+                Ok(ParseReturn::Continue) => {}
+                Ok(ParseReturn::Stop) => break,
+                Ok(ParseReturn::StopClosure) => {
+                    self.errors.push(self.emit_error(
+                        ParserErrorKind::EndClosure,
+                        Continue::Stop,
+                        Range::default(),
+                    ));
+                    if self.panic_mode() {
+                        break;
+                    }
+                }
             }
         }
         if self.errors.is_empty() {
@@ -205,14 +218,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_statements(&mut self) -> Result<Option<()>, ParserError<'a>> {
+    fn parse_statements(&mut self) -> Result<ParseReturn, ParserError<'a>> {
         let first_token = match self.lexer.next()? {
             Some(token) => token,
             None => {
                 return if self.scope().is_some() || !self.function_stack.is_empty() {
                     self.expected_token(TokenKind::Keyword(Keyword::End))
                 } else {
-                    Ok(None)
+                    Ok(ParseReturn::Stop)
                 }
             }
         };
@@ -252,6 +265,9 @@ impl<'a> Parser<'a> {
                     self.emit_instruction_u8(Instruction::Return);
                     std::mem::swap(&mut self.code, &mut function.code);
                     self.code.functions.push(function.code);
+                    if function.closure {
+                        return Ok(ParseReturn::StopClosure); // weird edge case : we need to stop parsing now and return to the caller (parse_lambda)
+                    }
                 } else {
                     return Err(self.emit_error(
                         ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::End)),
@@ -291,11 +307,13 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Keyword(Keyword::For) => todo!(),
             TokenKind::Keyword(Keyword::Fn) => {
-                let mut function = match self.next()? {
+                let mut function = match self.peek()? {
                     Some(Token {
                         kind: TokenKind::Id(func_name),
                         ..
                     }) => {
+                        let func_name = func_name.clone();
+                        self.next()?;
                         match self.next()? {
                             Some(Token {
                                 kind: TokenKind::LPar,
@@ -313,7 +331,16 @@ impl<'a> Parser<'a> {
                                 ))
                             }
                         };
-                        self.parse_prototype(func_name)?
+                        let func = self.parse_prototype(func_name.clone(), false)?;
+                        self.write_variable(func_name);
+                        func
+                    }
+                    Some(Token {
+                        kind: TokenKind::LPar,
+                        ..
+                    }) => {
+                        self.parse_expression(Some(first_token), true)?;
+                        return Ok(ParseReturn::Continue);
                     }
                     token => {
                         return Err(self.emit_error(
@@ -365,6 +392,9 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            TokenKind::LPar => {
+                self.parse_expression(Some(first_token), true)?;
+            }
             _ => {
                 return Err(self.emit_error(
                     ParserErrorKind::Unexpected(first_token.kind),
@@ -374,7 +404,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Ok(Some(()))
+        Ok(ParseReturn::Continue)
     }
 
     /// Attempt to determine the given variable location relative to the current
@@ -499,7 +529,13 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a function prototype, e.g. 'fn f(a, b)'
-    fn parse_prototype(&mut self, name: String) -> Result<Function, ParserError<'a>> {
+    ///
+    /// Assumes the opening `(` has been parsed.
+    fn parse_prototype(
+        &mut self,
+        name: String,
+        closure: bool,
+    ) -> Result<Function, ParserError<'a>> {
         let mut args = Vec::new();
         loop {
             if let Some(token) = self.next()? {
@@ -537,8 +573,6 @@ impl<'a> Parser<'a> {
         }
         self.emit_instruction(Instruction::ReadFunction(self.code.functions.len() as u32));
 
-        self.write_variable(name.clone());
-
         let arg_number = args.len() as _;
         Ok(Function {
             variables: args,
@@ -546,6 +580,7 @@ impl<'a> Parser<'a> {
             arg_number,
             scopes: Vec::new(),
             code: Chunk::new(name),
+            closure,
         })
     }
 }
@@ -559,6 +594,7 @@ pub enum ParserErrorKind {
     ExpectedId,
     UnexpectedExpr,
     NonAssignable,
+    EndClosure,
 }
 
 impl fmt::Display for ParserErrorKind {
@@ -571,6 +607,9 @@ impl fmt::Display for ParserErrorKind {
             Self::UnexpectedExpr => formatter.write_str("unexpected expression"),
             Self::ExpectedId => formatter.write_str("expected identifier"),
             Self::NonAssignable => formatter.write_str("this expression cannot be assigned to"),
+            Self::EndClosure => formatter.write_str(
+                "This is not an error but an internal hack : you should not be seeing this !",
+            ),
         }
     }
 }
@@ -669,7 +708,7 @@ mod tests {
                 Constant::Int(8),
             ]
         );
-        assert_eq!(chunk.strings, [String::from("f"), String::from("g")]);
+        assert_eq!(chunk.strings, ["f", "g"]);
         assert_eq!(
             chunk.code,
             [
@@ -704,7 +743,7 @@ mod tests {
         let parser = Parser::new(Source::TopLevel("while x > y x -= 1 end"));
         let chunk = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, [Constant::Int(1)]);
-        assert_eq!(chunk.strings, [String::from("x"), String::from("y")]);
+        assert_eq!(chunk.strings, ["x", "y"]);
         assert_eq!(
             chunk.code,
             [
@@ -735,7 +774,7 @@ mod tests {
         ));
         let chunk = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, [Constant::Int(1)]);
-        assert_eq!(chunk.strings, [String::from("x"), String::from("y")]);
+        assert_eq!(chunk.strings, ["x", "y"]);
         assert_eq!(
             chunk.code[0..5],
             [
@@ -768,7 +807,7 @@ mod tests {
         let parser = Parser::new(Source::TopLevel("t = {}"));
         let chunk = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, []);
-        assert_eq!(chunk.strings, [String::from("t")]);
+        assert_eq!(chunk.strings, ["t"]);
         assert_eq!(
             chunk.code,
             [Instruction::MakeTable(0), Instruction::WriteGlobal(0)]
@@ -786,7 +825,7 @@ mod tests {
                 Constant::String("hello".to_owned())
             ]
         );
-        assert_eq!(chunk.strings, [String::from("t")]);
+        assert_eq!(chunk.strings, ["t"]);
         assert_eq!(
             chunk.code,
             [
@@ -850,7 +889,7 @@ mod tests {
         let parser = Parser::new(Source::TopLevel("fn f() return 0 end x = f()"));
         let chunk = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, []);
-        assert_eq!(chunk.strings, [String::from("f"), String::from("x")]);
+        assert_eq!(chunk.strings, ["f", "x"]);
         assert_eq!(
             chunk.code,
             [
@@ -869,6 +908,109 @@ mod tests {
                 Instruction::PushNil,
                 Instruction::Return
             ]
-        )
+        );
+
+        let parser = Parser::new(Source::TopLevel(
+            "
+        x = 0
+        fn f()
+            y = 1
+            fn g()
+                x = 2
+                y = 2
+            end
+            return g + 1
+        end
+        ",
+        ));
+        let chunk = parser.parse_top_level().unwrap();
+        assert_eq!(chunk.constants, [Constant::Int(0)]);
+        assert_eq!(chunk.strings, ["x", "f"]);
+        assert_eq!(
+            chunk.code,
+            [
+                Instruction::ReadConstant(0),
+                Instruction::WriteGlobal(0),
+                Instruction::ReadFunction(0),
+                Instruction::WriteGlobal(1),
+            ]
+        );
+        assert_eq!(chunk.functions[0].constants, [Constant::Int(1)]);
+        assert!(chunk.functions[0].strings.is_empty());
+        assert_eq!(
+            chunk.functions[0].code,
+            [
+                Instruction::ReadConstant(0),
+                Instruction::WriteLocal(0),
+                Instruction::ReadFunction(0),
+                Instruction::WriteLocal(1),
+                Instruction::ReadLocal(1),
+                Instruction::ReadConstant(0),
+                Instruction::Add,
+                Instruction::Return,
+                Instruction::PushNil,
+                Instruction::Return
+            ]
+        );
+
+        assert_eq!(
+            chunk.functions[0].functions[0].constants,
+            [Constant::Int(2)]
+        );
+        assert!(chunk.functions[0].functions[0].strings.is_empty());
+        assert_eq!(
+            chunk.functions[0].functions[0].code,
+            [
+                Instruction::ReadConstant(0),
+                Instruction::WriteLocal(0),
+                Instruction::ReadConstant(0),
+                Instruction::WriteCaptured(0),
+                Instruction::PushNil,
+                Instruction::Return
+            ]
+        );
+
+        let parser = Parser::new(Source::TopLevel(
+            "
+            x = fn()
+                    y = 1
+                    return (fn(a, b) return y + a + b end)(1, 2)
+                end
+            ",
+        ));
+        let chunk = parser.parse_top_level().unwrap();
+        assert_eq!(chunk.constants, []);
+        assert_eq!(chunk.strings, ["x"]);
+        assert_eq!(
+            chunk.code,
+            [Instruction::ReadFunction(0), Instruction::WriteGlobal(0)]
+        );
+        assert_eq!(
+            chunk.functions[0].code,
+            [
+                Instruction::ReadConstant(0),
+                Instruction::WriteLocal(0),
+                Instruction::ReadFunction(0),
+                Instruction::ReadConstant(0),
+                Instruction::ReadConstant(1),
+                Instruction::Call(2),
+                Instruction::Return,
+                Instruction::PushNil,
+                Instruction::Return
+            ]
+        );
+        assert_eq!(
+            chunk.functions[0].functions[0].code,
+            [
+                Instruction::ReadCaptured(0),
+                Instruction::ReadLocal(0),
+                Instruction::ReadLocal(1),
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Return,
+                Instruction::PushNil,
+                Instruction::Return
+            ]
+        );
     }
 }
