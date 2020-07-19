@@ -1,6 +1,6 @@
 use super::values::Value;
 use crate::parser::Chunk;
-use std::{collections::HashMap, mem::size_of, ptr::NonNull, sync::Arc};
+use std::{collections::HashMap, fmt, mem::size_of, ptr::NonNull, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub struct GCHeader {
@@ -10,11 +10,14 @@ pub struct GCHeader {
 }
 
 impl GCHeader {
+    /// Creates a header for a collectable object.
+    ///
+    /// This object will be rooted once to avoid collection.
     pub fn new(next: Option<NonNull<Collectable>>) -> Self {
         Self {
             next,
             marked: false,
-            roots: 0,
+            roots: 1,
         }
     }
 }
@@ -44,6 +47,16 @@ impl PartialEq for Collectable {
     }
 }
 
+impl fmt::Display for Collectable {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match &self.object {
+            CollectableObject::Captured(value) => fmt::Display::fmt(value, formatter),
+            CollectableObject::Function { .. } => formatter.write_str("<function>"),
+            CollectableObject::Table(_) => formatter.write_str("<table>"),
+        }
+    }
+}
+
 impl Collectable {
     fn new_function(
         next: Option<NonNull<Collectable>>,
@@ -69,6 +82,14 @@ impl Collectable {
     #[inline]
     pub fn unroot(&mut self) {
         self.header.roots -= 1
+    }
+
+    #[inline]
+    pub fn as_captured(&self) -> Option<&Value> {
+        match &self.object {
+            CollectableObject::Captured(value) => Some(value),
+            _ => None,
+        }
     }
 
     fn to_mark(&self) -> Vec<&Collectable> {
@@ -130,6 +151,7 @@ pub struct GC {
 }
 
 impl GC {
+    /// Creates a new empty garbage collector
     pub fn new() -> Self {
         Self {
             allocated: 0,
@@ -143,6 +165,10 @@ impl GC {
         unsafe { std::ptr::drop_in_place(value as *mut _) };
     }
 
+    /// Check that `additional` more bytes won't go over the threshold.
+    ///
+    /// If it does, a mark and sweep algorithm is launched, and the treshold is
+    /// increased.
     fn check(&mut self, additional: usize) {
         if self.allocated + additional > self.threshold {
             println!(
@@ -165,39 +191,49 @@ impl GC {
         }
     }
 
-    /// Clones a collectable value, creating a new, fresh one (aka a different pointer).
-    /// Does not clone the GC properties (typically roots), but share any internal collectable value, such as captured variables and table keys/values.
+    /// Clones a collectable value, creating a new, fresh one (aka a different
+    /// pointer).
+    ///
+    /// Does not clone the GC properties (typically roots), but share any
+    /// internal collectable value, such as captured variables and table keys/
+    /// values.
+    ///
     /// # Remarks
-    /// The old value must not be collectable.
-    /// The new value will not be rooted.
-    /// If the value is not collectable, simply clones it
-    pub fn clone_value(&mut self, value: &Value) -> Value {
+    ///
+    /// The new value will be rooted.
+    ///
+    /// If the value is not collectable, simply clones it.
+    ///
+    /// # Safety
+    ///
+    /// The old value **must** be rooted in order to avoid collection during the
+    /// copy !
+    pub unsafe fn clone_value(&mut self, value: &Value) -> Value {
         match value {
-            Value::Collectable(ptr) => {
-                match &unsafe { ptr.as_ref() }.object {
-                    CollectableObject::Table(table) => {
-                        let mut new_table = self.new_table();
-                        new_table.root(); // avoid collection while we add elements
+            Value::Collectable(ptr) => match &ptr.as_ref().object {
+                CollectableObject::Table(table) => {
+                    let mut new_table = self.new_table();
+                    if let Some(new_table) = new_table.as_table_mut() {
                         for (key, value) in table {
-                            self.add_table_element(&mut new_table, key.clone(), value.clone())
-                                .unwrap();
+                            self.add_table_element(new_table, key.clone(), value.clone());
                         }
-                        new_table.unroot();
-                        new_table
                     }
-                    CollectableObject::Function {
-                        captured_variables,
-                        chunk,
-                        args_nb,
-                    } => self.new_function(chunk.clone(), *args_nb, captured_variables.clone()),
-                    CollectableObject::Captured(value) => self.new_captured(value.clone()),
+                    new_table
                 }
-            }
+                CollectableObject::Function {
+                    captured_variables,
+                    chunk,
+                    args_nb,
+                } => self.new_function(chunk.clone(), *args_nb, captured_variables.clone()),
+                CollectableObject::Captured(value) => self.new_captured(value.clone()),
+            },
             _ => value.clone(),
         }
     }
 
-    /// Creates a new garbage collected function
+    /// Creates a new garbage collected function.
+    ///
+    /// This function will be rooted
     pub fn new_function(
         &mut self,
         chunk: Arc<Chunk>,
@@ -215,6 +251,11 @@ impl GC {
         Value::Collectable(ptr)
     }
 
+    /// Creates a new garbage collected value.
+    ///
+    /// If the value was already a captured variable, it is simply returned.
+    ///
+    /// The new value will be rooted
     pub fn new_captured(&mut self, value: Value) -> Value {
         if value.as_captured().is_some() {
             value
@@ -233,6 +274,9 @@ impl GC {
         }
     }
 
+    /// Creates a new empty table.
+    ///
+    /// The new table will be rooted.
     pub fn new_table(&mut self) -> Value {
         let mut collectable = Collectable {
             header: GCHeader::new(None),
@@ -250,21 +294,15 @@ impl GC {
     // returns 'table' in case of failure
     pub fn add_table_element(
         &mut self,
-        table: &mut Value,
+        table: &mut HashMap<Value, Value>,
         key: Value,
         value: Value,
-    ) -> Result<(), Value> {
-        match table.as_table_mut() {
-            None => Err(table.clone()),
-            Some(table) => {
-                let old_capacity = table.capacity() * size_of::<(Value, Value)>();
-                table.insert(key, value);
-                let additional = table.capacity() * size_of::<(Value, Value)>() - old_capacity;
-                self.check(additional);
-                self.allocated += additional;
-                Ok(())
-            }
-        }
+    ) {
+        let old_capacity = table.capacity() * size_of::<(Value, Value)>();
+        table.insert(key, value);
+        let additional = table.capacity() * size_of::<(Value, Value)>() - old_capacity;
+        self.check(additional);
+        self.allocated += additional;
     }
 
     pub fn remove_table_element(&mut self, table: &mut Value, key: Value) -> Result<(), Value> {

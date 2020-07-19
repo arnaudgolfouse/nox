@@ -1,6 +1,8 @@
 use super::gc::{Collectable, CollectableObject};
+use crate::parser::Constant;
 use std::{
     collections::HashMap,
+    fmt,
     hash::{Hash, Hasher},
     ptr::NonNull,
 };
@@ -15,8 +17,32 @@ pub enum Value {
     Collectable(NonNull<Collectable>),
 }
 
+impl From<Constant> for Value {
+    fn from(constant: Constant) -> Self {
+        match constant {
+            Constant::Nil => Self::Nil,
+            Constant::Bool(b) => Self::Bool(b),
+            Constant::Int(i) => Self::Int(i),
+            Constant::Float(f) => Self::Float(f),
+            Constant::String(s) => Self::String(s),
+        }
+    }
+}
+
 impl PartialEq for Value {
     fn eq(&self, other: &Value) -> bool {
+        // 'de-capture' the variables
+        if let Some(x1) = self.as_captured() {
+            return if let Some(x2) = other.as_captured() {
+                x1 == x2
+            } else {
+                x1 == other
+            };
+        }
+        if let Some(x2) = other.as_captured() {
+            return self == x2;
+        }
+        // do the actual comparison (impossible to have captured variables now !)
         match self {
             Self::Nil => matches!(other, Self::Nil),
             Self::Bool(x1) => match other {
@@ -35,10 +61,17 @@ impl PartialEq for Value {
                 Self::String(x2) => x1 == x2,
                 _ => false,
             },
-            Self::Collectable(x1) => match other {
-                Self::Collectable(x2) => x1 == x2,
-                _ => false,
-            },
+            Self::Collectable(_) => {
+                if let Some(x1) = self.as_collectable() {
+                    if let Some(x2) = self.as_collectable() {
+                        x1 == x2
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
         }
     }
 }
@@ -54,6 +87,19 @@ impl Hash for Value {
             Self::Float(f) => (*f).to_bits().hash(hasher),
             Self::String(s) => s.hash(hasher),
             Self::Collectable(ptr) => ptr.hash(hasher),
+        }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::Nil => formatter.write_str("nil"),
+            Self::Bool(b) => fmt::Display::fmt(b, formatter),
+            Self::Int(i) => fmt::Display::fmt(i, formatter),
+            Self::Float(f) => fmt::Display::fmt(f, formatter),
+            Self::String(s) => fmt::Display::fmt(s, formatter),
+            Self::Collectable(col) => fmt::Display::fmt(unsafe { col.as_ref() }, formatter),
         }
     }
 }
@@ -81,6 +127,8 @@ impl Value {
         }
     }
 
+    /// Return `Some` if the value is not collectable, or if it is a captured
+    /// value.
     pub fn as_captured(&self) -> Option<&Value> {
         match self {
             Self::Collectable(ptr) => match &unsafe { &ptr.as_ref() }.object {

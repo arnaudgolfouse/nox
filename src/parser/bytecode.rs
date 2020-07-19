@@ -126,141 +126,149 @@ impl<Op: Operand> Instruction<Op> {
 instructions! {
     /// Return from the current function
     ///
-    /// This leaves the stack unchanged.
+    /// This leaves the tmp_stack unchanged but pops a call frame.
     Return => "RETURN",
     /// Equality test (`==`)
     ///
-    /// Pop two values from the stack, compare them and push the result.
+    /// Pop two values from the tmp_stack, compare them and push the result.
     Equal => "EQUAL",
     /// Inequality test (`!=`)
     ///
-    /// Pop two values from the stack, compare them and push the result.
+    /// Pop two values from the tmp_stack, compare them and push the result.
     NEqual => "NOT_EQUAL",
     /// Inferior test (`<`)
     ///
-    /// Pop two values from the stack, compare them and push the result.
+    /// Pop two values from the tmp_stack, compare them and push the result.
     Less => "LESS",
     /// Inferior or equal test (`<=`)
     ///
-    /// Pop two values from the stack, compare them and push the result.
+    /// Pop two values from the tmp_stack, compare them and push the result.
     LessEq => "LESS_EQ",
     /// Superior test (`>`)
     ///
-    /// Pop two values from the stack, compare them and push the result.
+    /// Pop two values from the tmp_stack, compare them and push the result.
     More => "MORE",
     /// Superior or equal test (`>=`)
     ///
-    /// Pop two values from the stack, compare them and push the result.
+    /// Pop two values from the tmp_stack, compare them and push the result.
     MoreEq => "MORE_EQ",
     /// Addition (`+`)
     ///
-    /// Pop two values from the stack, add them and push the result.
+    /// Pop two values from the tmp_stack, add them and push the result.
     Add => "ADD",
     /// Subtraction (`-`)
     ///
-    /// Pop two values from the stack, subtract on with the other, and push the result.
+    /// Pop two values from the tmp_stack, subtract on with the other, and push the result.
     Subtract => "SUBTRACT",
     /// Multiplication (`*`)
     ///
-    /// Pop two values from the stack, multiply them and push the result.
+    /// Pop two values from the tmp_stack, multiply them and push the result.
     Multiply => "MULTIPLY",
     /// Division (`/`)
     ///
-    /// Pop two values from the stack, divide of with the other, and push the result.
+    /// Pop two values from the tmp_stack, divide of with the other, and push the result.
     Divide => "DIVIDE",
     /// Modulo (`%`)
     ///
-    /// Pop two values from the stack, take one modulo the other,and push the result.
+    /// Pop two values from the tmp_stack, take one modulo the other,and push the result.
     Modulo => "MODULO",
     /// Power (`^`)
     ///
-    /// Pop two values from the stack, take one to the power of the other, and push the
+    /// Pop two values from the tmp_stack, take one to the power of the other, and push the
     /// result.
     Pow => "POW",
     /// `or`
     ///
-    /// Pop two values from the stack, 'or' them, and push the result.
+    /// Pop two values from the tmp_stack, 'or' them, and push the result.
     Or => "OR",
     /// `and`
     ///
-    /// Pop two values from the stack, 'and' them, and push the result.
+    /// Pop two values from the tmp_stack, 'and' them, and push the result.
     And => "AND",
     /// `xor`
     ///
-    /// Pop two values from the stack, 'xor' them, and push the result.
+    /// Pop two values from the tmp_stack, 'xor' them, and push the result.
     Xor => "XOR",
     /// Negation (-)
     ///
-    /// Pop one value from the stack, negate it, and push it back.
+    /// Pop one value from the tmp_stack, negate it, and push it back.
     Negative => "NEG",
     /// Logical negation (not)
     ///
-    /// Pop one value from the stack, negate it logically, and push it back.
+    /// Pop one value from the tmp_stack, negate it logically, and push it back.
     Not => "NOT",
-    /// Push `nil` on the stack.
+    /// Push `nil` on the tmp_stack.
     PushNil => "PUSH_NIL",
-    /// Push `true` on the stack.
+    /// Push `true` on the tmp_stack.
     PushTrue => "PUSH_TRUE",
-    /// Push `false` on the stack.
+    /// Push `false` on the tmp_stack.
     PushFalse => "PUSH_FALSE",
     /// Read a table element
     ///
-    /// The key is at the top of the stack, and the table right behind it.
+    /// The key is at the top of the tmp_stack, and the table right behind it.
     ReadTable => "READ_TABLE",
     /// Write a table element
     ///
-    /// The element to write is at the top of the stack, then the key, and then
-    /// the table.
+    /// The element to write is at the top of the tmp_stack, then the key, and
+    /// then the table.
     WriteTable => "WRITE_TABLE",
     ---
-    /// Push a function on the stack.
+    /// Push a function on the tmp_stack.
     ///
-    /// The function is designated by its index in the `functions` field of the chunk.
+    /// The function is designated by its index in the `functions` field of the
+    /// chunk.
     ReadFunction(Op) => "READ_FUNCTION",
-    /// Push a constant on the stack.
+    /// Push a constant on the tmp_stack.
     ///
-    /// The constant is designated by its index in the `constants` field of the chunk.
+    /// The constant is designated by its index in the `constants` field of the
+    /// chunk.
     ReadConstant(Op) => "READ_CONSTANT",
-    /// Push a global on the stack.
+    /// Push a global on the tmp_stack.
     ///
-    /// The global's name is designated by its index in the `globals` field of the chunk.
+    /// The global's name is designated by its index in the `globals` field of
+    /// the chunk.
     ReadGlobal(Op) => "READ_GLOBAL",
     /// Write a global variable.
     ///
-    /// Pop the variable at the top of the stack, and write it at the global name, designated by its
-    /// index in the `globals` field of the chunk.
+    /// Pop the variable at the top of the tmp_stack, and write it at the global
+    /// name, designated by its index in the `globals` field of the chunk.
     WriteGlobal(Op) => "WRITE_GLOBAL",
-    /// Push a local on the stack.
+    /// Push a local on the tmp_stack.
     ///
     /// The local is designated by its index in the stack.
     ReadLocal(Op) => "READ_LOCAL",
     /// Write a local variable.
     ///
-    /// Pop the variable at the top of the stack, and write it at the given index in the stack.
+    /// Pop the variable at the top of the tmp_stack, and write it at the given
+    /// index in the stack.
     WriteLocal(Op) => "WRITE_LOCAL",
     ReadCaptured(Op) => "READ_CAPTURED",
     WriteCaptured(Op) => "WRITE_CAPTURED",
-    /// Pop the indicated number of values from the stack.
+    /// Pop the indicated number of values from the tmp_stack.
     Pop(Op) => "POP",
     /// Raw jump
     ///
-    /// Jump the specified offst in the instructions vector.
+    /// Jump the specified offset in the instructions vector.
     Jump(Op) => "JUMP",
     /// Conditional jump
     ///
-    /// Jump the specified offset in the instructions vector if `true` is at the top of the stack.
+    /// Jump the specified offset in the instructions vector if `true` is at the
+    /// top of the tmp_stack.
     JumpTrue(Op) => "JUMP_TRUE",
     /// Conditional jump
     ///
-    /// Jump the specified offset in the instructions vector if `false` is at the top of the stack.
+    /// Jump the specified offset in the instructions vector if `false` is at
+    /// the top of the tmp_stack.
     JumpFalse(Op) => "JUMP_FALSE",
     /// Conditional jump
     ///
-    /// Jump the specified offset in the instructions vector if `true` is at the top of the stack, and pops the top of the stack.
+    /// Pop the top of the tmp_stack, and jump the specified offset in the
+    /// instructions vector if it is `true`.
     JumpPopTrue(Op) => "JUMP_POP_TRUE",
     /// Conditional jump
     ///
-    /// Jump the specified offset in the instructions vector if `false` is at the top of the stack, and pops the top of the stack.
+    /// Pop the top of the tmp_stack, and jump the specified offset in the
+    /// instructions vector if it is `false`.
     JumpPopFalse(Op) => "JUMP_POP_FALSE",
     /// Raw back Jump
     ///
@@ -268,19 +276,20 @@ instructions! {
     JumpBack(Op) => "JUMP_BACK",
     /// Call a function.
     ///
-    /// This interprets the top of the stack as the function, and the `operand` following values
-    /// as the arguments.
+    /// This interprets the top of the tmp_stack as the function, and the
+    /// `operand` following values as the arguments.
     Call(Op) => "CALL",
-    /// Creates a new table.
+    /// Creates a new table and pushes it on the tmp_stack.
     ///
-    /// This will use 2*Op elements of the stack to make this table (pair by pair).
+    /// This will use 2*Op elements of the tmp_stack to make this table (pair by
+    /// pair).
     MakeTable(Op) => "MAKE_TABLE",
-    /// Duplicate the first `Op+1` elements of the stack.
+    /// Duplicate the first `Op+1` elements of the tmp_stack.
     DuplicateTop(Op) => "DUPLICATE_TOP",
     /// Argument extension
     ///
-    /// Allow for instructions with u16 / u24 / u32 operands : this always precede the concerned
-    /// instruction.
+    /// Allow for instructions with u16 / u24 / u32 operands : this always
+    /// precede the concerned instruction.
     Extended(Op) => "EXTENDED",
 }
 
@@ -322,7 +331,7 @@ impl fmt::Display for Constant {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Chunk {
     /// Name of this chunk
     pub name: String,

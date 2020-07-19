@@ -1,4 +1,7 @@
-use nox2::{parser::ParserError, vm::VM, Continue};
+use nox2::{
+    vm::{VMError, VM},
+    Continue,
+};
 use rustyline::{error::ReadlineError, Editor};
 use std::io::{self, Write};
 
@@ -19,9 +22,9 @@ impl Repl {
         }
     }
 
-    fn evaluate(&mut self) -> Result<(), Vec<ParserError>> {
+    fn evaluate(&mut self) -> Result<(), VMError> {
         self.vm.parse_top_level(self.current_phrase.as_str())?;
-        //self.vm.run()?;
+        println!("=> {}", self.vm.run()?);
         Ok(())
     }
 
@@ -44,23 +47,17 @@ impl Repl {
                 std::mem::swap(&mut new_phrase, &mut self.current_phrase);
                 self.editor.add_history_entry(new_phrase);
             }
-            Err(err) => {
-                let first_err = err.first().unwrap();
-                match first_err.continuable {
-                    Continue::Stop => {
-                        for err in err {
-                            println!("{}\n", err)
-                        }
-                        let mut new_phrase = String::new();
-                        std::mem::swap(&mut new_phrase, &mut self.current_phrase);
-                        self.editor.add_history_entry(new_phrase);
-                    }
-                    Continue::ContinueWithNewline => self.current_phrase.push('\n'),
-
-                    Continue::ContinueWithSpace => self.current_phrase.push(' '),
-                    Continue::Continue => {}
+            Err(err) => match err.continuable() {
+                Continue::Stop => {
+                    println!("{}\n", err);
+                    let mut new_phrase = String::new();
+                    std::mem::swap(&mut new_phrase, &mut self.current_phrase);
+                    self.editor.add_history_entry(new_phrase);
                 }
-            }
+                Continue::ContinueWithNewline => self.current_phrase.push('\n'),
+                Continue::ContinueWithSpace => self.current_phrase.push(' '),
+                Continue::Continue => {}
+            },
         }
         true
     }
