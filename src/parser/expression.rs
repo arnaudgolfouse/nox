@@ -251,7 +251,7 @@ fn parse_call_internal<'a, P: ExpressionParser<'a>>(
         } else {
             return Err(parser.emit_error(
                 ParserErrorKind::ExpectExpression,
-                Continue::ContinueWithNewline,
+                Continue::Continue,
                 Range::new(parser.current_position(), parser.current_position()),
             ));
         }
@@ -271,7 +271,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                 self.emit_instruction_u8(Instruction::PushNil);
             }
             constant => {
-                let index = self.code.add_constant(constant);
+                let index = self.code().add_constant(constant);
                 self.emit_instruction(Instruction::ReadConstant(index));
             }
         }
@@ -301,7 +301,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
 
         match self.find_variable(&variable) {
             VariableLocation::Undefined => {
-                let index = self.code.add_string(variable);
+                let index = self.code().add_string(variable);
                 self.emit_instruction(Instruction::ReadGlobal(index))
             }
             VariableLocation::Local(index) => {
@@ -312,13 +312,6 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
             }
             VariableLocation::Captured(index) => {
                 self.emit_instruction(Instruction::ReadCaptured(index as u32))
-            }
-            VariableLocation::OtherFunc(func_index, var_index) => {
-                if let Some(func) = self.function_stack.last_mut() {
-                    let index = func.captures.len() as u32;
-                    func.captures.push((func_index, var_index));
-                    self.emit_instruction(Instruction::ReadCaptured(index as u32))
-                }
             }
         }
 
@@ -354,8 +347,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                 Range::new(self.current_position(), self.current_position()),
             ));
         }
-        let mut function = self.parse_prototype(String::from("<closure>"), true)?;
-        std::mem::swap(&mut self.code, &mut function.code);
+        let function = self.parse_prototype(String::from("<closure>"), true)?;
         self.function_stack.push(function);
         loop {
             match self.parse_statements()? {
@@ -378,9 +370,9 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         self.parse_precedence(Precedence::Unary, token, true)?;
         match operator {
             Operation::Minus => self
-                .code
+                .code()
                 .emit_instruction_u8(Instruction::Negative, op_line),
-            Operation::Not => self.code.emit_instruction_u8(Instruction::Not, op_line),
+            Operation::Not => self.code().emit_instruction_u8(Instruction::Not, op_line),
             _ => {} // technically unreacheable ? meh
         }
         Ok(())
@@ -395,7 +387,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                     TokenKind::RBrace => break,
                     TokenKind::Id(member) => {
                         elem_num += 1;
-                        let member_index = self.code.add_constant(Constant::String(member));
+                        let member_index = self.code().add_constant(Constant::String(member));
                         self.emit_instruction(Instruction::ReadConstant(member_index));
                         let token = self.next()?;
                         match token {
@@ -403,7 +395,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                                 kind: TokenKind::Assign(Assign::Equal),
                                 ..
                             }) => {}
-                            _ => return self.expected_token(TokenKind::Assign(Assign::Equal)),
+                            _ => return Err(self.expected_token(TokenKind::Assign(Assign::Equal))),
                         }
 
                         let token = self.next()?;
@@ -425,7 +417,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                                     token.range,
                                 ))
                             }
-                            None => return self.expected_token(TokenKind::RBrace),
+                            None => return Err(self.expected_token(TokenKind::RBrace)),
                         }
                     }
                     _ => {
@@ -437,7 +429,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                     }
                 }
             } else {
-                return self.expected_token(TokenKind::RBrace);
+                return Err(self.expected_token(TokenKind::RBrace));
             }
         }
         self.emit_instruction(Instruction::MakeTable(elem_num));
@@ -447,7 +439,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
     fn parse_binary(&mut self, operator: Operation, range: Range) -> Result<(), ParserError<'a>> {
         let line = range.start.line;
 
-        self.code.emit_instruction_u8(
+        self.code().emit_instruction_u8(
             match operator {
                 Operation::Plus => Instruction::Add,
                 Operation::Minus => Instruction::Subtract,
@@ -513,7 +505,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                 }
             }
             _ => {
-                self.code
+                self.code()
                     .emit_instruction_u8(Instruction::ReadTable, range.start.line);
                 Ok(ExpressionType::TableRead)
             }
@@ -524,8 +516,8 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         let range = if let Some(token) = self.next()? {
             match token.kind {
                 TokenKind::Id(member) => {
-                    let member_index = self.code.add_constant(Constant::String(member));
-                    self.code.emit_instruction(
+                    let member_index = self.code().add_constant(Constant::String(member));
+                    self.code().emit_instruction(
                         Instruction::ReadConstant(member_index),
                         token.range.start.line,
                     );
@@ -565,7 +557,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                 }
             }
             _ => {
-                self.code
+                self.code()
                     .emit_instruction_u8(Instruction::ReadTable, range.start.line);
                 Ok(ExpressionType::TableRead)
             }

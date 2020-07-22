@@ -1,9 +1,10 @@
+use super::LocalOrCaptured;
 use crate::lexer::TokenKind;
-use std::{convert::TryFrom, fmt, mem::size_of};
+use std::{convert::TryFrom, fmt, mem::size_of, sync::Arc};
 
 /// Helper trait : this should not be derived by any actual type other than u8, u16, usize... (which is already done in this library).
 #[doc(hidden)]
-pub trait Operand: Sized + Default + Copy + std::convert::Into<u64> {
+pub trait Operand: fmt::Display + Sized + Default + Copy + std::convert::Into<u64> {
     /// data for the `Extended` instructions. In theory, this is `[Option<u8>; n]`.
     type Extended;
     /// Return the operand and the slice of (eventual) extended operands.
@@ -64,7 +65,7 @@ macro_rules! instructions {
 /// This structure is generic over the argument type to facilitate parsing
 /// (where instructions can have up to u32 operands). Only the `u8` variant will
 /// effectively be used at the end.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum Instruction<Op: Operand> {
     $(
@@ -77,15 +78,30 @@ pub enum Instruction<Op: Operand> {
     )*
 }
 
-impl<Op: Operand> Instruction<Op> {
-    pub fn operand(self) -> Option<Op> {
-        use Instruction::*;
+impl<Op: Operand> fmt::Debug for Instruction<Op> {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             $(
-                $code1 => None,
+                Instruction::$code1 => formatter.write_str(stringify!($code1)),
             )*
             $(
-                $code2(operand) => Some(operand),
+                Instruction::$code2(operand) => {
+                    write!(formatter, stringify!($code2))?;
+                    write!(formatter, "({})", operand)
+                }
+            )*
+        }
+    }
+}
+
+impl<Op: Operand> Instruction<Op> {
+    pub fn operand(self) -> Option<Op> {
+        match self {
+            $(
+                Instruction::$code1 => None,
+            )*
+            $(
+                Instruction::$code2(operand) => Some(operand),
             )*
         }
     }
@@ -106,14 +122,13 @@ impl<Op: Operand> Instruction<Op> {
     pub fn into_u8(self) -> (Instruction<u8>, Op::Extended) {
         let (operand, extended) = self.operand().unwrap_or_default().extended();
 
-        use Instruction::*;
         (
             match self {
                 $(
-                    $code1 => $code1,
+                    Instruction::$code1 => Instruction::$code1,
                 )*
                 $(
-                    $code2(_) => $code2(operand),
+                    Instruction::$code2(_) => Instruction::$code2(operand),
                 )*
             },
             extended,
@@ -263,21 +278,42 @@ instructions! {
     /// Conditional jump
     ///
     /// Pop the top of the tmp_stack, and jump the specified offset in the
-    /// instructions vector if it is `true`.
-    JumpPopTrue(Op) => "JUMP_POP_TRUE",
-    /// Conditional jump
-    ///
-    /// Pop the top of the tmp_stack, and jump the specified offset in the
     /// instructions vector if it is `false`.
     JumpPopFalse(Op) => "JUMP_POP_FALSE",
-    /// Raw back Jump
+    /// Conditional jump
     ///
-    /// Jump backward the specified offset in the instructions vector.
-    JumpBack(Op) => "JUMP_BACK",
+    /// Pop the top of the tmp_stack, and if it is `false`, jump the specified
+    /// offset in the instructions vector and pop an element of `loop_addresses`.
+    JumpEndWhile(Op) => "JUMP_END_WHILE",
+    /// Conditional jump
+    ///
+    /// Pop the top of the tmp_stack, and if it is `nil`, jump the specified
+    /// offset in the instructions vector, pop an element of `loop_addresses`
+    ///, pop the top of the tmp_stack (the function), and 'clear' (unroots) the
+    /// loop variable.
+    JumpEndFor(Op) => "JUMP_END_FOR",
+    /// Break for the closest enclosing loop.
+    ///
+    /// If `Op == 0`, this is a `while` loop, else this is a `for` loop.
+    ///
+    /// No changes to the stack : This will use the stored loop address.
+    Break(Op) => "BREAK",
+    /// Break for the closest enclosing loop.
+    ///
+    /// If `Op == 0`, this is a `while` loop, else this is a `for` loop.
+    ///
+    /// No changes to the stack : This will use the stored loop address.
+    Continue(Op) => "CONTINUE",
+    /// Prepare for a `while` or `for` loop by storing addresses.
+    ///
+    /// The operand is an offset to the position of the jump.
+    ///
+    /// The current address will be stored, as well as the address of the jump.
+    PrepareLoop(Op) => "PREPARE_LOOP",
     /// Call a function.
     ///
-    /// This interprets the top of the tmp_stack as the function, and the
-    /// `operand` following values as the arguments.
+    /// This interprets the `operand` first values of the tmp_stack as the
+    /// arguments, and the following value as the function.
     Call(Op) => "CALL",
     /// Creates a new table and pushes it on the tmp_stack.
     ///
@@ -336,17 +372,21 @@ pub struct Chunk {
     /// Name of this chunk
     pub name: String,
     /// Vector of line information for the instructions
-    pub lines: Vec<(u32, u32)>,
+    pub(crate) lines: Vec<(u32, u32)>,
     /// bytecode instructions
-    pub code: Vec<Instruction<u8>>,
+    pub(crate) code: Vec<Instruction<u8>>,
+    /// Number of arguments for this function (0 is top-level)
+    pub(crate) arg_number: u32,
     /// Constants associated with the chunk
-    pub constants: Vec<Constant>,
+    pub(crate) constants: Vec<Constant>,
     /// Global names associated with the chunk
-    pub strings: Vec<String>,
+    pub(crate) globals: Vec<String>,
     /// Number of locals needed when loading the function
-    pub locals_number: u16,
+    pub(crate) locals_number: u32,
+    /// Captured variables from this function's parent.
+    pub(crate) captures: Vec<LocalOrCaptured>,
     /// functions inside this chunk
-    pub functions: Vec<Chunk>,
+    pub(crate) functions: Vec<Arc<Chunk>>,
 }
 
 impl Chunk {
@@ -355,12 +395,15 @@ impl Chunk {
             name,
             lines: Vec::new(),
             code: Vec::new(),
+            arg_number: 0,
             constants: Vec::new(),
-            strings: Vec::new(),
+            globals: Vec::new(),
             locals_number: 0,
+            captures: Vec::new(),
             functions: Vec::new(),
         }
     }
+
     /// Emit the new instruction.
     ///
     /// Multiple `u8` instructions will actually be emmited if the operand is bigger than `u8::MAX`.
@@ -404,7 +447,7 @@ impl Chunk {
     /// Add a string to the Chunk, and return it's index for future reference.
     pub fn add_string(&mut self, global: String) -> u32 {
         if let Some((index, _)) = self
-            .strings
+            .globals
             .iter()
             .enumerate()
             .find(|(_, glob)| **glob == global)
@@ -412,11 +455,12 @@ impl Chunk {
             return index as u32;
         }
 
-        self.strings.push(global);
-        self.strings.len() as u32 - 1
+        self.globals.push(global);
+        self.globals.len() as u32 - 1
     }
 
-    /// push an instruction (presumed to be a JUMP), and return its index in the bytecode for future modification
+    /// push an `Jump(0)` instruction, and returns its index in the bytecode for
+    /// future modification
     pub fn push_jump(&mut self) -> usize {
         self.code.push(Instruction::Jump(0));
         self.code.len() - 1
@@ -424,7 +468,9 @@ impl Chunk {
 
     /// Write the (now known) operand at the given index.
     ///
-    /// This function can be quite inneficient, as operands bigger than `u8::MAX` will shift the entire code to make room for extended instructions.
+    /// This function can be quite inneficient, as operands bigger than
+    /// `u8::MAX` will shift a lot of code to make room for extended
+    /// instructions.
     pub fn write_jump(&mut self, mut address: usize, instruction: Instruction<u64>) {
         // wow there cowboy !
         let initial_instruction = &mut self.code[address];
@@ -454,7 +500,7 @@ impl Chunk {
                 format!("{}", self.constants[operand.unwrap_or_default() as usize])
             }
             Instruction::ReadGlobal(_) | Instruction::WriteGlobal(_) => {
-                self.strings[operand.unwrap_or_default() as usize].clone()
+                self.globals[operand.unwrap_or_default() as usize].clone()
             }
             Instruction::ReadFunction(_) => self.functions[operand.unwrap_or_default() as usize]
                 .name
@@ -469,6 +515,19 @@ impl Chunk {
 
         write!(formatter, "{:<10} {}", operand, operand_value)
     }
+
+    /// Get the line for the instruction at `index`, or the last line.
+    pub(crate) fn get_line(&self, index: usize) -> usize {
+        let mut line_index = 0;
+        for (line, nb) in self.lines.iter().copied() {
+            if line_index + nb as usize >= index {
+                return line as usize;
+            }
+            line_index += nb as usize;
+        }
+
+        self.lines.last().map(|(line, _)| *line).unwrap_or(0) as usize
+    }
 }
 
 impl fmt::Display for Chunk {
@@ -482,7 +541,7 @@ impl fmt::Display for Chunk {
             write!(formatter, "{}", last)?
         }
         writeln!(formatter, "]")?;
-        writeln!(formatter, " - strings : {:?}", self.strings)?;
+        writeln!(formatter, " - globals : {:?}", self.globals)?;
         write!(formatter, " - functions : [")?;
         for function in &self.functions[..self.functions.len().saturating_sub(1)] {
             write!(formatter, "{}, ", function.name)?
@@ -539,33 +598,6 @@ impl fmt::Display for Chunk {
     }
 }
 
-/// Compute the right operand for two interleaving JUMP instruction, accounting
-/// for the extended arguments.
-pub(super) fn right_jump_operands(offset_1: &mut u64, offset_2: &mut u64) {
-    let (mut offset_1_limit, mut offset_2_limit, mut changed_1, mut changed_2) =
-        (u8::MAX as u64, u8::MAX as u64, true, true);
-    while changed_1 || changed_2 {
-        changed_1 = false;
-        changed_2 = false;
-        if *offset_1 > offset_1_limit {
-            *offset_2 += 1;
-            changed_2 = true;
-            if offset_1_limit != u64::MAX {
-                offset_1_limit = (offset_1_limit << 8) | 0xff;
-            }
-        }
-        if *offset_2 > offset_2_limit {
-            *offset_1 += 1;
-            *offset_2 += 1;
-            changed_1 = true;
-            changed_2 = true;
-            if offset_2_limit != u64::MAX {
-                offset_2_limit = (offset_1_limit << 8) | 0xff;
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,28 +621,5 @@ mod tests {
                 ]
             )
         );
-    }
-
-    #[test]
-    fn right_jump_operands_test() {
-        let (mut offset_1, mut offset_2) = (4, 6);
-        right_jump_operands(&mut offset_1, &mut offset_2);
-        assert_eq!(offset_1, 4);
-        assert_eq!(offset_2, 6);
-
-        let (mut offset_1, mut offset_2) = (255, 256);
-        right_jump_operands(&mut offset_1, &mut offset_2);
-        assert_eq!(offset_1, 256);
-        assert_eq!(offset_2, 258);
-
-        let (mut offset_1, mut offset_2) = ((1 << 8) - 1, (1 << 16) - 2);
-        right_jump_operands(&mut offset_1, &mut offset_2);
-        assert_eq!(offset_1, (1 << 8) + 1);
-        assert_eq!(offset_2, (1 << 16) + 1);
-
-        let (mut offset_1, mut offset_2) = ((1 << 16) - 1, (1 << 8) - 1);
-        right_jump_operands(&mut offset_1, &mut offset_2);
-        assert_eq!(offset_1, (1 << 16));
-        assert_eq!(offset_2, (1 << 8) + 2);
     }
 }
