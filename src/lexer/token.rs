@@ -29,6 +29,8 @@ pub enum Operation {
     Divide,
     /// `%`
     Modulo,
+    /// `^`
+    Pow,
     /// `or`
     Or,
     /// `and`
@@ -71,6 +73,7 @@ impl Display for Operation {
             Operation::Multiply => formatter.write_char('*'),
             Operation::Divide => formatter.write_char('/'),
             Operation::Modulo => formatter.write_char('%'),
+            Operation::Pow => formatter.write_char('^'),
             Operation::And => formatter.write_str("and"),
             Operation::Or => formatter.write_str("or"),
             Operation::Xor => formatter.write_str("xor"),
@@ -96,7 +99,109 @@ pub enum Assign {
     Modulo,
 }
 
+macro_rules! keywords {
+    (
+        $(#[$doc:meta])*
+        pub enum $K:ident {
+            $(
+                $(#[$keyword_doc:meta])*
+                $keyword:ident => $name:literal,
+            )*
+        }
+    ) => {
+$(#[$doc])*
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum $K {
+    $(
+        $(#[$keyword_doc])*
+        $keyword,
+    )*
+}
+
+impl Display for $K {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            $(
+                Self::$keyword => formatter.write_str($name),
+            )*
+        }
+    }
+}
+
+impl convert::TryFrom<&str> for $K {
+    type Error = ();
+    fn try_from(word: &str) -> Result<Self, <Self as convert::TryFrom<&str>>::Error> {
+        match word {
+            $(
+                $name => Ok(Self::$keyword),
+            )*
+            _ => Err(()),
+        }
+    }
+}
+    };
+}
+
+keywords! {
 /// Keywords of the language
+///
+/// # Remark
+///
+/// `and`, `or`, `xor` and `not`, while technically keywords, are found under the
+/// [Operation](enum.Operation.html) enum.
+pub enum Keyword {
+    /// `fn`
+    Fn => "fn",
+    /// `global`
+    Global => "global",
+    /// `if`
+    If => "if",
+    /// `then`
+    Then => "then",
+    /// `else`
+    Else => "else",
+    /// `for`
+    ///
+    /// Start a `for` loop
+    For => "for",
+    /// `in`
+    In => "in",
+    /// `while`
+    ///
+    /// Start a `while` loop
+    While => "while",
+    /// `end`
+    ///
+    /// End the current `fn`, `if`, `else`, `while`, or `for` block.
+    End => "end",
+    /// `break`
+    ///
+    /// Break out of the current loop
+    Break => "break",
+    /// `continue`
+    ///
+    /// Skip to the next iteration of the current loop
+    Continue => "continue",
+    /// `return`
+    ///
+    /// Return from the currently executing code
+    Return => "return",
+    /// `true`
+    ///
+    /// Boolean constant `true`
+    True => "true",
+    /// `false`
+    ///
+    /// Boolean constant `false`
+    False => "false",
+    /// `nil`
+    ///
+    /// Constant `nil`
+    Nil => "nil",
+}
+}
+
+/*/// Keywords of the language
 ///
 /// # Remark
 ///
@@ -106,6 +211,8 @@ pub enum Assign {
 pub enum Keyword {
     /// `fn`
     Fn,
+    /// `global`
+    Global,
     /// `if`
     If,
     /// `then`
@@ -176,7 +283,7 @@ impl convert::TryFrom<&str> for Keyword {
             _ => Err(()),
         }
     }
-}
+}*/
 
 /// Kind of token encountered. This can be an operator, a keyword, a variable
 /// name...

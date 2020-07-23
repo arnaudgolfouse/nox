@@ -9,12 +9,8 @@ use std::{
 /// Describe what should the REPL do with this error.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Continue {
-    /// Continue as if we were on the same line
-    Continue,
     /// Continue on a new line
-    ContinueWithNewline,
-    /// Continue with a space character
-    ContinueWithSpace,
+    Continue,
     /// Hard error, stop
     Stop,
 }
@@ -34,15 +30,14 @@ fn int_width(i: u32) -> usize {
 ///
 /// # Example
 ///
-/// ```should_fail
-/// # use nox2::{Error, lexer::Lexer};
+/// ```compile_fail
 /// let mut lexer = Lexer::top_level("1.0.2"); // malformed number
 /// lexer.next().unwrap();
 /// ```
 ///
 /// Will output :
 /// ```text
-/// top-level: 1:3
+/// top-level: 1:4
 /// 1 | 1.0.2
 ///        ^
 ///
@@ -187,7 +182,7 @@ fn display_error_internal(
         "{}: {}:{}",
         source.name(),
         range.start.line + 1,
-        range.start.column
+        range.start.column + 1
     )?;
 
     let multiline = range.start.line < range.end.line;

@@ -22,20 +22,19 @@ impl GCHeader {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum CollectableObject {
     Table(HashMap<Value, Value>),
     Captured(Value),
     Function {
         chunk: Arc<Chunk>,
-        args_nb: u8,
         captured_variables: Vec<Value>,
     },
 }
 
 impl Eq for CollectableObject {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Collectable {
     pub header: GCHeader,
     pub object: CollectableObject,
@@ -61,14 +60,12 @@ impl Collectable {
     fn new_function(
         next: Option<NonNull<Collectable>>,
         chunk: Arc<Chunk>,
-        args_nb: u8,
         captured_variables: Vec<Value>,
     ) -> Self {
         Self {
             header: GCHeader::new(next),
             object: CollectableObject::Function {
                 chunk,
-                args_nb,
                 captured_variables,
             },
         }
@@ -143,11 +140,17 @@ impl Collectable {
 
 const INITIAL_THRESHOLD: usize = 10000;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GC {
     allocated: usize,
     threshold: usize,
     first: Option<NonNull<Collectable>>,
+}
+
+impl Default for GC {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GC {
@@ -160,6 +163,7 @@ impl GC {
         }
     }
 
+    /// Drop a value, and updates the amount of allocated memory.
     fn drop_value(&mut self, value: &mut Collectable) {
         self.allocated -= value.size();
         unsafe { std::ptr::drop_in_place(value as *mut _) };
@@ -215,7 +219,7 @@ impl GC {
                     let mut new_table = self.new_table();
                     if let Some(new_table) = new_table.as_table_mut() {
                         for (key, value) in table {
-                            self.add_table_element(new_table, key.clone(), value.clone());
+                            self.add_table_element(new_table, key.duplicate(), value.duplicate());
                         }
                     }
                     new_table
@@ -223,25 +227,19 @@ impl GC {
                 CollectableObject::Function {
                     captured_variables,
                     chunk,
-                    args_nb,
-                } => self.new_function(chunk.clone(), *args_nb, captured_variables.clone()),
-                CollectableObject::Captured(value) => self.new_captured(value.clone()),
+                } => self.new_function(chunk.clone(), Value::duplicate_vec(captured_variables)),
+                CollectableObject::Captured(value) => self.new_captured(value.duplicate()),
             },
-            _ => value.clone(),
+            _ => value.duplicate(),
         }
     }
 
     /// Creates a new garbage collected function.
     ///
     /// This function will be rooted
-    pub fn new_function(
-        &mut self,
-        chunk: Arc<Chunk>,
-        args_nb: u8,
-        mut captured_variables: Vec<Value>,
-    ) -> Value {
+    pub fn new_function(&mut self, chunk: Arc<Chunk>, mut captured_variables: Vec<Value>) -> Value {
         captured_variables.shrink_to_fit();
-        let mut collectable = Collectable::new_function(None, chunk, args_nb, captured_variables);
+        let mut collectable = Collectable::new_function(None, chunk, captured_variables);
         let additional = collectable.size();
         self.check(additional);
         collectable.header.next = self.first.take();
@@ -291,7 +289,9 @@ impl GC {
         Value::Collectable(ptr)
     }
 
-    // returns 'table' in case of failure
+    /// Add a `(key, value)` pair to the `table`.
+    ///
+    /// Updates the allocated memory of the GC.
     pub fn add_table_element(
         &mut self,
         table: &mut HashMap<Value, Value>,
@@ -305,20 +305,19 @@ impl GC {
         self.allocated += additional;
     }
 
-    pub fn remove_table_element(&mut self, table: &mut Value, key: Value) -> Result<(), Value> {
-        match table.as_table_mut() {
-            None => Err(table.clone()),
-            Some(table) => {
-                let old_capacity = table.capacity() * size_of::<(Value, Value)>();
-                table.remove(&key);
-                let new_capacity = table.capacity() * size_of::<(Value, Value)>();
-                self.allocated -= old_capacity - new_capacity;
-                Ok(())
-            }
-        }
+    /// Removes an element from the table, and updates the amount of allocated
+    /// memory.
+    pub fn remove_table_element(&mut self, table: &mut HashMap<Value, Value>, key: &Value) {
+        let old_capacity = table.capacity() * size_of::<(Value, Value)>();
+        table.remove(key);
+        let new_capacity = table.capacity() * size_of::<(Value, Value)>();
+        self.allocated -= old_capacity - new_capacity;
     }
 
-    pub fn unmark_all(&mut self) {
+    /// Unmark all values.
+    ///
+    /// This prepares the GC for a collection
+    fn unmark_all(&mut self) {
         let mut to_unmark = self.first;
 
         while let Some(mut value) = to_unmark {
@@ -327,7 +326,10 @@ impl GC {
         }
     }
 
-    pub fn mark(&mut self) {
+    /// Mark the rooted variables, and the variables they lead to.
+    ///
+    /// This is the heart of the mark-and-sweep algorithm.
+    fn mark(&mut self) {
         let mut to_mark = Vec::new();
         let mut next = self.first;
         while let Some(current_ptr) = next {
@@ -350,7 +352,8 @@ impl GC {
         }
     }
 
-    pub fn sweep(&mut self) {
+    /// Delete all unmarked values.
+    fn sweep(&mut self) {
         while let Some(mut value) = self.first {
             let value = unsafe { value.as_mut() };
             if value.header.marked {
@@ -376,14 +379,19 @@ impl GC {
         }
     }
 
+    /// Run a mark-and-sweep algorithm to free unused memory.
     pub fn mark_and_sweep(&mut self) {
         self.unmark_all();
         self.mark();
         self.sweep();
     }
 
+    /// Delete **all** values associated with this GC.
+    ///
     /// # Safety
-    /// this is incredibely unsafe, as any pointer to a gc value becomes invalid. Only use if you ABSOLUTELY need it !
+    ///
+    /// This is **incredibly** unsafe, as any pointer to a gc value becomes
+    /// invalid. Only use if you ABSOLUTELY need it !
     pub unsafe fn force_empty(&mut self) {
         while let Some(mut ptr) = self.first {
             let value = ptr.as_mut();
@@ -391,26 +399,25 @@ impl GC {
             self.drop_value(value);
         }
     }
+}
 
-    pub fn print_all_allocated(&self) {
+impl fmt::Display for GC {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let mut ptr = self.first;
         let mut i = 0;
         while let Some(to_print_ptr) = ptr {
             let to_print = unsafe { to_print_ptr.as_ref() };
-            println!(" {} - at {:?} - {:?}", i, to_print_ptr, to_print);
+            writeln!(formatter, " {} - at {:?} - {}", i, to_print_ptr, to_print)?;
             i += 1;
             ptr = to_print.header.next;
         }
+        Ok(())
     }
 }
 
 impl Drop for GC {
     fn drop(&mut self) {
-        while let Some(mut ptr) = self.first {
-            let value = unsafe { ptr.as_mut() };
-            self.first = value.header.next.take();
-            self.drop_value(value);
-        }
+        unsafe { self.force_empty() }
         #[cfg(debug)]
         assert_eq!(self.allocated, 0)
     }

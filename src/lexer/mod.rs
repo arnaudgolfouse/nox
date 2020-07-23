@@ -173,6 +173,7 @@ impl<'a> Lexer<'a> {
                 }
                 _ => TokenKind::Exclamation,
             },
+            '^' => TokenKind::Op(Operation::Pow),
             c => return Err(self.emit_error(LexerErrorKind::UnknownCharacter(c), Continue::Stop)),
         };
 
@@ -305,7 +306,7 @@ impl<'a> Lexer<'a> {
                 None => {
                     return Err(self.emit_error(
                         LexerErrorKind::IncompleteString(matching_character),
-                        Continue::ContinueWithNewline,
+                        Continue::Continue,
                     ))
                 }
                 Some(c) => c,

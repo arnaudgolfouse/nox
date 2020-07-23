@@ -49,14 +49,12 @@ impl Repl {
             }
             Err(err) => match err.continuable() {
                 Continue::Stop => {
-                    println!("{}\n", err);
+                    println!("{}", err);
                     let mut new_phrase = String::new();
                     std::mem::swap(&mut new_phrase, &mut self.current_phrase);
                     self.editor.add_history_entry(new_phrase);
                 }
-                Continue::ContinueWithNewline => self.current_phrase.push('\n'),
-                Continue::ContinueWithSpace => self.current_phrase.push(' '),
-                Continue::Continue => {}
+                Continue::Continue => self.current_phrase.push('\n'),
             },
         }
         true

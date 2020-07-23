@@ -1,20 +1,31 @@
-use nox2::{parser::Parser, Source};
+use nox2::vm::{Value, VM};
 
 fn main() {
-    let parser = Parser::new(Source::TopLevel(
-        r#"
-    # comment !
+    let mut vm = VM::new();
+    vm.parse_top_level(
+        "
     fn f()
-        return 5
+        x = 5
+        fn g(a)
+            x += a
+            return x
+        end
+        return g
     end
-    return (3 != -4.6) * not do43do(8.2, "9") + "fn + 5" / "z"(héllœ.bye, (5+4)(8).b[c + 8]) == 5"#,
-    ));
-    match parser.parse_top_level() {
-        Ok(chunk) => println!("{}", chunk),
-        Err(err) => {
-            for err in err {
-                println!("{}", err)
-            }
-        }
+
+    f = f()
+    f(1)
+
+    x = f(-60.5)
+
+    return x
+    ",
+    )
+    .unwrap();
+
+    match vm.run() {
+        Ok(value) => assert_eq!(value, Value::Float(-54.5)),
+        Err(err) => panic!("{}", err),
     }
+    println!("[OK]")
 }
