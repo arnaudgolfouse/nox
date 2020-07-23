@@ -1,6 +1,9 @@
 mod operations;
 
-use super::gc::{Collectable, CollectableObject};
+use super::{
+    ffi::RustFunction,
+    gc::{Collectable, CollectableObject},
+};
 use crate::parser::{Chunk, Constant};
 pub use operations::OperationError;
 use std::{collections::HashMap, fmt, ptr::NonNull, sync::Arc};
@@ -20,6 +23,7 @@ pub enum Value {
     Float(f64),
     String(String),
     Collectable(NonNull<Collectable>),
+    RustFunction(RustFunction),
 }
 
 impl fmt::Debug for Value {
@@ -37,6 +41,7 @@ impl fmt::Debug for Value {
                     write!(formatter, "Collectable({:?})", ptr)
                 }
             }
+            Self::RustFunction(func) => write!(formatter, "RustFunction({:?})", func),
         }
     }
 }
@@ -64,6 +69,7 @@ impl fmt::Display for Value {
             Self::Float(f) => fmt::Display::fmt(f, formatter),
             Self::String(s) => fmt::Display::fmt(s, formatter),
             Self::Collectable(col) => fmt::Display::fmt(unsafe { col.as_ref() }, formatter),
+            Self::RustFunction(_) => formatter.write_str("<function>"),
         }
     }
 }
@@ -83,6 +89,7 @@ impl Value {
             Self::Float(f) => Self::Float(*f),
             Self::String(s) => Self::String(s.clone()),
             Self::Collectable(ptr) => Self::Collectable(*ptr),
+            Self::RustFunction(func) => Self::RustFunction(func.clone()),
         }
     }
 
@@ -151,12 +158,27 @@ impl Value {
         }
     }
 
+    /// Return `self` if it is not captured, or the inner value of `self`
     fn captured_value(self) -> Value {
         match self {
             Self::Collectable(ptr) => {
                 let captured = unsafe { &ptr.as_ref().object };
                 match captured {
                     CollectableObject::Captured(value) => unsafe { value.duplicate() },
+                    _ => self,
+                }
+            }
+            _ => self,
+        }
+    }
+
+    /// Return `self` if it is not captured, or the inner value of `self`
+    pub fn captured_value_ref(&self) -> &Value {
+        match self {
+            Self::Collectable(ptr) => {
+                let captured = unsafe { &ptr.as_ref().object };
+                match captured {
+                    CollectableObject::Captured(value) => value,
                     _ => self,
                 }
             }

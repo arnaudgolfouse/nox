@@ -1,5 +1,6 @@
 use nox2::{
-    vm::{VMError, VM},
+    libraries,
+    vm::{VMError, Value, VM},
     Continue,
 };
 use rustyline::{error::ReadlineError, Editor};
@@ -13,8 +14,8 @@ struct Repl {
 
 impl Repl {
     fn new() -> Self {
-        let vm = VM::new();
-        //vm.import_all(libraries::prelude()).unwrap();
+        let mut vm = VM::new();
+        vm.import_all(libraries::prelude()).unwrap();
         Self {
             current_phrase: String::new(),
             vm,
@@ -24,7 +25,10 @@ impl Repl {
 
     fn evaluate(&mut self) -> Result<(), VMError> {
         self.vm.parse_top_level(self.current_phrase.as_str())?;
-        println!("=> {}", self.vm.run()?);
+        let value = self.vm.run()?;
+        if value != Value::Nil {
+            println!("=> {}", value);
+        }
         Ok(())
     }
 

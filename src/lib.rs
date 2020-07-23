@@ -1,5 +1,6 @@
 mod error;
 pub mod lexer;
+pub mod libraries;
 pub mod parser;
 pub mod vm;
 

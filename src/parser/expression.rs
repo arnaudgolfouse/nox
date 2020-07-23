@@ -446,15 +446,17 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                 Operation::Multiply => Instruction::Multiply,
                 Operation::Divide => Instruction::Divide,
                 Operation::Modulo => Instruction::Modulo,
-                // Operation::Pow => self.code.push_instruction(Instruction::Pow,
+                Operation::Pow => Instruction::Pow,
                 Operation::Equal => Instruction::Equal,
                 Operation::NEqual => Instruction::NEqual,
                 Operation::Less => Instruction::Less,
                 Operation::LessEq => Instruction::LessEq,
                 Operation::More => Instruction::More,
                 Operation::MoreEq => Instruction::MoreEq,
+                Operation::And => Instruction::And,
+                Operation::Or => Instruction::Or,
                 Operation::Xor => Instruction::Xor,
-                _ => Instruction::Add, // technically unreacheable ? meh
+                Operation::Not => Instruction::Add, // technically unreacheable ? meh
             },
             line,
         );

@@ -1,9 +1,11 @@
+pub mod ffi;
 pub mod gc;
 mod values;
 
 use crate::{
     error::Continue,
     parser::{Chunk, Constant, Instruction, Parser, ParserError},
+    Source,
 };
 use gc::GC;
 use std::{collections::HashMap, fmt, sync::Arc};
@@ -72,6 +74,7 @@ impl VM {
         self.gc.mark_and_sweep();
     }
 
+    /// Load and parse a text `source` in the top-level for execution.
     pub fn parse_top_level<'a>(&mut self, source: &'a str) -> Result<(), VMError<'a>> {
         self.partial_reset();
         let parser = Parser::new(crate::Source::TopLevel(source));
@@ -79,203 +82,53 @@ impl VM {
         Ok(())
     }
 
-    #[inline]
-    fn code(&self) -> &Vec<Instruction<u8>> {
-        match self.call_frames.last() {
-            Some(frame) => &frame.chunk.code,
-            None => &self.chunk.code,
-        }
-    }
-
-    #[inline]
-    fn chunk(&self) -> &Chunk {
-        match self.call_frames.last() {
-            Some(frame) => &frame.chunk,
-            None => &self.chunk,
-        }
-    }
-
-    /// Returns a reference to the current function's local variables.
-    #[inline]
-    fn local_vars(&self) -> &[Value] {
-        match self.call_frames.last() {
-            Some(frame) => &self.stack[frame.local_start..],
-            // all the stack for loop variables
-            None => &self.stack[..],
-        }
-    }
-
-    /// Returns a reference to the current function's local variables.
-    #[inline]
-    fn captured_vars(&self) -> &[Value] {
-        match self.call_frames.last() {
-            Some(frame) => &self.stack[frame.captured_start..],
-            None => &[],
-        }
-    }
-
-    /// Returns a mutable reference to the current function's local variables.
-    #[inline]
-    fn local_vars_mut(&mut self) -> &mut [Value] {
-        match self.call_frames.last() {
-            Some(frame) => &mut self.stack[frame.local_start..],
-            // all the stack for loop variables
-            None => &mut self.stack[..],
-        }
-    }
-
-    /// Returns a mutable reference to the current function's local variables.
-    #[inline]
-    fn captured_vars_mut(&mut self) -> &mut [Value] {
-        match self.call_frames.last() {
-            Some(frame) => &mut self.stack[frame.captured_start..],
-            None => &mut [],
-        }
-    }
-
-    /// Read the instruction pointer, resolving any `Instruction::Extended`.
-    ///
-    /// # Errors
-    ///
-    /// An error is emitted is the instruction pointer is out of bounds.
-    fn read_ip<'a>(&mut self) -> Result<(Instruction<u8>, u64), VMErrorKind<'a>> {
-        let mut operand = 0;
-        let opcode =
-            loop {
-                match self.code().get(self.ip).copied().ok_or_else(|| {
-                    InternalError::InstructionPointerOOB(self.ip, self.code().len())
-                })? {
-                    // extended operand
-                    Instruction::Extended(extended) => {
-                        operand += extended as u64;
-                        operand <<= 8;
-                        self.ip += 1;
-                    }
-                    instruction => {
-                        operand += instruction.operand().unwrap_or(0) as u64;
-                        self.ip += 1;
-                        break instruction;
-                    }
-                };
-            };
-        Ok((opcode, operand))
-    }
-
-    /// Pop and unroot a value from the `tmp_stack`.
-    ///
-    /// If `rooted` is `true`, the value will NOT be unrooted.
-    #[inline]
-    fn pop_tmp<'a>(&mut self, rooted: bool) -> Result<Value, VMErrorKind<'a>> {
-        let mut value = self.tmp_stack.pop().ok_or(InternalError::EmptyStack)?;
-        if !rooted {
-            value.unroot();
-        }
-        Ok(value)
-    }
-
-    /// Read a value at `index` from the `stack`.
-    ///
-    /// The returned value will have an additional root.
-    #[inline]
-    fn read_local<'a>(&mut self, index: usize) -> Result<Value, VMErrorKind<'a>> {
-        Ok(unsafe {
-            let mut local = self
-                .local_vars()
-                .get(index)
-                .ok_or(InternalError::IncorrectInstruction(Instruction::ReadLocal(
-                    index as u64,
-                )))?
-                .duplicate();
-            local.root();
-            local
-        })
-    }
-
-    /// Read a `value` at `index` in the `stack`.
-    ///
-    /// The previous value will be unrooted.
-    fn write_local<'a>(&mut self, index: usize, value: Value) -> Result<(), VMErrorKind<'a>> {
-        let old_value =
-            self.local_vars_mut()
-                .get_mut(index)
-                .ok_or(InternalError::IncorrectInstruction(
-                    Instruction::WriteLocal(index as u64),
-                ))?;
-        old_value.unroot();
-        *old_value = value;
+    /// Load and parse a `source` file or top-level in the top-level for
+    /// execution.
+    pub fn parse_source<'a>(&mut self, source: Source<'a>) -> Result<(), VMError<'a>> {
+        self.partial_reset();
+        let parser = Parser::new(source);
+        self.chunk = Arc::new(parser.parse_top_level()?);
         Ok(())
     }
 
-    /// Root and write the given global value, unrooting any potential previous
-    /// value.
-    #[inline]
-    fn write_global(&mut self, name: String, global: Value) {
-        if let Some(mut value) = self.global_variables.insert(name, global) {
-            value.unroot()
-        }
+    /// Load a raw chunk of bytecode in the top-level for execution.
+    pub fn load(&mut self, chunk: Chunk) {
+        self.partial_reset();
+        self.chunk = Arc::new(chunk);
     }
 
-    /// Jump to the specified destination.
-    ///
-    /// # Return
-    ///
-    /// - `Ok(())` if `destination` was in bounds, or if `destination == self.code().len()`. (will be handled at the next iteration of the `run` loop).
-    /// - `Err(InternalError::JumpOob)` else.
-    #[inline]
-    fn jump_to<'a>(&mut self, destination: usize) -> Result<(), VMErrorKind<'a>> {
-        if destination > self.code().len() {
-            Err(InternalError::JumpOob(destination, true).into())
-        } else {
-            self.ip = destination;
-            Ok(())
+    /// Load the library as a table in the global variables.
+    pub fn import(&mut self, library: ffi::Library) -> Result<(), VMError> {
+        if self.global_variables.contains_key(&library.name) {
+            return Err(VMError::Runtime {
+                kind: RuntimeError::NameAlreadyDefined(library.name),
+                line: 0,
+            });
         }
-    }
-
-    /// Read a function from the current code's `functions`.
-    ///
-    /// This will take care of capturing variables, and the returned function
-    /// will be rooted.
-    fn read_function<'a>(&mut self, operand: u64) -> Result<Value, VMErrorKind<'a>> {
-        use crate::parser::LocalOrCaptured;
-
-        let function = self
-            .chunk()
-            .functions
-            .get(operand as usize)
-            .ok_or(InternalError::IncorrectInstruction(
-                Instruction::ReadFunction(operand),
-            ))?
-            .clone();
-
-        // Capture variables
-        let mut captured = Vec::new();
-        for captured_index in function.captures.iter() {
-            match captured_index {
-                LocalOrCaptured::Local(index) => {
-                    let to_capture = unsafe {
-                        self.local_vars_mut()
-                            .get_mut(*index)
-                            .ok_or(InternalError::IncorrectInstruction(Instruction::ReadLocal(
-                                *index as u64,
-                            )))?
-                            .duplicate()
-                    };
-                    let to_capture = self.gc.new_captured(to_capture);
-                    captured.push(unsafe { to_capture.duplicate() });
-                    *self.local_vars_mut().get_mut(*index).ok_or(
-                        InternalError::IncorrectInstruction(Instruction::ReadLocal(*index as u64)),
-                    )? = to_capture;
-                }
-                LocalOrCaptured::Captured(index) => {
-                    let to_capture = self.captured_vars_mut().get_mut(*index).ok_or(
-                        InternalError::IncorrectInstruction(Instruction::ReadLocal(*index as u64)),
-                    )?;
-                    captured.push(unsafe { to_capture.duplicate() })
-                }
+        let mut library_table = self.gc.new_table();
+        library_table.root();
+        if let Some(library_table) = library_table.as_table_mut() {
+            for (name, value) in library.variables {
+                self.gc
+                    .add_table_element(library_table, Value::String(name), value);
             }
         }
+        self.global_variables.insert(library.name, library_table);
+        Ok(())
+    }
 
-        Ok(self.gc.new_function(function, captured))
+    /// Load all objects in the library as global variables.
+    pub fn import_all(&mut self, library: ffi::Library) -> Result<(), VMError> {
+        for (name, value) in library.variables {
+            if self.global_variables.contains_key(&name) {
+                return Err(VMError::Runtime {
+                    kind: RuntimeError::NameAlreadyDefined(name),
+                    line: 0,
+                });
+            }
+            self.global_variables.insert(name, value);
+        }
+        Ok(())
     }
 
     /// Run the VM on the currently stored code.
@@ -342,7 +195,6 @@ impl VM {
             Err(err) => err,
         };
         match kind {
-            VMErrorKind::Parser(err) => Err(VMError::Parser(err)),
             VMErrorKind::Runtime(err) => Err(VMError::Runtime {
                 kind: err,
                 line: self.chunk().get_line(self.ip),
@@ -354,7 +206,206 @@ impl VM {
         }
     }
 
-    fn run_internal<'a>(&mut self) -> Result<Value, VMErrorKind<'a>> {
+    #[inline]
+    fn code(&self) -> &Vec<Instruction<u8>> {
+        match self.call_frames.last() {
+            Some(frame) => &frame.chunk.code,
+            None => &self.chunk.code,
+        }
+    }
+
+    #[inline]
+    fn chunk(&self) -> &Chunk {
+        match self.call_frames.last() {
+            Some(frame) => &frame.chunk,
+            None => &self.chunk,
+        }
+    }
+
+    /// Returns a reference to the current function's local variables.
+    #[inline]
+    fn local_vars(&self) -> &[Value] {
+        match self.call_frames.last() {
+            Some(frame) => &self.stack[frame.local_start..],
+            // all the stack for loop variables
+            None => &self.stack[..],
+        }
+    }
+
+    /// Returns a reference to the current function's local variables.
+    #[inline]
+    fn captured_vars(&self) -> &[Value] {
+        match self.call_frames.last() {
+            Some(frame) => &self.stack[frame.captured_start..],
+            None => &[],
+        }
+    }
+
+    /// Returns a mutable reference to the current function's local variables.
+    #[inline]
+    fn local_vars_mut(&mut self) -> &mut [Value] {
+        match self.call_frames.last() {
+            Some(frame) => &mut self.stack[frame.local_start..],
+            // all the stack for loop variables
+            None => &mut self.stack[..],
+        }
+    }
+
+    /// Returns a mutable reference to the current function's local variables.
+    #[inline]
+    fn captured_vars_mut(&mut self) -> &mut [Value] {
+        match self.call_frames.last() {
+            Some(frame) => &mut self.stack[frame.captured_start..],
+            None => &mut [],
+        }
+    }
+
+    /// Read the instruction pointer, resolving any `Instruction::Extended`.
+    ///
+    /// # Errors
+    ///
+    /// An error is emitted is the instruction pointer is out of bounds.
+    fn read_ip(&mut self) -> Result<(Instruction<u8>, u64), VMErrorKind> {
+        let mut operand = 0;
+        let opcode =
+            loop {
+                match self.code().get(self.ip).copied().ok_or_else(|| {
+                    InternalError::InstructionPointerOOB(self.ip, self.code().len())
+                })? {
+                    // extended operand
+                    Instruction::Extended(extended) => {
+                        operand += extended as u64;
+                        operand <<= 8;
+                        self.ip += 1;
+                    }
+                    instruction => {
+                        operand += instruction.operand().unwrap_or(0) as u64;
+                        self.ip += 1;
+                        break instruction;
+                    }
+                };
+            };
+        Ok((opcode, operand))
+    }
+
+    /// Pop and unroot a value from the `tmp_stack`.
+    ///
+    /// If `rooted` is `true`, the value will NOT be unrooted.
+    #[inline]
+    fn pop_tmp(&mut self, rooted: bool) -> Result<Value, VMErrorKind> {
+        let mut value = self.tmp_stack.pop().ok_or(InternalError::EmptyStack)?;
+        if !rooted {
+            value.unroot();
+        }
+        Ok(value)
+    }
+
+    /// Read a value at `index` from the `stack`.
+    ///
+    /// The returned value will have an additional root.
+    #[inline]
+    fn read_local(&mut self, index: usize) -> Result<Value, VMErrorKind> {
+        Ok(unsafe {
+            let mut local = self
+                .local_vars()
+                .get(index)
+                .ok_or(InternalError::IncorrectInstruction(Instruction::ReadLocal(
+                    index as u64,
+                )))?
+                .duplicate();
+            local.root();
+            local
+        })
+    }
+
+    /// Read a `value` at `index` in the `stack`.
+    ///
+    /// The previous value will be unrooted.
+    fn write_local(&mut self, index: usize, value: Value) -> Result<(), VMErrorKind> {
+        let old_value =
+            self.local_vars_mut()
+                .get_mut(index)
+                .ok_or(InternalError::IncorrectInstruction(
+                    Instruction::WriteLocal(index as u64),
+                ))?;
+        old_value.unroot();
+        *old_value = value;
+        Ok(())
+    }
+
+    /// Root and write the given global value, unrooting any potential previous
+    /// value.
+    #[inline]
+    fn write_global(&mut self, name: String, global: Value) {
+        if let Some(mut value) = self.global_variables.insert(name, global) {
+            value.unroot()
+        }
+    }
+
+    /// Jump to the specified destination.
+    ///
+    /// # Return
+    ///
+    /// - `Ok(())` if `destination` was in bounds, or if `destination == self.code().len()`. (will be handled at the next iteration of the `run` loop).
+    /// - `Err(InternalError::JumpOob)` else.
+    #[inline]
+    fn jump_to(&mut self, destination: usize) -> Result<(), VMErrorKind> {
+        if destination > self.code().len() {
+            Err(InternalError::JumpOob(destination, true).into())
+        } else {
+            self.ip = destination;
+            Ok(())
+        }
+    }
+
+    /// Read a function from the current code's `functions`.
+    ///
+    /// This will take care of capturing variables, and the returned function
+    /// will be rooted.
+    fn read_function(&mut self, operand: u64) -> Result<Value, VMErrorKind> {
+        use crate::parser::LocalOrCaptured;
+
+        let function = self
+            .chunk()
+            .functions
+            .get(operand as usize)
+            .ok_or(InternalError::IncorrectInstruction(
+                Instruction::ReadFunction(operand),
+            ))?
+            .clone();
+
+        // Capture variables
+        let mut captured = Vec::new();
+        for captured_index in function.captures.iter() {
+            match captured_index {
+                LocalOrCaptured::Local(index) => {
+                    let to_capture = unsafe {
+                        self.local_vars_mut()
+                            .get_mut(*index)
+                            .ok_or(InternalError::IncorrectInstruction(Instruction::ReadLocal(
+                                *index as u64,
+                            )))?
+                            .duplicate()
+                    };
+                    let to_capture = self.gc.new_captured(to_capture);
+                    captured.push(unsafe { to_capture.duplicate() });
+                    *self.local_vars_mut().get_mut(*index).ok_or(
+                        InternalError::IncorrectInstruction(Instruction::ReadLocal(*index as u64)),
+                    )? = to_capture;
+                }
+                LocalOrCaptured::Captured(index) => {
+                    let to_capture = self.captured_vars_mut().get_mut(*index).ok_or(
+                        InternalError::IncorrectInstruction(Instruction::ReadLocal(*index as u64)),
+                    )?;
+                    captured.push(unsafe { to_capture.duplicate() })
+                }
+            }
+        }
+
+        Ok(self.gc.new_function(function, captured))
+    }
+
+    fn run_internal(&mut self) -> Result<Value, VMErrorKind> {
         loop {
             if self.ip == self.code().len() {
                 return Ok(Value::Nil);
@@ -671,7 +722,26 @@ impl VM {
                     let function = match function.as_function_mut() {
                         Some(function) => function,
                         None => {
-                            return Err(RuntimeError::NotAFunction(format!("{}", function)).into())
+                            use std::ops::DerefMut;
+                            if let Value::RustFunction(function) = function {
+                                let function = function.clone();
+                                let mut function = function.0.borrow_mut();
+                                match function.deref_mut()(&mut self.stack[local_start..]) {
+                                    Ok(mut value) => {
+                                        value.root();
+                                        self.tmp_stack.push(value);
+                                        for mut value in self.stack.drain(local_start..) {
+                                            value.unroot()
+                                        }
+                                    }
+                                    Err(err) => return Err(RuntimeError::RustFunction(err).into()),
+                                }
+                                continue;
+                            } else {
+                                return Err(
+                                    RuntimeError::NotAFunction(format!("{}", function)).into()
+                                );
+                            }
                         }
                     };
 
@@ -739,6 +809,10 @@ pub enum RuntimeError {
     NotATable(String),
     NotAFunction(String),
     InvalidArgNumber(u32, u64),
+    /// Error emitted by a Rust function
+    RustFunction(String),
+    /// Trying to import an already defined library
+    NameAlreadyDefined(String),
 }
 
 impl fmt::Display for RuntimeError {
@@ -752,6 +826,10 @@ impl fmt::Display for RuntimeError {
                 "invalid number of arguments : expected {}, got {}",
                 expected, got
             ),
+            Self::RustFunction(err) => write!(formatter, "{}", err),
+            Self::NameAlreadyDefined(name) => {
+                write!(formatter, "library name '{}' is already defined", name)
+            }
         }
     }
 }
@@ -837,10 +915,9 @@ impl<'a> VMError<'a> {
 }
 
 #[derive(Debug)]
-pub enum VMErrorKind<'a> {
+enum VMErrorKind {
     Internal(InternalError),
     Runtime(RuntimeError),
-    Parser(Vec<ParserError<'a>>),
 }
 
 impl<'a> From<Vec<ParserError<'a>>> for VMError<'a> {
@@ -849,13 +926,13 @@ impl<'a> From<Vec<ParserError<'a>>> for VMError<'a> {
     }
 }
 
-impl<'a> From<RuntimeError> for VMErrorKind<'a> {
+impl From<RuntimeError> for VMErrorKind {
     fn from(err: RuntimeError) -> Self {
         Self::Runtime(err)
     }
 }
 
-impl<'a> From<InternalError> for VMErrorKind<'a> {
+impl From<InternalError> for VMErrorKind {
     fn from(err: InternalError) -> Self {
         Self::Internal(err)
     }
@@ -1073,5 +1150,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(vm.run().unwrap(), Value::Int(6));
+    }
+
+    #[test]
+    fn errors() {
+        let mut vm = VM::new();
+        assert!(vm.parse_top_level("0 = x",).is_err());
+        vm.parse_top_level("x.a = 7").unwrap();
+        assert!(vm.run().is_err());
+        vm.reset();
+        vm.parse_top_level("x[789] = 9").unwrap();
+        assert!(vm.run().is_err());
     }
 }

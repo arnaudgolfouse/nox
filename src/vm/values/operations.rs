@@ -35,7 +35,7 @@ impl From<OperationError> for RuntimeError {
     }
 }
 
-impl<'a> From<OperationError> for VMErrorKind<'a> {
+impl From<OperationError> for VMErrorKind {
     fn from(err: OperationError) -> Self {
         RuntimeError::OperationError(err).into()
     }
@@ -78,6 +78,7 @@ impl PartialEq for Value {
                 Self::Collectable(ptr2) => ptr1 == ptr2,
                 _ => false,
             },
+            Self::RustFunction(_) => false,
         }
     }
 }
@@ -94,6 +95,8 @@ impl Hash for Value {
                 CollectableObject::Captured(value) => value.hash(hasher),
                 _ => ptr.hash(hasher),
             },
+            // two RustFunction's are never equal, so we don't really care about what is hashed
+            Self::RustFunction(func) => func.0.as_ptr().hash(hasher),
         }
     }
 }
