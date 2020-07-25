@@ -1,6 +1,7 @@
 
 # keywords :
-	- def
+	- fn
+	- global
 	- if
 	- then
 	- else
@@ -15,7 +16,7 @@
 # constants : 
 	- true
 	- false
-	- none
+	- nil
 	
 # operators :
 	- +
@@ -23,6 +24,7 @@
 	- *
 	- /
 	- %
+	- ^
 	- =
 	- +=
 	- -=
