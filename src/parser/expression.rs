@@ -23,10 +23,10 @@ pub enum Precedence {
     Term = 6,
     /// `*` `/`
     Factor = 7,
-    /*/// '^'
-    Pow = 8,*/
     /// `%`
-    Modulo = 9,
+    Modulo = 8,
+    /// '^'
+    Pow = 9,
     /// `not` `-`
     Unary = 10,
 }
@@ -183,6 +183,7 @@ pub trait ExpressionParser<'a>: Sized {
                             | Operation::MoreEq => Precedence::Comparison,
                             Operation::Plus | Operation::Minus => Precedence::Term,
                             Operation::Multiply | Operation::Divide => Precedence::Factor,
+                            Operation::Pow => Precedence::Pow,
                             Operation::Modulo => Precedence::Modulo,
                             _ => {
                                 break;

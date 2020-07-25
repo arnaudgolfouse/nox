@@ -17,6 +17,7 @@ pub fn prelude() -> Library {
 mod tests {
     use super::*;
     use crate::vm::{Value, VM};
+
     #[test]
     fn test_case() {
         let mut vm = VM::new();

@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 mod token;
 
 use crate::{
@@ -197,16 +200,18 @@ impl<'a> Lexer<'a> {
     /// ```
     /// use nox2::lexer::{Lexer, TokenKind, Operation};
     ///
-    /// let source = "3 * \"hello\"";
+    /// let source = "3 * \"hello\" ^ 2";
     /// let tokens = [
     ///     TokenKind::Int(3),
     ///     TokenKind::Op(Operation::Multiply),
     ///     TokenKind::Str("hello".to_owned()),
+    ///     TokenKind::Op(Operation::Pow),
+    ///     TokenKind::Int(2),
     /// ];
     /// let mut lexer = Lexer::top_level(source);
-    /// assert_eq!(tokens[0], lexer.next().unwrap().unwrap().kind);
-    /// assert_eq!(tokens[1], lexer.next().unwrap().unwrap().kind);
-    /// assert_eq!(tokens[2], lexer.next().unwrap().unwrap().kind);
+    /// for token in tokens.iter() {
+    ///     assert_eq!(token, &lexer.next().unwrap().unwrap().kind);
+    /// }
     /// ```
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<Token>, LexerError<'a>> {
@@ -477,61 +482,5 @@ impl<'a> fmt::Display for LexerError<'a> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let display_message = |formatter: &mut fmt::Formatter| write!(formatter, "{}", self.kind);
         display_error(display_message, self.range, &self.source, false, formatter)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn errors() {
-        // multiple dots
-        assert!(matches!(
-            Lexer::top_level("3.1.2").next().unwrap_err().kind,
-            LexerErrorKind::NumberUnexpectedDot(10)
-        ));
-        // dot in hexadecimal
-        // TODO : Lua support this, maybe we should too ?
-        assert!(matches!(
-            Lexer::top_level("0x5fa.2").next().unwrap_err().kind,
-            LexerErrorKind::NumberUnexpectedDot(16)
-        ));
-        // unrecognised character
-        assert!(matches!(
-            Lexer::top_level("😬").next().unwrap_err().kind,
-            LexerErrorKind::UnknownCharacter(_)
-        ));
-        // incomplete string
-        assert!(matches!(
-            Lexer::top_level("'hello world").next().unwrap_err().kind,
-            LexerErrorKind::IncompleteString(_)
-        ));
-        // i64 error
-        assert!(matches!(
-            Lexer::top_level("999999999999999999999")
-                .next()
-                .unwrap_err()
-                .kind,
-            LexerErrorKind::Parsei64(_)
-        ));
-        // TODO : the Rust parser is not very good with this error, make a custom one.
-        assert!(matches!(
-            Lexer::top_level("0xg").next().unwrap_err().kind,
-            LexerErrorKind::Parsei64(_)
-        ));
-        // f64 error
-        assert!(matches!(
-            // yeah 😅
-            // TODO : resolve this, make it 1.0 ?
-            Lexer::top_level("0.999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999").next().unwrap_err().kind,
-            LexerErrorKind::Parsef64(_)
-        ));
-        assert_eq!(
-            Lexer::top_level("0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001").next().unwrap(),
-            Some(Token {
-                kind: TokenKind::Float(0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001),
-                range: Range::new(Position::default(), Position::new(181, 0))
-            })
-        );
     }
 }

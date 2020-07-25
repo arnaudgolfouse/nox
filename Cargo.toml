@@ -7,6 +7,20 @@ edition = "2018"
 [dependencies]
 colored = "2.0"
 rustyline = "6.2"
+criterion = { version = "0.3", optional = true }
 
 [profile.release]
 lto = true
+
+[features]
+default = ["check"]
+check = []
+bench = ["criterion"]
+
+[[bench]]
+name = "munchausen"
+harness = false
+
+[[bench]]
+name = "range"
+harness = false

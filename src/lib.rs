@@ -1,3 +1,17 @@
+//! Nox language interpreter
+//!
+//! # Features
+//!
+//! The `check` feature, enabled by default, enables checks on various
+//! operations internal to the VM. It is mainly used in case there is a bug in
+//! the VM, or if you fed custom bytecode to the VM. Disabling it may improve
+//! performances.
+//! 
+//! ## Note
+//! 
+//! At the moment, it seems that unchecked run perform **worse** that the 
+//! checked ones. They do result in smaller binaries though.
+
 mod error;
 pub mod lexer;
 pub mod libraries;

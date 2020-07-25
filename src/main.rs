@@ -1,31 +1,34 @@
-use nox2::vm::{Value, VM};
+use nox2::{vm::VM};
 
 fn main() {
     let mut vm = VM::new();
+    //vm.import_all(libraries::prelude()).unwrap();
+
     vm.parse_top_level(
         "
+fn range(a, b)
+    x = a - 1
     fn f()
-        x = 5
-        fn g(a)
-            x += a
+        x += 1
+        if x < b then
             return x
         end
-        return g
     end
+    return f
+end
 
-    f = f()
-    f(1)
+x = 0
+for i in range(0, 20000)
+    x += 1
+end
 
-    x = f(-60.5)
-
-    return x
+return x
     ",
     )
     .unwrap();
 
     match vm.run() {
-        Ok(value) => assert_eq!(value, Value::Float(-54.5)),
+        Ok(value) => println!("[OK] : {}", value),
         Err(err) => panic!("{}", err),
     }
-    println!("[OK]")
 }
