@@ -9,7 +9,7 @@
 //! 
 //! ## Note
 //! 
-//! At the moment, it seems that unchecked run perform **worse** that the 
+//! At the moment, it seems that unchecked runs perform **worse** that the 
 //! checked ones. They do result in smaller binaries though.
 
 mod error;

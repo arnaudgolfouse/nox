@@ -9,7 +9,7 @@ use crate::{
     lexer::{Assign, Keyword, Lexer, LexerError, LexerErrorKind, Token, TokenKind},
     Range, Source,
 };
-pub use bytecode::{Chunk, Constant, Instruction};
+pub(crate) use bytecode::{Chunk, Constant, Instruction};
 use expression::{ExpressionParser, ExpressionType};
 use std::fmt;
 
@@ -95,7 +95,7 @@ impl Function {
 }
 
 #[derive(Default, Debug)]
-pub struct TopLevel {
+struct TopLevel {
     /// Stack of scopes
     scopes: Vec<Scope>,
     /// Variables local to the `for` loops
@@ -831,6 +831,12 @@ impl<'a> Parser<'a> {
         EnclosingLoop::None
     }
 }
+
+/*
+====================================================
+= ERRORS ===========================================
+====================================================
+*/
 
 #[derive(Debug)]
 pub enum ParserErrorKind {

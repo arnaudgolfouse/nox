@@ -64,7 +64,11 @@ impl VM {
     /// value.
     #[inline]
     fn write_global(&mut self, name: String, global: Value) {
-        if let Some(mut value) = self.global_variables.insert(name, global) {
+        if let Some(mut value) = if global == Value::Nil {
+            self.global_variables.remove(&name)
+        } else {
+            self.global_variables.insert(name, global)
+        } {
             value.unroot()
         }
     }
@@ -286,7 +290,11 @@ impl VM {
                     let key = self.pop_tmp(false);
                     let mut table = self.pop_tmp(false);
                     if let Some(table) = table.as_table_mut() {
-                        self.gc.add_table_element(table, key, value);
+                        if value == Value::Nil {
+                            self.gc.remove_table_element(table, &key);
+                        } else {
+                            self.gc.add_table_element(table, key, value);
+                        }
                     } else {
                         return Err(RuntimeError::NotATable(format!("{}", table)).into());
                     }

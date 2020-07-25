@@ -1,3 +1,7 @@
+//! Garbage collector
+//!
+//! I don't know why I keep this module public, it probably won't stay that way.
+
 use super::values::Value;
 use crate::parser::Chunk;
 use std::{collections::HashMap, fmt, mem::size_of, ptr::NonNull, sync::Arc};
@@ -142,7 +146,7 @@ const INITIAL_THRESHOLD: usize = 10000;
 
 #[derive(Debug)]
 pub struct GC {
-    allocated: usize,
+    pub(super) allocated: usize,
     threshold: usize,
     first: Option<NonNull<Collectable>>,
 }
@@ -175,12 +179,15 @@ impl GC {
     /// increased.
     fn check(&mut self, additional: usize) {
         if self.allocated + additional > self.threshold {
+            #[cfg(debug_assertions)]
             println!(
                 "=========\nthreshold ({}) reached, sweeping...",
                 self.threshold
             );
+            #[cfg(debug_assertions)]
             let old_allocated = self.allocated;
             self.mark_and_sweep();
+            #[cfg(debug_assertions)]
             println!("freed {} bytes", old_allocated - self.allocated);
             loop {
                 self.threshold = std::cmp::max(
@@ -191,6 +198,7 @@ impl GC {
                     break;
                 }
             }
+            #[cfg(debug_assertions)]
             println!("new threshold = {}\n=========", self.threshold);
         }
     }
@@ -417,8 +425,19 @@ impl fmt::Display for GC {
 
 impl Drop for GC {
     fn drop(&mut self) {
-        unsafe { self.force_empty() }
-        #[cfg(debug)]
-        assert_eq!(self.allocated, 0)
+        //unsafe { self.force_empty() }
+        self.mark_and_sweep(); // oooh, risky
+        #[cfg(debug_assertions)]
+        if self.allocated != 0 {
+            use colored::Colorize;
+            eprintln!(
+                "{} {} {}",
+                "!!! ALLOCATION ERROR :".red().bold(),
+                self.allocated,
+                "bytes still allocated !!!\n!!! Please report this error !!!"
+                    .red()
+                    .bold(),
+            );
+        }
     }
 }

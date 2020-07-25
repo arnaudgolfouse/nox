@@ -15,8 +15,8 @@ return (z + 5) * -0.5  # return -21.5
     .unwrap();
 
     assert_eq!(vm.run().unwrap(), Value::Float(-21.5));
+    vm.reset();
 
-    let mut vm = VM::new();
     vm.parse_top_level(
         "
 x = 2                  # x = 2
@@ -26,8 +26,8 @@ return (x - 5) * -0.5  # return -2.0
         ",
     )
     .unwrap();
-
     assert_eq!(vm.run().unwrap(), Value::Float(-2.0));
+    vm.reset();
 }
 
 #[test]
@@ -43,6 +43,7 @@ return t.x * t.y
     .unwrap();
 
     assert_eq!(vm.run().unwrap(), Value::Int(10));
+    vm.reset();
 }
 
 #[test]
@@ -68,7 +69,7 @@ return y",
     .unwrap();
     assert_eq!(vm.run().unwrap(), Value::Int(4));
 
-    let mut vm = VM::new();
+    vm.reset();
     vm.parse_top_level(
         "
 y = 1
@@ -80,9 +81,9 @@ return x",
     )
     .unwrap();
     assert_eq!(vm.run().unwrap(), Value::Int(-1));
+    vm.reset();
 
     // testing extended instructions
-    let mut vm = VM::new();
     vm.parse_top_level(
         "
 total = 0
@@ -134,8 +135,8 @@ return total
     )
     .unwrap();
     assert_eq!(vm.run().unwrap(), Value::Int(0));
+    vm.reset();
 
-    let mut vm = VM::new();
     vm.parse_top_level(
         "
 x1 = 0
@@ -154,6 +155,7 @@ return x2",
     )
     .unwrap();
     assert_eq!(vm.run().unwrap(), Value::Int(8));
+    vm.reset();
 }
 
 #[test]
@@ -185,9 +187,9 @@ return x
     )
     .unwrap();
     assert_eq!(vm.run().unwrap(), Value::Int(6));
+    vm.reset();
 
     // a somewhat complex example
-    let mut vm = VM::new();
     vm.import_all(libraries::prelude()).unwrap();
     vm.parse_top_level(
         r#"
@@ -228,6 +230,7 @@ return x
     )
     .unwrap();
     assert_eq!(vm.run().unwrap(), Value::Int(15));
+    vm.reset();
 }
 
 #[test]
@@ -243,7 +246,8 @@ fn errors() {
     vm.run().unwrap_err();
     vm.parse_top_level("return nil ^ 5.2").unwrap();
     vm.run().unwrap_err();
-    vm.parse_top_level("return { x = 5 } - fn() return 1 end").unwrap();
+    vm.parse_top_level("return { x = 5 } - fn() return 1 end")
+        .unwrap();
     vm.run().unwrap_err();
     vm.reset();
     // not a table

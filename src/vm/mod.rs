@@ -1,3 +1,9 @@
+//! Runtime of the nox language.
+//!
+//! Contains the [Virtual Machine](struct.VM.html), the
+//! [Garbage Collector](./gc/struct.GC.html) and the
+//! [Foreign Functions Interface](./ffi/index.html).
+
 pub mod ffi;
 pub mod gc;
 mod values;
@@ -39,6 +45,7 @@ struct CallFrame {
     loop_addresses: Vec<(usize, usize)>,
 }
 
+/// The Nox Virtual Machine
 #[derive(Default, Debug)]
 pub struct VM {
     /// Currently executing code
@@ -61,9 +68,7 @@ pub struct VM {
 
 impl VM {
     pub fn new() -> Self {
-        Self {
-            ..Default::default()
-        }
+        Self::default()
     }
 
     /// Completely reset the VM.
@@ -75,7 +80,9 @@ impl VM {
         for (_, mut value) in self.global_variables.drain() {
             value.unroot()
         }
-        self.gc.mark_and_sweep()
+        self.gc.mark_and_sweep();
+        #[cfg(test)]
+        assert_eq!(self.gc.allocated, 0);
     }
 
     /// Similar to `reset`, but keep the global variables, the GC and the curent
@@ -101,8 +108,7 @@ impl VM {
         Ok(())
     }
 
-    /// Load and parse a `source` file or top-level in the top-level for
-    /// execution.
+    /// Load and parse a `source` file or `str` in the top-level for execution.
     pub fn parse_source<'a>(&mut self, source: Source<'a>) -> Result<(), VMError<'a>> {
         self.partial_reset();
         let parser = Parser::new(source);
@@ -226,6 +232,7 @@ impl VM {
         }
     }
 
+    /// Currently executing instructions
     #[inline]
     fn code(&self) -> &Vec<Instruction<u8>> {
         match self.call_frames.last() {
@@ -234,6 +241,7 @@ impl VM {
         }
     }
 
+    /// Currently executing Chunk
     #[inline]
     fn chunk(&self) -> &Chunk {
         match self.call_frames.last() {
@@ -246,13 +254,13 @@ impl VM {
     #[inline]
     fn local_vars(&self) -> &[Value] {
         match self.call_frames.last() {
-            Some(frame) => &self.stack[frame.local_start..],
+            Some(frame) => &self.stack[frame.local_start..frame.captured_start],
             // all the stack for loop variables
             None => &self.stack[..],
         }
     }
 
-    /// Returns a reference to the current function's local variables.
+    /// Returns a reference to the current function's captured variables.
     #[inline]
     fn captured_vars(&self) -> &[Value] {
         match self.call_frames.last() {
@@ -265,13 +273,13 @@ impl VM {
     #[inline]
     fn local_vars_mut(&mut self) -> &mut [Value] {
         match self.call_frames.last() {
-            Some(frame) => &mut self.stack[frame.local_start..],
+            Some(frame) => &mut self.stack[frame.local_start..frame.captured_start],
             // all the stack for loop variables
             None => &mut self.stack[..],
         }
     }
 
-    /// Returns a mutable reference to the current function's local variables.
+    /// Returns a mutable reference to the current function's captured variables.
     #[inline]
     fn captured_vars_mut(&mut self) -> &mut [Value] {
         match self.call_frames.last() {
@@ -280,6 +288,26 @@ impl VM {
         }
     }
 }
+
+impl Drop for VM {
+    fn drop(&mut self) {
+        for mut value in self.stack.drain(..) {
+            value.unroot()
+        }
+        for mut value in self.tmp_stack.drain(..) {
+            value.unroot()
+        }
+        for (_, mut value) in self.global_variables.drain() {
+            value.unroot()
+        }
+    }
+}
+
+/*
+====================================================
+= ERRORS ===========================================
+====================================================
+*/
 
 #[derive(Debug)]
 pub enum RuntimeError {

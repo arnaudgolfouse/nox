@@ -16,7 +16,7 @@ use std::{
     str::Chars,
 };
 
-/// Transform a `Source` into `Token`s
+/// Transform a [Source](../enum.Source.html) into [Token](struct.Token.html)s
 pub struct Lexer<'a> {
     pub(crate) source: Source<'a>,
     iterator: Peekable<Chars<'a>>,
@@ -58,7 +58,7 @@ impl<'a> Lexer<'a> {
         lexer
     }
 
-    pub fn current_range(&self) -> Range {
+    pub(crate) fn current_range(&self) -> Range {
         Range::new(self.current_start, self.position)
     }
 
@@ -439,7 +439,7 @@ pub enum LexerErrorKind {
 impl Display for LexerErrorKind {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            LexerErrorKind::NumberUnexpectedDot(base) => {
+            Self::NumberUnexpectedDot(base) => {
                 if *base == 10 {
                     write!(formatter, "unexpected dot")
                 } else {
@@ -450,15 +450,13 @@ impl Display for LexerErrorKind {
                     )
                 }
             }
-            LexerErrorKind::UnknownCharacter(c) => write!(formatter, "unknown character : '{}'", c),
-            LexerErrorKind::ExpectedCharacterAfter(c) => {
+            Self::UnknownCharacter(c) => write!(formatter, "unknown character : '{}'", c),
+            Self::ExpectedCharacterAfter(c) => {
                 write!(formatter, "expected character after '{}'", c)
             }
-            LexerErrorKind::IncompleteString(c) => {
-                write!(formatter, "expected {} to end the string", c)
-            }
-            LexerErrorKind::Parsei64(err) => write!(formatter, "{}", err),
-            LexerErrorKind::Parsef64(err) => write!(formatter, "{}", err),
+            Self::IncompleteString(c) => write!(formatter, "expected {} to end the string", c),
+            Self::Parsei64(err) => write!(formatter, "{}", err),
+            Self::Parsef64(err) => write!(formatter, "{}", err),
         }
     }
 }
