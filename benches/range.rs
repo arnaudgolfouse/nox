@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 
-use nox2::{
+use nox::{
     libraries,
     runtime::{Value, VM},
 };
