@@ -42,7 +42,7 @@ Expr -> Number
 		| AssignableExpr
 		| TableExpr
 
-BinaryOp -> "==" | "!=" | "<" | ">" | "<=" | ">=" | "+" | "-" | "*" | "/" | "%" | "or" | "and" | "xor"
+BinaryOp -> "==" | "!=" | "<" | ">" | "<=" | ">=" | "+" | "-" | "*" | "/" | "%" | "^" | "or" | "and" | "xor"
 
 UnaryOp -> "-" | "not"
 
