@@ -28,13 +28,13 @@ impl VM {
         (opcode, operand)
     }
 
-    /// Pop and unroot a value from the `tmp_stack`.
+    /// Pop and unroot a value from the `stack`.
     ///
     /// If `rooted` is `true`, the value will NOT be unrooted.
     #[inline]
     fn pop_tmp(&mut self, rooted: bool) -> Value {
         // TODO : replace this with `unreacheable` once it is stabilized
-        let mut value = self.tmp_stack.pop().unwrap_or(Value::Nil);
+        let mut value = self.stack.pop().unwrap_or(Value::Nil);
         if !rooted {
             value.unroot();
         }
@@ -149,22 +149,22 @@ impl VM {
 
     pub(super) fn run_internal(&mut self) -> Result<Value, VMErrorKind> {
         loop {
-            if self.ip == self.code().len() {
-                return Ok(Value::Nil);
-            }
             let (opcode, operand) = self.read_ip();
             match opcode {
                 Instruction::Return => {
                     if let Some(frame) = self.call_frames.pop() {
-                        for mut value in self.stack.drain(frame.local_start..) {
+                        for mut value in self
+                            .stack
+                            .drain(frame.local_start - 1..self.stack.len() - 1)
+                        {
                             value.unroot()
                         }
                         self.ip = frame.previous_ip;
-                        match self.tmp_stack.last_mut() {
+                        match self.stack.last_mut() {
                             Some(return_value) => return_value.decapture(),
                             None => {} // TODO : unreacheable
                         }
-                    } else if let Some(value) = self.tmp_stack.pop() {
+                    } else if let Some(value) = self.stack.pop() {
                         return Ok(value);
                     } else {
                         // TODO : unreacheable
@@ -173,104 +173,104 @@ impl VM {
                 Instruction::Equal => {
                     let value_1 = self.pop_tmp(false);
                     let value_2 = self.pop_tmp(false);
-                    self.tmp_stack.push(Value::Bool(value_1 == value_2))
+                    self.stack.push(Value::Bool(value_1 == value_2))
                 }
                 Instruction::NEqual => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
-                    self.tmp_stack.push(Value::Bool(value_1 != value_2))
+                    self.stack.push(Value::Bool(value_1 != value_2))
                 }
                 Instruction::Less => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.less(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::LessEq => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.less_eq(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::More => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.more(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::MoreEq => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.more_eq(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::Add => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.add(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::Subtract => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.subtract(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::Multiply => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.multiply(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::Divide => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.divide(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::Modulo => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.modulo(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::Pow => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.pow(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::And => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.and(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::Or => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.or(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::Xor => {
                     let value_2 = self.pop_tmp(false);
                     let value_1 = self.pop_tmp(false);
                     let new_value = value_1.xor(value_2)?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::Negative => {
                     let value = self.pop_tmp(false);
                     let new_value = value.negative()?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
                 Instruction::Not => {
                     let value = self.pop_tmp(false);
                     let new_value = value.not()?;
-                    self.tmp_stack.push(new_value)
+                    self.stack.push(new_value)
                 }
-                Instruction::PushNil => self.tmp_stack.push(Value::Nil),
-                Instruction::PushTrue => self.tmp_stack.push(Value::Bool(true)),
-                Instruction::PushFalse => self.tmp_stack.push(Value::Bool(false)),
+                Instruction::PushNil => self.stack.push(Value::Nil),
+                Instruction::PushTrue => self.stack.push(Value::Bool(true)),
+                Instruction::PushFalse => self.stack.push(Value::Bool(false)),
                 Instruction::ReadTable => {
                     let key = self.pop_tmp(false);
                     let table = self.pop_tmp(false);
@@ -280,7 +280,7 @@ impl VM {
                             .map(|value| unsafe { value.duplicate() })
                             .unwrap_or(Value::Nil);
                         value.root();
-                        self.tmp_stack.push(value)
+                        self.stack.push(value)
                     } else {
                         return Err(RuntimeError::NotATable(format!("{}", table)).into());
                     }
@@ -301,9 +301,9 @@ impl VM {
                 }
                 Instruction::ReadFunction(_) => {
                     let function = self.read_function(operand);
-                    self.tmp_stack.push(function);
+                    self.stack.push(function);
                 }
-                Instruction::ReadConstant(_) => self.tmp_stack.push(unsafe {
+                Instruction::ReadConstant(_) => self.stack.push(unsafe {
                     self.chunk()
                         .constants
                         .get_unchecked(operand as usize)
@@ -318,7 +318,7 @@ impl VM {
                         .map(|value| unsafe { value.duplicate() })
                         .unwrap_or(Value::Nil);
                     value.root();
-                    self.tmp_stack.push(value)
+                    self.stack.push(value)
                 }
                 Instruction::WriteGlobal(_) => {
                     let name =
@@ -328,7 +328,7 @@ impl VM {
                 }
                 Instruction::ReadLocal(_) => {
                     let local = self.read_local(operand as usize);
-                    self.tmp_stack.push(local)
+                    self.stack.push(local)
                 }
                 Instruction::WriteLocal(_) => {
                     let local = self.pop_tmp(true);
@@ -341,7 +341,7 @@ impl VM {
                             .duplicate()
                     };
                     captured.root();
-                    self.tmp_stack.push(captured)
+                    self.stack.push(captured)
                 }
                 Instruction::WriteCaptured(_) => {
                     let var = self.pop_tmp(true);
@@ -360,13 +360,13 @@ impl VM {
                 Instruction::Jump(_) => self.jump_to(operand as usize + self.ip - 1),
                 Instruction::JumpTrue(_) => {
                     // TODO : unreacheable
-                    if self.tmp_stack.last().unwrap_or(&Value::Nil) == &Value::Bool(true) {
+                    if self.stack.last().unwrap_or(&Value::Nil) == &Value::Bool(true) {
                         self.jump_to(operand as usize + self.ip - 1)
                     }
                 }
                 Instruction::JumpFalse(_) => {
                     // TODO : unreacheable
-                    if self.tmp_stack.last().unwrap_or(&Value::Nil) == &Value::Bool(false) {
+                    if self.stack.last().unwrap_or(&Value::Nil) == &Value::Bool(false) {
                         self.jump_to(operand as usize + self.ip - 1)
                     }
                 }
@@ -383,7 +383,7 @@ impl VM {
                     }
                 }
                 Instruction::JumpEndFor(_) => {
-                    if self.tmp_stack.last() == Some(&Value::Nil) {
+                    if self.stack.last() == Some(&Value::Nil) {
                         self.pop_tmp(false);
                         // address of the loop variable, since this instruction is always followed by `WriteLocal(loop_index)`.
                         {
@@ -406,9 +406,9 @@ impl VM {
                 Instruction::Break(_) => {
                     let (_, jump_address) = self.loop_address();
                     if operand == 0 {
-                        self.tmp_stack.push(Value::Bool(false))
+                        self.stack.push(Value::Bool(false))
                     } else {
-                        self.tmp_stack.push(Value::Nil)
+                        self.stack.push(Value::Nil)
                     }
                     self.ip = jump_address;
                 }
@@ -422,17 +422,11 @@ impl VM {
                     self.push_loop_address((expr_address, jump_address))
                 }
                 Instruction::Call(_) => {
-                    let local_start = self.stack.len();
-                    for arg in self
-                        .tmp_stack
-                        .drain(self.tmp_stack.len() - operand as usize..)
-                    {
-                        self.stack.push(arg);
-                    }
+                    let local_start = self.stack.len() - operand as usize;
+                    let mut function =
+                        unsafe { self.stack.get_unchecked(local_start - 1).duplicate() };
 
-                    let mut function = self.pop_tmp(false);
-
-                    let function = match function.as_function_mut() {
+                    let func = match function.as_function_mut() {
                         Some(function) => function,
                         None => {
                             use std::ops::DerefMut;
@@ -442,10 +436,10 @@ impl VM {
                                 match function.deref_mut()(&mut self.stack[local_start..]) {
                                     Ok(mut value) => {
                                         value.root();
-                                        self.tmp_stack.push(value);
-                                        for mut value in self.stack.drain(local_start..) {
+                                        for mut value in self.stack.drain(local_start - 1..) {
                                             value.unroot()
                                         }
+                                        self.stack.push(value);
                                     }
                                     Err(err) => return Err(RuntimeError::RustFunction(err).into()),
                                 }
@@ -458,25 +452,25 @@ impl VM {
                         }
                     };
 
-                    if operand != function.0.arg_number as u64 {
+                    if operand != func.0.arg_number as u64 {
                         return Err(
-                            RuntimeError::InvalidArgNumber(function.0.arg_number, operand).into(),
+                            RuntimeError::InvalidArgNumber(func.0.arg_number, operand).into()
                         );
                     }
 
-                    for _ in 0..(function.0.locals_number - operand as u32) {
+                    for _ in 0..(func.0.locals_number - operand as u32) {
                         self.stack.push(Value::Nil)
                     }
 
                     let captured_start = self.stack.len();
-                    for captured in function.1 {
+                    for captured in func.1 {
                         let mut captured = unsafe { captured.duplicate() };
                         captured.root();
                         self.stack.push(captured);
                     }
 
                     self.call_frames.push(CallFrame {
-                        chunk: function.0.clone(),
+                        chunk: func.0.clone(),
                         previous_ip: self.ip,
                         local_start,
                         captured_start,
@@ -494,15 +488,14 @@ impl VM {
                             self.gc.add_table_element(table, key, value);
                         }
                     }
-                    self.tmp_stack.push(new_table)
+                    self.stack.push(new_table)
                 }
                 Instruction::DuplicateTop(_) => {
-                    let index_start = self.tmp_stack.len() - operand as usize - 1;
-                    for index in index_start..self.tmp_stack.len() {
-                        let mut duplicate =
-                            unsafe { self.tmp_stack.get_unchecked(index).duplicate() };
+                    let index_start = self.stack.len() - operand as usize - 1;
+                    for index in index_start..self.stack.len() {
+                        let mut duplicate = unsafe { self.stack.get_unchecked(index).duplicate() };
                         duplicate.root();
-                        self.tmp_stack.push(duplicate)
+                        self.stack.push(duplicate)
                     }
                 }
                 // unreacheable : already consumed at the beginning of the loop

@@ -243,6 +243,12 @@ impl<'a> Parser<'a> {
             Err(self.errors)
         } else {
             self.top_level.code.locals_number = self.top_level.for_variables.len() as u32;
+            self.top_level
+                .code
+                .emit_instruction_u8(Instruction::PushNil, self.lexer.position.line);
+            self.top_level
+                .code
+                .emit_instruction_u8(Instruction::Return, self.lexer.position.line);
             Ok(self.top_level.code)
         }
     }

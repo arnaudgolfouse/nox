@@ -54,8 +54,6 @@ pub struct VM {
     ip: usize,
     /// Stack for local variables
     stack: Vec<Value>,
-    /// Stack for temporary variables
-    tmp_stack: Vec<Value>,
     /// Global variables
     global_variables: HashMap<String, Value>,
     /// Stack of call information
@@ -90,9 +88,6 @@ impl VM {
     pub fn partial_reset(&mut self) {
         self.ip = 0;
         for mut value in self.stack.drain(..) {
-            value.unroot()
-        }
-        for mut value in self.tmp_stack.drain(..) {
             value.unroot()
         }
         self.call_frames.clear();
@@ -292,9 +287,6 @@ impl VM {
 impl Drop for VM {
     fn drop(&mut self) {
         for mut value in self.stack.drain(..) {
-            value.unroot()
-        }
-        for mut value in self.tmp_stack.drain(..) {
             value.unroot()
         }
         for (_, mut value) in self.global_variables.drain() {
