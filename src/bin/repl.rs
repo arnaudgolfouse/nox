@@ -1,4 +1,4 @@
-use nox2::{
+use nox::{
     libraries,
     runtime::{VMError, Value, VM},
     Continue,

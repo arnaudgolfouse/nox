@@ -104,7 +104,7 @@ impl<'a> Lexer<'a> {
     /// # Examples
     ///
     /// ```
-    /// use nox2::lexer::{Lexer, TokenKind, Operation};
+    /// use nox::lexer::{Lexer, TokenKind, Operation};
     /// let mut lexer = Lexer::top_level("def f(a, b) a + b * 4.1");
     /// let mut tokens = lexer.tokens().unwrap();
     /// assert_eq!(TokenKind::Float(4.1), tokens.pop().unwrap().kind);
@@ -207,7 +207,7 @@ impl<'a> Lexer<'a> {
     /// # Examples
     ///
     /// ```
-    /// use nox2::lexer::{Lexer, TokenKind, Operation};
+    /// use nox::lexer::{Lexer, TokenKind, Operation};
     ///
     /// let source = "3 * \"hello\" ^ 2";
     /// let tokens = [
@@ -242,7 +242,7 @@ impl<'a> Lexer<'a> {
     /// # Examples
     ///
     /// ```
-    /// use nox2::lexer::{Lexer, TokenKind, Operation};
+    /// use nox::lexer::{Lexer, TokenKind, Operation};
     ///
     /// let source = "3 * \"hello\"";
     /// let tokens = [

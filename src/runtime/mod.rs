@@ -165,7 +165,7 @@ impl VM {
     ///
     /// **Example 1**
     /// ```
-    /// # use nox2::runtime::{VM, Value};
+    /// # use nox::runtime::{VM, Value};
     /// let mut vm = VM::new();
     /// vm.parse_top_level(
     /// "
@@ -182,7 +182,7 @@ impl VM {
     /// ```
     /// **Example 2**
     /// ```
-    /// # use nox2::runtime::{VM, Value};
+    /// # use nox::runtime::{VM, Value};
     /// let mut vm = VM::new();
     /// vm.parse_top_level(
     /// "

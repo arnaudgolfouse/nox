@@ -5,7 +5,7 @@
 //! # Example
 //!
 //! ```
-//! use nox2::{parser::Parser, Source};
+//! use nox::{parser::Parser, Source};
 //! let parser = Parser::new(Source::TopLevel("x = 5 print(x) return x + 1"));
 //! let code = parser.parse_top_level().unwrap();
 //! ```

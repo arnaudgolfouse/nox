@@ -1,5 +1,5 @@
 [package]
-name = "nox2"
+name = "nox"
 version = "0.1.0"
 authors = ["Arnaud <arnaud.golfouse@free.fr>"]
 edition = "2018"

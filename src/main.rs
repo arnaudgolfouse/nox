@@ -1,4 +1,4 @@
-use nox2::{libraries, runtime::VM};
+use nox::{libraries, runtime::VM};
 
 fn main() {
     let mut vm = VM::new();
