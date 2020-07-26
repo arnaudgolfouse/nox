@@ -2,7 +2,8 @@ use super::LocalOrCaptured;
 use crate::lexer::TokenKind;
 use std::{convert::TryFrom, fmt, mem::size_of, sync::Arc};
 
-/// Helper trait : this should not be derived by any actual type other than u8, u16, usize... (which is already done in this library).
+/// Helper trait : this should not be derived by any actual type other than u8,
+/// u16, usize... (which is already done in this library).
 #[doc(hidden)]
 pub trait Operand: fmt::Display + Sized + Default + Copy + std::convert::Into<u64> {
     /// data for the `Extended` instructions. In theory, this is `[Option<u8>; n]`.
@@ -95,6 +96,8 @@ impl<Op: Operand> fmt::Debug for Instruction<Op> {
 }
 
 impl<Op: Operand> Instruction<Op> {
+    /// Return `Some(operand)` if an operand is associated with this
+    /// instruction, else it returns `None`.
     pub fn operand(self) -> Option<Op> {
         match self {
             $(
@@ -118,7 +121,8 @@ impl<Op: Operand> Instruction<Op> {
         }
     }
 
-    /// Convert this instruction into a `u8` instruction, and the eventual extended operands.
+    /// Convert this instruction into a `u8` instruction, and the eventual
+    /// extended operands.
     pub fn into_u8(self) -> (Instruction<u8>, Op::Extended) {
         let (operand, extended) = self.operand().unwrap_or_default().extended();
 
@@ -278,16 +282,6 @@ instructions! {
     Jump(Op) => "JUMP",
     /// Conditional jump
     ///
-    /// Jump the specified offset in the instructions vector if `true` is at the
-    /// top of the stack.
-    JumpTrue(Op) => "JUMP_TRUE",
-    /// Conditional jump
-    ///
-    /// Jump the specified offset in the instructions vector if `false` is at
-    /// the top of the stack.
-    JumpFalse(Op) => "JUMP_FALSE",
-    /// Conditional jump
-    ///
     /// Pop the top of the stack, and jump the specified offset in the
     /// instructions vector if it is `false`.
     JumpPopFalse(Op) => "JUMP_POP_FALSE",
@@ -378,10 +372,15 @@ impl fmt::Display for Constant {
     }
 }
 
+/// Chunk of code.
+///
+/// This structure contains all the necessary informations to run a function,
+/// including its code but also constants, other functions, global variables
+/// names...
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Chunk {
     /// Name of this chunk
-    pub name: String,
+    pub(crate) name: String,
     /// Vector of line information for the instructions
     pub(crate) lines: Vec<(u32, u32)>,
     /// bytecode instructions
@@ -401,7 +400,8 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(name: String) -> Self {
+    /// Create a new Chunk with the name `name`.
+    pub(crate) fn new(name: String) -> Self {
         Self {
             name,
             lines: Vec::new(),
@@ -415,10 +415,19 @@ impl Chunk {
         }
     }
 
+    pub fn name(&self) -> &String {
+        &self.name
+    }
+
     /// Emit the new instruction.
     ///
-    /// Multiple `u8` instructions will actually be emmited if the operand is bigger than `u8::MAX`.
-    pub fn emit_instruction<Op: Operand>(&mut self, instruction: Instruction<Op>, line: u32) {
+    /// Multiple `u8` instructions will actually be emmited if the operand is
+    /// bigger than `u8::MAX`.
+    pub(crate) fn emit_instruction<Op: Operand>(
+        &mut self,
+        instruction: Instruction<Op>,
+        line: u32,
+    ) {
         let (instruction, extended) = instruction.into_u8();
         for extended in Op::iter_extended(&extended) {
             if let Some(extended) = extended {
@@ -431,7 +440,7 @@ impl Chunk {
     /// Directly push an instruction.
     ///
     /// If you want to use bigger operands than `u8`, consider using `emit_instruction` instead.
-    pub fn emit_instruction_u8(&mut self, instruction: Instruction<u8>, line: u32) {
+    pub(crate) fn emit_instruction_u8(&mut self, instruction: Instruction<u8>, line: u32) {
         match self.lines.last_mut() {
             Some((l, nb)) if *l == line => *nb += 1,
             _ => self.lines.push((line, 1)),
@@ -441,7 +450,7 @@ impl Chunk {
     }
 
     /// Add a constant to the Chunk, and return it's index for future reference.
-    pub fn add_constant(&mut self, constant: Constant) -> u32 {
+    pub(crate) fn add_constant(&mut self, constant: Constant) -> u32 {
         if let Some((index, _)) = self
             .constants
             .iter()
@@ -456,7 +465,7 @@ impl Chunk {
     }
 
     /// Add a string to the Chunk, and return it's index for future reference.
-    pub fn add_string(&mut self, global: String) -> u32 {
+    pub(crate) fn add_string(&mut self, global: String) -> u32 {
         if let Some((index, _)) = self
             .globals
             .iter()
@@ -472,7 +481,7 @@ impl Chunk {
 
     /// push an `Jump(0)` instruction, and returns its index in the bytecode for
     /// future modification
-    pub fn push_jump(&mut self) -> usize {
+    pub(crate) fn push_jump(&mut self) -> usize {
         self.code.push(Instruction::Jump(0));
         self.code.len() - 1
     }
@@ -482,7 +491,7 @@ impl Chunk {
     /// This function can be quite inneficient, as operands bigger than
     /// `u8::MAX` will shift a lot of code to make room for extended
     /// instructions.
-    pub fn write_jump(&mut self, mut address: usize, instruction: Instruction<u64>) {
+    pub(crate) fn write_jump(&mut self, mut address: usize, instruction: Instruction<u64>) {
         // wow there cowboy !
         let initial_instruction = &mut self.code[address];
         assert_eq!(initial_instruction, &Instruction::Jump(0));
@@ -528,7 +537,7 @@ impl Chunk {
     }
 
     /// Get the line for the instruction at `index`, or the last line.
-    pub(crate) fn get_line(&self, index: usize) -> usize {
+    pub fn get_line(&self, index: usize) -> usize {
         let mut line_index = 0;
         for (line, nb) in self.lines.iter().copied() {
             if line_index + nb as usize >= index {

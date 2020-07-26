@@ -2,7 +2,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 
 use nox2::{
     libraries,
-    vm::{Value, VM},
+    runtime::{Value, VM},
 };
 
 fn munchausen(c: &mut Criterion) {

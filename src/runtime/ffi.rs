@@ -1,3 +1,5 @@
+//! Foreign Functions Interface 
+
 use super::Value;
 use std::{cell::RefCell, fmt::Debug, sync::Arc};
 

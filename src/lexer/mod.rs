@@ -1,3 +1,5 @@
+//! Lexer for the nox language.
+
 #[cfg(test)]
 mod tests;
 
@@ -18,12 +20,19 @@ use std::{
 
 /// Transform a [Source](../enum.Source.html) into [Token](struct.Token.html)s
 pub struct Lexer<'a> {
+    /// Source code for this lexer
     pub(crate) source: Source<'a>,
+    /// Iterator over the `source`'s chars
     iterator: Peekable<Chars<'a>>,
+    /// Next token, pre-parsed
     next_token: Result<Option<Token>, LexerError<'a>>,
+    /// Start position of the current token
     current_start: Position,
+    /// Current position on the source
     pub(crate) position: Position,
+    /// Position of the next token in the source
     next_position: Position,
+    /// Position of the previous token in the source
     pub(crate) previous_position: Position,
 }
 

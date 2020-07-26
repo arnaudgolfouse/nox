@@ -358,18 +358,6 @@ impl VM {
                 }
                 // NOTE FOR JUMPS : We need to add/subtract 1 because we are on the instruction AFTER the jump.
                 Instruction::Jump(_) => self.jump_to(operand as usize + self.ip - 1),
-                Instruction::JumpTrue(_) => {
-                    // TODO : unreacheable
-                    if self.stack.last().unwrap_or(&Value::Nil) == &Value::Bool(true) {
-                        self.jump_to(operand as usize + self.ip - 1)
-                    }
-                }
-                Instruction::JumpFalse(_) => {
-                    // TODO : unreacheable
-                    if self.stack.last().unwrap_or(&Value::Nil) == &Value::Bool(false) {
-                        self.jump_to(operand as usize + self.ip - 1)
-                    }
-                }
                 Instruction::JumpPopFalse(_) => {
                     if self.pop_tmp(false) == Value::Bool(false) {
                         self.jump_to(operand as usize + self.ip - 1)

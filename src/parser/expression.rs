@@ -9,7 +9,7 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
 #[repr(u8)]
-pub enum Precedence {
+pub(super) enum Precedence {
     None = 0,
     /// `or`, `xor`
     Or = 2,
@@ -32,7 +32,7 @@ pub enum Precedence {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum ExpressionType {
+pub(super) enum ExpressionType {
     Constant,
     Assign(String, Assign, Range),
     UnaryOp,
@@ -46,8 +46,10 @@ pub enum ExpressionType {
 
 /// Collection of methods for parsing expressions.
 ///
-/// This allow to implement every individual parsing block (constants, variables, ...), while having the default implementation handle putting them together.
-pub trait ExpressionParser<'a>: Sized {
+/// This allow to implement every individual parsing block (constants,
+/// variables, ...), while having the default implementation handle putting them
+/// together.
+pub(super) trait ExpressionParser<'a>: Sized {
     /// Parse a constant.
     fn parse_constant(&mut self, constant: Constant);
     /// Parse a variable name.

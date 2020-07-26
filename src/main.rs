@@ -1,8 +1,8 @@
-use nox2::{vm::VM};
+use nox2::{libraries, runtime::VM};
 
 fn main() {
     let mut vm = VM::new();
-    //vm.import_all(libraries::prelude()).unwrap();
+    vm.import_all(libraries::prelude()).unwrap();
 
     vm.parse_top_level(
         "

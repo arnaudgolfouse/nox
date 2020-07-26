@@ -17,12 +17,21 @@ use std::{collections::HashMap, fmt, ptr::NonNull, sync::Arc};
 /// [duplicate](enum.Value.html#method.duplicate) is provided to get a raw copy
 /// of a value.
 pub enum Value {
+    /// `nil` value
     Nil,
+    /// Boolean
     Bool(bool),
+    /// Integer
     Int(i64),
+    /// Floating-point number
     Float(f64),
+    /// Heap-allocated string
+    ///
+    /// TODO : make this a collectable value ?
     String(String),
+    /// Collectable value
     Collectable(NonNull<Collectable>),
+    /// External Rust function
     RustFunction(RustFunction),
 }
 

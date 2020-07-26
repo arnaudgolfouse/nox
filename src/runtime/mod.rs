@@ -165,7 +165,7 @@ impl VM {
     ///
     /// **Example 1**
     /// ```
-    /// # use nox2::vm::{VM, Value};
+    /// # use nox2::runtime::{VM, Value};
     /// let mut vm = VM::new();
     /// vm.parse_top_level(
     /// "
@@ -182,7 +182,7 @@ impl VM {
     /// ```
     /// **Example 2**
     /// ```
-    /// # use nox2::vm::{VM, Value};
+    /// # use nox2::runtime::{VM, Value};
     /// let mut vm = VM::new();
     /// vm.parse_top_level(
     /// "
@@ -301,11 +301,17 @@ impl Drop for VM {
 ====================================================
 */
 
+/// Error thrown by the VM at runtime.
 #[derive(Debug)]
 pub enum RuntimeError {
+    /// Invalid unary or binary operation
     OperationError(OperationError),
+    /// A table operation (read or write) was attempted on a value that is not a
+    /// table.
     NotATable(String),
+    /// A call operation was attempted on a value that is not a function.
     NotAFunction(String),
+    /// A function received an incorrect number of arguments
     InvalidArgNumber(u32, u64),
     /// Error emitted by a Rust function
     RustFunction(String),

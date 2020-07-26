@@ -1,7 +1,23 @@
+//! Libraries for the nox language.
+//!
+//! Contains sets of functions written in Rust.
+
 mod prelude;
 
-use crate::vm::ffi::Library;
+use crate::runtime::ffi::Library;
 
+/// Return a 'prelude' `Library`.
+///
+/// It contains the following functions :
+/// - `range` : Takes two `Int` arguments `a` and `b`, and creates an iterator
+/// from `a` (included) to `b` (excluded).
+/// - `letters` : Takes a single `String` argument, and creates an iterator over
+/// its letters.
+/// - `print` : Print the given arguments
+/// - `println` : Print the given arguments and a newline.
+/// - `to_string` : Takes a single argument, and tries to convert it to a
+/// `String`.
+/// - `to_int` : Takes a single argument, and tries to convert it to a `Int`.
 pub fn prelude() -> Library {
     let mut prelude = Library::new("std_prelude".to_owned());
     prelude.add_function("range", prelude::range);
@@ -16,7 +32,7 @@ pub fn prelude() -> Library {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vm::{Value, VM};
+    use crate::runtime::{Value, VM};
 
     #[test]
     fn test_case() {

@@ -1,3 +1,15 @@
+//! Parser for the nox language.
+//!
+//! This will generate bytecode from a [Source](../enum.Source.html).
+//!
+//! # Example
+//!
+//! ```
+//! use nox2::{parser::Parser, Source};
+//! let parser = Parser::new(Source::TopLevel("x = 5 print(x) return x + 1"));
+//! let code = parser.parse_top_level().unwrap();
+//! ```
+
 #[cfg(test)]
 mod tests;
 
@@ -9,7 +21,8 @@ use crate::{
     lexer::{Assign, Keyword, Lexer, LexerError, LexerErrorKind, Token, TokenKind},
     Range, Source,
 };
-pub(crate) use bytecode::{Chunk, Constant, Instruction};
+pub use bytecode::Chunk;
+pub(crate) use bytecode::{Constant, Instruction};
 use expression::{ExpressionParser, ExpressionType};
 use std::fmt;
 
@@ -88,41 +101,30 @@ struct Function {
 }
 
 impl Function {
+    fn new_top_level(name: String) -> Self {
+        Self {
+            scopes: Vec::new(),
+            variables: Vec::new(),
+            code: Chunk::new(name),
+            closure: false,
+        }
+    }
+
     /// This function returns `None` if there is no opened scope in the function
     fn scope(&self) -> Option<&Scope> {
         self.scopes.last()
     }
 }
 
-#[derive(Default, Debug)]
-struct TopLevel {
-    /// Stack of scopes
-    scopes: Vec<Scope>,
-    /// Variables local to the `for` loops
-    for_variables: Vec<String>,
-    /// Bytecode
-    code: Chunk,
-}
-
-impl TopLevel {
-    fn new(name: String) -> Self {
-        Self {
-            scopes: Vec::new(),
-            for_variables: Vec::new(),
-            code: Chunk::new(name),
-        }
-    }
-
-    /// This function returns `None` if there is no opened scope in the top-level
-    fn scope(&self) -> Option<&Scope> {
-        self.scopes.last()
-    }
-}
-
+/// Parser for the nox language.
 pub struct Parser<'a> {
+    /// Associated lexer
     lexer: Lexer<'a>,
+    /// Errors encoutered while parsing
     errors: Vec<ParserError<'a>>,
-    top_level: TopLevel,
+    /// Root function
+    top_level: Function,
+    /// Nested functions
     function_stack: Vec<Function>,
 }
 
@@ -138,12 +140,13 @@ pub struct Parser<'a> {
 //     z = 8       // - x y a z
 // end             // -
 impl<'a> Parser<'a> {
+    /// Create a new `Parser` from a `Source`.
     pub fn new(source: Source<'a>) -> Self {
         let name = source.name().to_owned();
         Self {
             lexer: Lexer::new(source),
             errors: Vec::new(),
-            top_level: TopLevel::new(name),
+            top_level: Function::new_top_level(name),
             function_stack: Vec::new(),
         }
     }
@@ -209,6 +212,17 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse the associated [Source](../enum.Source.html) as a top-level
+    /// function.
+    ///
+    ///
+    /// # Panic mode
+    ///
+    /// If an error is encountered, the parser will enter a 'panic mode', and
+    /// try to find another valid statement from which to continue parsing.
+    ///
+    /// This allow the parser to find multiple errors, although there might be
+    /// false positives.
     pub fn parse_top_level(mut self) -> Result<Chunk, Vec<ParserError<'a>>> {
         loop {
             match self.parse_statements() {
@@ -242,7 +256,7 @@ impl<'a> Parser<'a> {
         if !self.errors.is_empty() {
             Err(self.errors)
         } else {
-            self.top_level.code.locals_number = self.top_level.for_variables.len() as u32;
+            self.top_level.code.locals_number = self.top_level.variables.len() as u32;
             self.top_level
                 .code
                 .emit_instruction_u8(Instruction::PushNil, self.lexer.position.line);
@@ -336,7 +350,7 @@ impl<'a> Parser<'a> {
                             // 'remove' the loop variable
                             match self.function_stack.last_mut() {
                                 Some(func) => func.variables[loop_variable_index].clear(),
-                                None => self.top_level.for_variables[loop_variable_index].clear(),
+                                None => self.top_level.variables[loop_variable_index].clear(),
                             }
                         }
                     }
@@ -464,8 +478,8 @@ impl<'a> Parser<'a> {
                         function.variables.len() - 1
                     }
                     None => {
-                        self.top_level.for_variables.push(for_variable);
-                        self.top_level.for_variables.len() - 1
+                        self.top_level.variables.push(for_variable);
+                        self.top_level.variables.len() - 1
                     }
                 };
                 self.emit_instruction(Instruction::WriteLocal(index as u64));
@@ -676,7 +690,7 @@ impl<'a> Parser<'a> {
 
             VariableLocation::Undefined
         } else {
-            for (index, var) in self.top_level.for_variables.iter().enumerate().rev() {
+            for (index, var) in self.top_level.variables.iter().enumerate().rev() {
                 if var == variable {
                     return VariableLocation::Local(index);
                 }
@@ -712,7 +726,7 @@ impl<'a> Parser<'a> {
         self.emit_instruction(instruction);
     }
 
-    pub fn assign_variable(
+    fn assign_variable(
         &mut self,
         variable: String,
         assignement: Assign,
@@ -845,7 +859,7 @@ impl<'a> Parser<'a> {
 */
 
 #[derive(Debug)]
-pub enum ParserErrorKind {
+pub(crate) enum ParserErrorKind {
     Lexer(LexerErrorKind),
     ExpectExpression,
     Expected(TokenKind),
@@ -873,11 +887,16 @@ impl fmt::Display for ParserErrorKind {
     }
 }
 
+/// Error emitted during parsing.
 #[derive(Debug)]
 pub struct ParserError<'a> {
+    /// kind of error
     kind: ParserErrorKind,
+    /// range of this error in the `Source`
     range: Range,
+    /// [Source](../enum.Source.html) of this error
     source: Source<'a>,
+    /// Indicate wether adding more tokens might remove this error.
     pub continuable: Continue,
 }
 

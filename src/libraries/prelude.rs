@@ -1,5 +1,7 @@
-use crate::vm::Value;
+use crate::runtime::Value;
 
+/// Takes two `Int` arguments `a` and `b`, and creates an iterator from `a`
+/// (included) to `b` (excluded).
 pub fn range(args: &mut [Value]) -> Result<Value, String> {
     if args.len() != 2 {
         return Err(format!(
@@ -30,6 +32,7 @@ pub fn range(args: &mut [Value]) -> Result<Value, String> {
     Ok(Value::from(iterator))
 }
 
+/// Takes a single `String` argument, and creates an iterator over its letters.
 pub fn letters(args: &mut [Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err(format!(
@@ -57,6 +60,7 @@ pub fn letters(args: &mut [Value]) -> Result<Value, String> {
     Ok(Value::from(letters))
 }
 
+/// Print the given arguments
 pub fn print(args: &mut [Value]) -> Result<Value, String> {
     for arg in args {
         print!("{}", arg)
@@ -64,6 +68,7 @@ pub fn print(args: &mut [Value]) -> Result<Value, String> {
     Ok(Value::Nil)
 }
 
+/// Print the given arguments and a newline.
 pub fn println(args: &mut [Value]) -> Result<Value, String> {
     for arg in args {
         print!("{}", arg)
@@ -72,6 +77,7 @@ pub fn println(args: &mut [Value]) -> Result<Value, String> {
     Ok(Value::Nil)
 }
 
+/// Takes a single argument, and tries to convert it to a `String`.
 pub fn to_string(args: &mut [Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err(format!(
@@ -94,6 +100,7 @@ pub fn to_string(args: &mut [Value]) -> Result<Value, String> {
     Ok(Value::String(string))
 }
 
+/// Takes a single argument, and tries to convert it to a `Int`.
 pub fn to_int(args: &mut [Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err(format!(

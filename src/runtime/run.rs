@@ -50,7 +50,7 @@ impl VM {
             let mut local = unsafe {
                 self.local_vars()
                     .get(index)
-                    .ok_or(InternalError::IncorrectInstruction(Instruction::ReadLocal(
+                    .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(
                         index as u64,
                     )))?
                     .duplicate()
@@ -67,9 +67,9 @@ impl VM {
         let old_value =
             self.local_vars_mut()
                 .get_mut(index)
-                .ok_or(InternalError::IncorrectInstruction(
-                    Instruction::WriteLocal(index as u64),
-                ))?;
+                .ok_or(InternalError::InvalidOperand(Instruction::WriteLocal(
+                    index as u64,
+                )))?;
         old_value.unroot();
         *old_value = value;
         Ok(())
@@ -115,9 +115,9 @@ impl VM {
             .chunk()
             .functions
             .get(operand as usize)
-            .ok_or(InternalError::IncorrectInstruction(
-                Instruction::ReadFunction(operand),
-            ))?
+            .ok_or(InternalError::InvalidOperand(Instruction::ReadFunction(
+                operand,
+            )))?
             .clone();
 
         // Capture variables
@@ -128,7 +128,7 @@ impl VM {
                     let to_capture = unsafe {
                         self.local_vars_mut()
                             .get_mut(*index)
-                            .ok_or(InternalError::IncorrectInstruction(Instruction::ReadLocal(
+                            .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(
                                 *index as u64,
                             )))?
                             .duplicate()
@@ -136,12 +136,12 @@ impl VM {
                     let to_capture = self.gc.new_captured(to_capture);
                     captured.push(unsafe { to_capture.duplicate() });
                     *self.local_vars_mut().get_mut(*index).ok_or(
-                        InternalError::IncorrectInstruction(Instruction::ReadLocal(*index as u64)),
+                        InternalError::InvalidOperand(Instruction::ReadLocal(*index as u64)),
                     )? = to_capture;
                 }
                 LocalOrCaptured::Captured(index) => {
                     let to_capture = self.captured_vars_mut().get_mut(*index).ok_or(
-                        InternalError::IncorrectInstruction(Instruction::ReadLocal(*index as u64)),
+                        InternalError::InvalidOperand(Instruction::ReadLocal(*index as u64)),
                     )?;
                     captured.push(unsafe { to_capture.duplicate() })
                 }
@@ -344,7 +344,7 @@ impl VM {
                 ),
                 Instruction::ReadGlobal(_) => {
                     let name = self.chunk().globals.get(operand as usize).ok_or(
-                        InternalError::IncorrectInstruction(Instruction::ReadGlobal(operand)),
+                        InternalError::InvalidOperand(Instruction::ReadGlobal(operand)),
                     )?;
                     let mut value = self
                         .global_variables
@@ -359,9 +359,9 @@ impl VM {
                         .chunk
                         .globals
                         .get(operand as usize)
-                        .ok_or(InternalError::IncorrectInstruction(
-                            Instruction::ReadGlobal(operand),
-                        ))?
+                        .ok_or(InternalError::InvalidOperand(Instruction::ReadGlobal(
+                            operand,
+                        )))?
                         .clone();
                     let global = self.pop(true)?;
                     self.write_global(name, global)
@@ -378,9 +378,9 @@ impl VM {
                     let mut captured = unsafe {
                         self.captured_vars()
                             .get(operand as usize)
-                            .ok_or(InternalError::IncorrectInstruction(
-                                Instruction::ReadCaptured(operand),
-                            ))?
+                            .ok_or(InternalError::InvalidOperand(Instruction::ReadCaptured(
+                                operand,
+                            )))?
                             .duplicate()
                     };
                     captured.root();
@@ -389,7 +389,7 @@ impl VM {
                 Instruction::WriteCaptured(_) => {
                     let var = self.pop(true)?;
                     let captured = self.captured_vars_mut().get_mut(operand as usize).ok_or(
-                        InternalError::IncorrectInstruction(Instruction::ReadCaptured(operand)),
+                        InternalError::InvalidOperand(Instruction::ReadCaptured(operand)),
                     )?;
                     if let Some(value) = captured.as_captured_mut() {
                         *value = var;
@@ -402,16 +402,6 @@ impl VM {
                 }
                 // NOTE FOR JUMPS : We need to add/subtract 1 because we are on the instruction AFTER the jump.
                 Instruction::Jump(_) => self.jump_to(operand as usize + self.ip - 1)?,
-                Instruction::JumpTrue(_) => {
-                    if self.stack.last().ok_or(InternalError::EmptyStack)? == &Value::Bool(true) {
-                        self.jump_to(operand as usize + self.ip - 1)?
-                    }
-                }
-                Instruction::JumpFalse(_) => {
-                    if self.stack.last().ok_or(InternalError::EmptyStack)? == &Value::Bool(false) {
-                        self.jump_to(operand as usize + self.ip - 1)?
-                    }
-                }
                 Instruction::JumpPopFalse(_) => {
                     if self.pop(false)? == Value::Bool(false) {
                         self.jump_to(operand as usize + self.ip - 1)?
@@ -575,15 +565,29 @@ pub(super) enum VMErrorKind {
     Runtime(RuntimeError),
 }
 
+/// Error internally thrown by the VM.
+///
+/// Such errors *should* not happen in theory. If they do, that means there is a
+/// bug in the VM or parser.
 #[derive(Debug)]
 pub enum InternalError {
+    /// The instruction pointer was out of bounds : the first number is the
+    /// value of the instruction pointer, and the second is the length of the
+    /// instruction vector.
     InstructionPointerOOB(usize, usize),
+    /// The instruction pointer is sent out of bounds by the contained offset.
+    /// The boolean indicate whether the offset is positive (`true`) or negative
+    /// (`false`)
     JumpOob(usize, bool),
+    /// An element was requested from the `stack` but it was empty.
     EmptyStack,
-    IncorrectInstruction(Instruction<u64>),
-    /// if `true`, `break`, else `continue`.
-    BreakOrContinueOutsideLoop(bool),
+    /// Various instruction errors. Most of the time this is caused by an
+    /// incorrect `Read-` or `Write-` instruction operand.
     InvalidOperand(Instruction<u64>),
+    /// A `Break` or `Continue` instruction was encountered outside of a loop.
+    ///
+    /// If `true`, `break`, else `continue`.
+    BreakOrContinueOutsideLoop(bool),
 }
 
 impl fmt::Display for InternalError {
@@ -598,19 +602,19 @@ impl fmt::Display for InternalError {
                 if *forward {
                     write!(
                         formatter,
-                        "!!! jump address -{} is out of bounds !!!",
+                        "!!! jump offset {} is out of bounds !!!",
                         jump_address
                     )
                 } else {
                     write!(
                         formatter,
-                        "!!! jump address {} is out of bounds !!!",
+                        "!!! jump offset -{} is out of bounds !!!",
                         jump_address
                     )
                 }
             }
             Self::EmptyStack => formatter.write_str("!!! empty stack !!!"),
-            Self::IncorrectInstruction(instruction) => write!(
+            Self::InvalidOperand(instruction) => write!(
                 formatter,
                 "!!! incorrect instruction : '{:?}'  !!!",
                 instruction
@@ -620,20 +624,18 @@ impl fmt::Display for InternalError {
                 "unexpected {} outside or a 'while' or 'for' loop",
                 if *b { "break" } else { "continue" }
             ),
-            Self::InvalidOperand(instruction) => write!(
-                formatter,
-                "!!! invalid operand for instruction '{}' : '{}'  !!!",
-                instruction.name(),
-                instruction.operand().unwrap_or(0)
-            ),
         }
     }
 }
 
+/// Various errors thrown by the Virtual Machine.
 #[derive(Debug)]
 pub enum VMError<'a> {
+    /// Internal error : indicate a bug in the VM
     Internal { kind: InternalError, line: usize },
+    /// Error encountered at runtime
     Runtime { kind: RuntimeError, line: usize },
+    /// Error(s) encountered while parsing
     Parser(Vec<ParserError<'a>>),
 }
 

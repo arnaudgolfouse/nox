@@ -1,6 +1,6 @@
 use nox2::{
     libraries,
-    vm::{VMError, Value, VM},
+    runtime::{VMError, Value, VM},
     Continue,
 };
 use rustyline::{error::ReadlineError, Editor};
