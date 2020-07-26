@@ -1,16 +1,29 @@
 //! Nox language interpreter
 //!
+//! This documentation covers the internal of the parser and the runtime : it
+//! does not describe how to actually use the nox language.
+//!
+//! # Structure
+//!
+//! The process is made out of three major steps :
+//! - Lexing : A [Lexer](./lexer/struct.Lexer.html) turns the source code into
+//! [Tokens](./lexer/struct.Token.html).
+//! - Parsing : A [Parser](./parser/struct.Parser.html) turns source code into
+//! bytecode (It includes a `Lexer` internally).
+//! - Running : A [Virtual Machine](./runtime/struct.VM.html) runs the bytecode.
+//!
 //! # Features
 //!
-//! The `check` feature, enabled by default, enables checks on various
+//! - The `check` feature, enabled by default, enables checks on various
 //! operations internal to the VM. It is mainly used in case there is a bug in
 //! the VM, or if you fed custom bytecode to the VM. Disabling it may improve
 //! performances.
-//!
-//! ## Note
-//!
+//! ### Note
 //! At the moment, it seems that unchecked runs perform **worse** that the
 //! checked ones. They do result in smaller binaries though.
+//!
+//! - Benchmarks can be run by activating the `bench` feature :
+//! `cargo bench --features bench`.
 
 mod error;
 pub mod lexer;
