@@ -21,7 +21,9 @@ bench = ["criterion"]
 [[bench]]
 name = "munchausen"
 harness = false
+required-features = ["bench"]
 
 [[bench]]
 name = "range"
 harness = false
+required-features = ["bench"]
