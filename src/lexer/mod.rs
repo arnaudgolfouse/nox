@@ -267,7 +267,7 @@ impl<'a> Lexer<'a> {
     fn parse_base(&mut self, s: &str, base: u32) -> Result<TokenKind, LexerError<'a>> {
         let result = match i64::from_str_radix(s, base) {
             Ok(i) => i,
-            Err(err) => return Err(self.emit_error(LexerErrorKind::Parsei64(err), Continue::Stop)),
+            Err(err) => return Err(self.emit_error(LexerErrorKind::Parseint(err), Continue::Stop)),
         };
         // if there is a '.', this is a floating-point number
         let next_char = self.iterator.peek();
@@ -302,7 +302,9 @@ impl<'a> Lexer<'a> {
         };
         let float_part = match s.parse::<f64>() {
             Ok(f) => f,
-            Err(err) => return Err(self.emit_error(LexerErrorKind::Parsef64(err), Continue::Stop)),
+            Err(err) => {
+                return Err(self.emit_error(LexerErrorKind::Parsefloat(err), Continue::Stop))
+            }
         };
         // if there is a '.', throw an error
         match self.iterator.peek() {
@@ -312,24 +314,96 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Will make a string out of all the next characters, until `matching_character`.
+    /// Will make a string out of all the next characters, until
+    /// `matching_character`.
     fn string(&mut self, matching_character: char) -> Result<String, LexerError<'a>> {
         let mut result = String::new();
         loop {
-            let next_char = match self.next_char() {
+            let next_char = match self.next_char_raw() {
                 None => {
                     return Err(self.emit_error(
                         LexerErrorKind::IncompleteString(matching_character),
                         Continue::Continue,
                     ))
                 }
-                Some(c) => c,
+                Some('\\') => {
+                    let c = match self.next_char_raw() {
+                        Some(c) => c,
+                        None => {
+                            return Err(self.emit_error(
+                                LexerErrorKind::IncompleteString(matching_character),
+                                Continue::Stop,
+                            ))
+                        }
+                    };
+                    match c {
+                        '\\' => '\\',
+                        '\'' => '\'',
+                        '\"' => '\"',
+                        '0' => '\0',
+                        'n' => '\n',
+                        'r' => '\r',
+                        't' => '\t',
+                        // ohhh boy, unicode
+                        // ;)
+                        // this is the same as in rust : \u{code}
+                        'u' => {
+                            match self.next_char_raw() {
+                                Some('{') => {}
+                                c => {
+                                    return Err(self.emit_error(
+                                        LexerErrorKind::ExpectedFound('{', c),
+                                        Continue::Stop,
+                                    ))
+                                }
+                            }
+                            let mut code_point = String::new();
+                            loop {
+                                if let Some(c) = self.next_char_raw() {
+                                    match c {
+                                        '}' => break,
+                                        _ => code_point.push(c),
+                                    }
+                                } else {
+                                    return Err(self.emit_error(
+                                        LexerErrorKind::IncompleteString(matching_character),
+                                        Continue::Stop,
+                                    ));
+                                }
+                            }
+                            match u32::from_str_radix(&code_point, 16) {
+                                Ok(code) => match std::char::from_u32(code) {
+                                    Some(c) => c,
+                                    None => {
+                                        return Err(self.emit_error(
+                                            LexerErrorKind::InvalidCodePoint(code),
+                                            Continue::Stop,
+                                        ))
+                                    }
+                                },
+                                Err(err) => {
+                                    return Err(self
+                                        .emit_error(LexerErrorKind::Parseint(err), Continue::Stop))
+                                }
+                            }
+                        }
+                        c if c == matching_character => c,
+                        _ => {
+                            return Err(
+                                self.emit_error(LexerErrorKind::UnknownEscape(c), Continue::Stop)
+                            )
+                        }
+                    }
+                }
+                Some(c) => {
+                    if c == matching_character {
+                        break;
+                    } else {
+                        c
+                    }
+                }
             };
-            if next_char == matching_character {
-                break;
-            } else {
-                result.push(next_char)
-            }
+            result.push(next_char)
         }
 
         Ok(result)
@@ -393,7 +467,8 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Gives next char with side-effects : it skips whitespace and advance the position.
+    /// Gives next char with side-effects : it skips commentary and advance the
+    /// position.
     fn next_char(&mut self) -> Option<char> {
         self.previous_position = self.position;
         self.position = self.next_position;
@@ -422,6 +497,23 @@ impl<'a> Lexer<'a> {
             }
         }
     }
+
+    /// Gives next char and advance the position.
+    fn next_char_raw(&mut self) -> Option<char> {
+        self.previous_position = self.position;
+        self.position = self.next_position;
+        match self.iterator.next() {
+            None => None,
+            Some('\n') => {
+                self.next_position.line += 1;
+                Some('\n')
+            }
+            Some(c) => {
+                self.next_position.column += 1;
+                Some(c)
+            }
+        }
+    }
 }
 
 /// Kind of errors returned by the lexer
@@ -437,12 +529,20 @@ pub enum LexerErrorKind {
     UnknownCharacter(char),
     /// Expected a character, but the input was over
     ExpectedCharacterAfter(char),
+    /// Expected the first character, found the second or nothing
+    ExpectedFound(char, Option<char>),
     /// Missing ending character in a string
     IncompleteString(char),
+    /// Unknown escape character in a string
+    UnknownEscape(char),
+    /// Invalid UTF8 code point in string.
+    ///
+    /// Emmitted with "\u{code}"
+    InvalidCodePoint(u32),
     /// Error while parsing an integer
-    Parsei64(std::num::ParseIntError),
+    Parseint(std::num::ParseIntError),
     /// Error while parsing a float
-    Parsef64(std::num::ParseFloatError),
+    Parsefloat(std::num::ParseFloatError),
 }
 
 impl Display for LexerErrorKind {
@@ -463,9 +563,22 @@ impl Display for LexerErrorKind {
             Self::ExpectedCharacterAfter(c) => {
                 write!(formatter, "expected character after '{}'", c)
             }
+            Self::ExpectedFound(expected, found) => write!(
+                formatter,
+                "expected '{}', found {}",
+                expected,
+                match found {
+                    Some(c) => format!("'{}'", c),
+                    None => "nothing".to_owned(),
+                }
+            ),
             Self::IncompleteString(c) => write!(formatter, "expected {} to end the string", c),
-            Self::Parsei64(err) => write!(formatter, "{}", err),
-            Self::Parsef64(err) => write!(formatter, "{}", err),
+            Self::UnknownEscape(c) => {
+                write!(formatter, "unknown escape sequence in string : '\\{}'", c)
+            }
+            Self::InvalidCodePoint(c) => write!(formatter, "invalid utf8 code point : '{}'", c),
+            Self::Parseint(err) => write!(formatter, "{}", err),
+            Self::Parsefloat(err) => write!(formatter, "{}", err),
         }
     }
 }
