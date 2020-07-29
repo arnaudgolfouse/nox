@@ -78,9 +78,9 @@ int_number:
 
 float_number: DEC_DIGIT* '.' DEC_DIGIT+;
 
-string: ('"' STRING '"') | ('\'' STRING '\'');
+string: ('"' (~'"')* '"') | ('\'' (~'\'')* '\'');
 
-identifier: STRING;
+identifier: ID;
 
 parent_expr: '(' expression ')';
 
@@ -116,7 +116,7 @@ call_args: (expression ',')* (expression)?;
 /* ============== TERMINALS ============== */
 /* ======================================= */
 
-STRING: [a-z]+;
+ID: [a-zA-Z_] [a-zA-Z0-9_]*;
 
 DEC_DIGIT: [0-9];
 
@@ -128,4 +128,4 @@ BIN_DIGIT: [0-1];
 
 WS: [ \r\n\t] -> skip;
 
-COMMENT: '#' STRING '\n' -> channel(HIDDEN);
+COMMENT: '#' ~[\n]* -> channel(HIDDEN);

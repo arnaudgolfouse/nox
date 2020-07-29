@@ -69,4 +69,4 @@ returns `true`
 
 ## Syntax
 
-The exact grammar of the language is described in the GRAMMAR file.
+The exact grammar of the language is described in the [nox.g4](./nox.g4) file, although this is not exact (e.g. identifiers accept unicode characters, or the handling of escape sequences in strings is not described).
