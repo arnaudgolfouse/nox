@@ -1,4 +1,5 @@
 mod operations;
+mod rust_value;
 
 use super::{
     ffi::RustFunction,
@@ -6,16 +7,10 @@ use super::{
 };
 use crate::parser::{Chunk, Constant};
 pub use operations::OperationError;
+pub use rust_value::RValue;
 use std::{collections::HashMap, fmt, ptr::NonNull, sync::Arc};
 
 /// A value that a variable can take in nox.
-///
-/// # Note
-///
-/// This structure does not implement `Clone`, as cloning semantics are tied to
-/// the [garbage collector](../gc/struct.GC.html). The (unsafe) method
-/// [duplicate](enum.Value.html#method.duplicate) is provided to get a raw copy
-/// of a value.
 pub enum Value {
     /// `nil` value
     Nil,
@@ -86,11 +81,15 @@ impl fmt::Display for Value {
 impl Value {
     /// Clones the value.
     ///
+    /// `Value` does not implement `Clone`, as cloning semantics are tied to
+    /// the [garbage collector](../gc/struct.GC.html). This method is provided
+    /// to get a raw copy of a value.
+    ///
     /// # Safety
     ///
     /// If the value is collectable, this function yields a new pointer to the
     /// same value. It must then be ensured that this pointer remains valid.
-    pub unsafe fn duplicate(&self) -> Self {
+    pub(super) unsafe fn duplicate(&self) -> Self {
         match self {
             Self::Nil => Self::Nil,
             Self::Bool(b) => Self::Bool(*b),

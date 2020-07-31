@@ -33,7 +33,7 @@ impl VM {
     ///
     /// If `rooted` is `true`, the value will NOT be unrooted.
     #[inline]
-    fn pop(&mut self, rooted: bool) -> Result<Value, VMErrorKind> {
+    fn pop_stack(&mut self, rooted: bool) -> Result<Value, VMErrorKind> {
         let mut value = self.stack.pop().ok_or(InternalError::EmptyStack)?;
         if !rooted {
             value.unroot();
@@ -202,100 +202,100 @@ impl VM {
                     }
                 }
                 Instruction::Equal => {
-                    let value_1 = self.pop(false)?;
-                    let value_2 = self.pop(false)?;
+                    let value_1 = self.pop_stack(false)?;
+                    let value_2 = self.pop_stack(false)?;
                     self.stack.push(Value::Bool(value_1 == value_2))
                 }
                 Instruction::NEqual => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     self.stack.push(Value::Bool(value_1 != value_2))
                 }
                 Instruction::Less => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.less(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::LessEq => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.less_eq(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::More => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.more(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::MoreEq => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.more_eq(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::Add => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.add(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::Subtract => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.subtract(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::Multiply => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.multiply(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::Divide => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.divide(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::Modulo => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.modulo(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::Pow => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.pow(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::And => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.and(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::Or => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.or(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::Xor => {
-                    let value_2 = self.pop(false)?;
-                    let value_1 = self.pop(false)?;
+                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack(false)?;
                     let new_value = value_1.xor(value_2)?;
                     self.stack.push(new_value)
                 }
                 Instruction::Negative => {
-                    let value = self.pop(false)?;
+                    let value = self.pop_stack(false)?;
                     let new_value = value.negative()?;
                     self.stack.push(new_value)
                 }
                 Instruction::Not => {
-                    let value = self.pop(false)?;
+                    let value = self.pop_stack(false)?;
                     let new_value = value.not()?;
                     self.stack.push(new_value)
                 }
@@ -303,8 +303,8 @@ impl VM {
                 Instruction::PushTrue => self.stack.push(Value::Bool(true)),
                 Instruction::PushFalse => self.stack.push(Value::Bool(false)),
                 Instruction::ReadTable => {
-                    let key = self.pop(false)?;
-                    let table = self.pop(false)?;
+                    let key = self.pop_stack(false)?;
+                    let table = self.pop_stack(false)?;
                     if let Some(table) = table.as_table() {
                         let mut value = table
                             .get(&key)
@@ -317,9 +317,9 @@ impl VM {
                     }
                 }
                 Instruction::WriteTable => {
-                    let value = self.pop(false)?;
-                    let key = self.pop(false)?;
-                    let mut table = self.pop(false)?;
+                    let value = self.pop_stack(false)?;
+                    let key = self.pop_stack(false)?;
+                    let mut table = self.pop_stack(false)?;
                     if let Some(table) = table.as_table_mut() {
                         if value == Value::Nil {
                             self.gc.remove_table_element(table, &key);
@@ -363,7 +363,7 @@ impl VM {
                             operand,
                         )))?
                         .clone();
-                    let global = self.pop(true)?;
+                    let global = self.pop_stack(true)?;
                     self.write_global(name, global)
                 }
                 Instruction::ReadLocal(_) => {
@@ -371,7 +371,7 @@ impl VM {
                     self.stack.push(local)
                 }
                 Instruction::WriteLocal(_) => {
-                    let local = self.pop(true)?;
+                    let local = self.pop_stack(true)?;
                     self.write_local(operand as usize, local)?
                 }
                 Instruction::ReadCaptured(_) => {
@@ -387,7 +387,7 @@ impl VM {
                     self.stack.push(captured)
                 }
                 Instruction::WriteCaptured(_) => {
-                    let var = self.pop(true)?;
+                    let var = self.pop_stack(true)?;
                     let captured = self.captured_vars_mut().get_mut(operand as usize).ok_or(
                         InternalError::InvalidOperand(Instruction::ReadCaptured(operand)),
                     )?;
@@ -397,18 +397,18 @@ impl VM {
                 }
                 Instruction::Pop(_) => {
                     for _ in 0..operand {
-                        self.pop(false)?;
+                        self.pop_stack(false)?;
                     }
                 }
                 // NOTE FOR JUMPS : We need to add/subtract 1 because we are on the instruction AFTER the jump.
                 Instruction::Jump(_) => self.jump_to(operand as usize + self.ip - 1)?,
                 Instruction::JumpPopFalse(_) => {
-                    if self.pop(false)? == Value::Bool(false) {
+                    if self.pop_stack(false)? == Value::Bool(false) {
                         self.jump_to(operand as usize + self.ip - 1)?
                     }
                 }
                 Instruction::JumpEndWhile(_) => {
-                    let value = self.pop(false)?;
+                    let value = self.pop_stack(false)?;
                     if value == Value::Bool(false) {
                         self.pop_loop_address();
                         self.jump_to(operand as usize + self.ip - 1)?
@@ -416,7 +416,7 @@ impl VM {
                 }
                 Instruction::JumpEndFor(_) => {
                     if self.stack.last() == Some(&Value::Nil) {
-                        self.pop(false)?;
+                        self.pop_stack(false)?;
                         // address of the loop variable, since this instruction is always followed by `WriteLocal(loop_index)`.
                         {
                             let ip_before = self.ip;
@@ -437,7 +437,7 @@ impl VM {
                         }
                         self.pop_loop_address();
                         self.jump_to(operand as usize + self.ip - 1)?;
-                        self.pop(false)?;
+                        self.pop_stack(false)?;
                     }
                 }
                 Instruction::Break(_) => {
@@ -532,8 +532,8 @@ impl VM {
                     let mut new_table = self.gc.new_table();
                     if let Some(table) = new_table.as_table_mut() {
                         for _ in 0..operand {
-                            let value = self.pop(false)?;
-                            let key = self.pop(false)?;
+                            let value = self.pop_stack(false)?;
+                            let key = self.pop_stack(false)?;
                             self.gc.add_table_element(table, key, value);
                         }
                     }

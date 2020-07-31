@@ -27,9 +27,9 @@ use crate::{
     Source,
 };
 use gc::GC;
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{cell::UnsafeCell, collections::HashMap, fmt, marker::PhantomData, sync::Arc};
 use values::OperationError;
-pub use values::Value;
+pub use values::{RValue, Value};
 
 #[derive(Default, Debug)]
 struct CallFrame {
@@ -205,26 +205,52 @@ impl VM {
     ///
     /// assert_eq!(vm.run().unwrap(), Value::Float(-54.5));
     /// ```
-    pub fn run<'a>(&mut self) -> Result<Value, VMError<'a>> {
+    pub fn run<'a, 'b>(&'b mut self) -> Result<RValue<'b>, VMError<'a>> {
         // for variables
         for _ in 0..self.chunk.locals_number {
             self.stack.push(Value::Nil)
         }
-        let kind = match self.run_internal() {
-            Ok(ok) => return Ok(ok),
-            Err(err) => err,
-        };
-        match kind {
-            VMErrorKind::Runtime(err) => Err(VMError::Runtime {
-                kind: err,
-                line: self.chunk().get_line(self.ip),
-            }),
-            #[cfg(feature = "check")]
-            VMErrorKind::Internal(err) => Err(VMError::Internal {
-                kind: err,
-                line: self.chunk().get_line(self.ip),
-            }),
+        match self.run_internal() {
+            Ok(ok) => {
+                self.partial_reset();
+                Ok(unsafe { self.make_rvalue_noroot(ok) })
+            }
+            Err(err) => match err {
+                VMErrorKind::Runtime(err) => Err(VMError::Runtime {
+                    kind: err,
+                    line: self.chunk().get_line(self.ip),
+                }),
+                #[cfg(feature = "check")]
+                VMErrorKind::Internal(err) => Err(VMError::Internal {
+                    kind: err,
+                    line: self.chunk().get_line(self.ip),
+                }),
+            },
         }
+    }
+
+    /// push a value onto the stack
+    pub fn push<'a>(&'a mut self, value: RValue<'a>) {
+        // no need to root since `value` will never be dropped.
+        self.stack.push(unsafe { value.into_raw() })
+    }
+
+    /// pop a value from the stack
+    pub fn pop(&mut self) -> Option<RValue> {
+        match self.stack.pop() {
+            None => None,
+            // additional root here
+            Some(value) => Some(self.make_rvalue(value)),
+        }
+    }
+
+    fn make_rvalue(&self, mut value: Value) -> RValue {
+        value.root();
+        RValue(UnsafeCell::new(value), PhantomData::default())
+    }
+
+    unsafe fn make_rvalue_noroot(&self, value: Value) -> RValue {
+        RValue(UnsafeCell::new(value), PhantomData::default())
     }
 
     /// Currently executing instructions

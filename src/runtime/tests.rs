@@ -162,32 +162,32 @@ return x2",
 fn for_loop() {
     let mut vm = VM::new();
     /*vm.parse_top_level(
-        "
-fn range(a, b)
-    it = a
-    fn iter()
-        if it == b then
-            return nil
-        else
-            it += 1
-            return it - 1
+            "
+    fn range(a, b)
+        it = a
+        fn iter()
+            if it == b then
+                return nil
+            else
+                it += 1
+                return it - 1
+            end
+        end
+        return iter
+    end
+    x = 0
+    for i in range(1, 4)
+        while i != 0
+            i -= 1
+            x += 1
         end
     end
-    return iter
-end
-x = 0
-for i in range(1, 4)
-    while i != 0
-        i -= 1
-        x += 1
-    end
-end
-return x
-            ",
-    )
-    .unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Int(6));
-    vm.reset();*/
+    return x
+                ",
+        )
+        .unwrap();
+        assert_eq!(vm.run().unwrap(), Value::Int(6));
+        vm.reset();*/
 
     // a somewhat complex example
     vm.import_all(libraries::prelude()).unwrap();
