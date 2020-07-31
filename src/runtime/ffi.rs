@@ -37,40 +37,40 @@ impl<F: 'static + FnMut(&mut [Value]) -> Result<Value, String>> From<F> for Valu
 /// [import_all](../struct.VM.html#method.import_all) functions of the `VM`.
 #[derive(Debug)]
 pub struct Library {
-    pub(crate) name: String,
-    pub(crate) variables: Vec<(String, Value)>,
+    pub(crate) name: Box<str>,
+    pub(crate) variables: Vec<(Box<str>, Value)>,
 }
 
 impl Library {
     /// Creates a new empty library
-    pub fn new(name: String) -> Self {
+    pub fn new<Name: Into<Box<str>>>(name: Name) -> Self {
         Self {
-            name,
+            name: name.into(),
             variables: Vec::new(),
         }
     }
 
     /// Add an integer constant to the library
-    pub fn add_int<S: ToString>(&mut self, name: S, i: i64) {
-        self.variables.push((name.to_string(), Value::Int(i)))
+    pub fn add_int<Name: Into<Box<str>>>(&mut self, name: Name, i: i64) {
+        self.variables.push((name.into(), Value::Int(i)))
     }
 
     /// Add a float constant to the library
-    pub fn add_float<S: ToString>(&mut self, name: S, f: f64) {
-        self.variables.push((name.to_string(), Value::Float(f)))
+    pub fn add_float<Name: Into<Box<str>>>(&mut self, name: Name, f: f64) {
+        self.variables.push((name.into(), Value::Float(f)))
     }
 
     /// Add a string constant to the library
-    pub fn add_string<S: ToString>(&mut self, name: S, s: String) {
-        self.variables.push((name.to_string(), Value::String(s)))
+    pub fn add_string<Name: Into<Box<str>>, S: Into<Box<str>>>(&mut self, name: Name, s: S) {
+        self.variables.push((name.into(), Value::String(s.into())))
     }
 
     /// Add a Rust function to the library
-    pub fn add_function<S: ToString, F>(&mut self, function_name: S, function: F)
+    pub fn add_function<Name: Into<Box<str>>, F>(&mut self, function_name: Name, function: F)
     where
         for<'a> F: FnMut(&mut [Value]) -> Result<Value, String> + 'static,
     {
         self.variables
-            .push((function_name.to_string(), Value::from(function)))
+            .push((function_name.into(), Value::from(function)))
     }
 }

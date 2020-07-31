@@ -232,9 +232,9 @@ pub enum TokenKind {
     Placeholder,
     Int(i64),
     Float(f64),
-    Str(String),
+    Str(Box<str>),
     Op(Operation),
-    Id(String),
+    Id(Box<str>),
 }
 
 impl TokenKind {

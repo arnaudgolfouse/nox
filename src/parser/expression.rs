@@ -34,7 +34,7 @@ pub(super) enum Precedence {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum ExpressionType {
     Constant,
-    Assign(String, Assign, Range),
+    Assign(Box<str>, Assign, Range),
     UnaryOp,
     BinaryOp,
     Call,
@@ -55,7 +55,7 @@ pub(super) trait ExpressionParser<'a>: Sized {
     /// Parse a variable name.
     fn parse_variable(
         &mut self,
-        variable: String,
+        variable: Box<str>,
         read_only: bool,
     ) -> Result<ExpressionType, ParserError<'a>>;
     /// Parse a parenthesised expression.
@@ -282,7 +282,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
 
     fn parse_variable(
         &mut self,
-        variable: String,
+        variable: Box<str>,
         read_only: bool,
     ) -> Result<ExpressionType, ParserError<'a>> {
         if let Some(Token {
@@ -350,7 +350,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                 Range::new(self.current_position(), self.current_position()),
             ));
         }
-        let function = self.parse_prototype(String::from("<closure>"), true)?;
+        let function = self.parse_prototype(Box::from("<closure>"), true)?;
         self.function_stack.push(function);
         loop {
             match self.parse_statements()? {

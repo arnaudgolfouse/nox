@@ -125,7 +125,7 @@ impl Value {
                 _ => Err((self, other)),
             },
             Value::String(s1) => match other {
-                Value::String(s2) => Ok(Value::String(format!("{}{}", s1, s2))),
+                Value::String(s2) => Ok(Value::String(format!("{}{}", s1, s2).into_boxed_str())),
                 _ => Err((Value::String(s1), other)),
             },
             _ => Err((self, other)),
@@ -159,7 +159,7 @@ impl Value {
             Value::Int(i1) => match other {
                 Value::Int(i2) => Ok(Value::Int(i1 * i2)),
                 Value::Float(f) => Ok(Value::Float(i1 as f64 * f)),
-                Value::String(s) => Ok(Value::String(s.repeat(i1 as usize))),
+                Value::String(s) => Ok(Value::String(s.repeat(i1 as usize).into_boxed_str())),
                 _ => Err((self, other)),
             },
             Value::Float(f1) => match other {
@@ -168,7 +168,7 @@ impl Value {
                 _ => Err((self, other)),
             },
             Value::String(s) => match other {
-                Value::Int(i) => Ok(Value::String(s.repeat(i as usize))),
+                Value::Int(i) => Ok(Value::String(s.repeat(i as usize).into_boxed_str())),
                 _ => Err((Value::String(s), other)),
             },
             _ => Err((self, other)),

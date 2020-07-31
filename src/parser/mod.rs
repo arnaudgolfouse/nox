@@ -91,7 +91,7 @@ enum VariableLocation {
 #[derive(Debug)]
 struct Function {
     /// Local variables of this function
-    variables: Vec<String>,
+    variables: Vec<Box<str>>,
     /// Stack of scopes
     scopes: Vec<Scope>,
     /// Bytecode
@@ -101,7 +101,7 @@ struct Function {
 }
 
 impl Function {
-    fn new_top_level(name: String) -> Self {
+    fn new_top_level(name: Box<str>) -> Self {
         Self {
             scopes: Vec::new(),
             variables: Vec::new(),
@@ -142,7 +142,7 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     /// Create a new `Parser` from a `Source`.
     pub fn new(source: Source<'a>) -> Self {
-        let name = source.name().to_owned();
+        let name = Box::from(source.name());
         Self {
             lexer: Lexer::new(source),
             errors: Vec::new(),
@@ -349,8 +349,10 @@ impl<'a> Parser<'a> {
                             );
                             // 'remove' the loop variable
                             match self.function_stack.last_mut() {
-                                Some(func) => func.variables[loop_variable_index].clear(),
-                                None => self.top_level.variables[loop_variable_index].clear(),
+                                Some(func) => func.variables[loop_variable_index] = Box::from(""),
+                                None => {
+                                    self.top_level.variables[loop_variable_index] = Box::from("")
+                                }
                             }
                         }
                     }
@@ -632,7 +634,7 @@ impl<'a> Parser<'a> {
             // local ?
             // reverse because of for variables.
             for (index, var) in func.variables.iter().enumerate().rev() {
-                if var == variable {
+                if var.as_ref() == variable {
                     return VariableLocation::Local(index);
                 }
             }
@@ -652,7 +654,7 @@ impl<'a> Parser<'a> {
             // in another function ? Then we must capture the variable a lot of time !
             for (func_index, func) in self.function_stack.iter().enumerate().rev().skip(1) {
                 for (index, var) in func.variables.iter().enumerate() {
-                    if var == variable {
+                    if var.as_ref() == variable {
                         let mut captured_index = LocalOrCaptured::Local(index);
                         // capturing the variable in all subsequent function
                         for function in self.function_stack.iter_mut().skip(func_index + 1) {
@@ -691,12 +693,12 @@ impl<'a> Parser<'a> {
             VariableLocation::Undefined
         } else {
             for (index, var) in self.top_level.variables.iter().enumerate().rev() {
-                if var == variable {
+                if var.as_ref() == variable {
                     return VariableLocation::Local(index);
                 }
             }
             for (index, var) in self.top_level.code.globals.iter().enumerate() {
-                if var == variable {
+                if var.as_ref() == variable {
                     return VariableLocation::Global(index);
                 }
             }
@@ -706,7 +708,7 @@ impl<'a> Parser<'a> {
 
     /// Emit the correct instruction to write a variable, assuming everything
     /// else has already been parsed.
-    fn write_variable(&mut self, variable: String) {
+    fn write_variable(&mut self, variable: Box<str>) {
         let instruction = match self.find_variable(&variable) {
             VariableLocation::Undefined => match self.function_stack.last_mut() {
                 Some(func) => {
@@ -728,7 +730,7 @@ impl<'a> Parser<'a> {
 
     fn assign_variable(
         &mut self,
-        variable: String,
+        variable: Box<str>,
         assignement: Assign,
     ) -> Result<(), ParserError<'a>> {
         match assignement {
@@ -784,7 +786,7 @@ impl<'a> Parser<'a> {
     /// Assumes the opening `(` has been parsed.
     fn parse_prototype(
         &mut self,
-        name: String,
+        name: Box<str>,
         closure: bool,
     ) -> Result<Function, ParserError<'a>> {
         let mut args = Vec::new();

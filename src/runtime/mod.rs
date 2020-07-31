@@ -55,7 +55,7 @@ pub struct VM {
     /// Stack for local variables
     stack: Vec<Value>,
     /// Global variables
-    global_variables: HashMap<String, Value>,
+    global_variables: HashMap<Box<str>, Value>,
     /// Stack of call information
     call_frames: Vec<CallFrame>,
     /// Stack of loop addresses used in `Continue` and `Break`
@@ -342,7 +342,7 @@ pub enum RuntimeError {
     /// Error emitted by a Rust function
     RustFunction(String),
     /// Trying to import an already defined library
-    NameAlreadyDefined(String),
+    NameAlreadyDefined(Box<str>),
 }
 
 impl fmt::Display for RuntimeError {

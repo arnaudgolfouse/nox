@@ -23,7 +23,7 @@ pub enum Value {
     /// Heap-allocated string
     ///
     /// TODO : make this a collectable value ?
-    String(String),
+    String(Box<str>),
     /// Collectable value
     Collectable(NonNull<Collectable>),
     /// External Rust function

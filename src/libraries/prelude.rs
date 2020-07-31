@@ -50,11 +50,7 @@ pub fn letters(args: &mut [Value]) -> Result<Value, String> {
     let letters = move |_: &mut [Value]| {
         Ok(match string.next() {
             None => Value::Nil,
-            Some(c) => {
-                let mut res = String::with_capacity(1);
-                res.push(c);
-                Value::String(res)
-            }
+            Some(c) => Value::String(Box::from(c.encode_utf8(&mut [0; 4]) as &str)),
         })
     };
     Ok(Value::from(letters))
@@ -86,7 +82,7 @@ pub fn to_string(args: &mut [Value]) -> Result<Value, String> {
         ));
     }
     let string = match unsafe { args.get_unchecked(0) }.captured_value_ref() {
-        Value::String(s) => s.clone(),
+        Value::String(s) => return Ok(Value::String(s.clone())),
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
         Value::Bool(b) => b.to_string(),
@@ -97,7 +93,7 @@ pub fn to_string(args: &mut [Value]) -> Result<Value, String> {
             ))
         }
     };
-    Ok(Value::String(string))
+    Ok(Value::String(string.into_boxed_str()))
 }
 
 /// Takes a single argument, and tries to convert it to a `Int`.

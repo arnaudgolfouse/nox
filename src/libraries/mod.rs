@@ -67,7 +67,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(vm.run().unwrap(), Value::String("eoo".to_string()));
+        assert_eq!(vm.run().unwrap(), Value::String("eoo".into()));
 
         let mut vm = VM::new();
         vm.import_all(prelude()).unwrap();
@@ -81,7 +81,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(vm.run().unwrap(), Value::String("54 8.61 true".to_string()));
+        assert_eq!(vm.run().unwrap(), Value::String("54 8.61 true".into()));
 
         let mut vm = VM::new();
         vm.import_all(prelude()).unwrap();

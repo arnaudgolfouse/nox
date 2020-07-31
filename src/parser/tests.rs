@@ -57,16 +57,16 @@ fn simple_statements() {
     assert_eq!(
         chunk.constants,
         [
-            Constant::String("hello".to_owned()),
-            Constant::String("world".to_owned()),
-            Constant::String("hello world".to_owned()),
+            Constant::String("hello".into()),
+            Constant::String("world".into()),
+            Constant::String("hello world".into()),
             Constant::Int(2),
             Constant::Int(5),
             Constant::Int(6),
             Constant::Int(8),
         ]
     );
-    assert_eq!(chunk.globals, ["f", "g"]);
+    assert_eq!(chunk.globals, [Box::from("f"), Box::from("g")]);
     assert_eq!(
         chunk.code,
         [
@@ -103,7 +103,7 @@ fn while_loop() {
     let parser = Parser::new(Source::TopLevel("while x > y x -= 1 end"));
     let chunk = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1)]);
-    assert_eq!(chunk.globals, ["x", "y"]);
+    assert_eq!(chunk.globals, [Box::from("x"), Box::from("y")]);
     assert_eq!(
         chunk.code,
         [
@@ -137,7 +137,7 @@ fn while_loop() {
     ));
     let chunk = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1)]);
-    assert_eq!(chunk.globals, ["x", "y"]);
+    assert_eq!(chunk.globals, [Box::from("x"), Box::from("y")]);
     assert_eq!(
         chunk.code[0..6],
         [
@@ -181,7 +181,7 @@ fn for_loop() {
     ));
     let chunk = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1), Constant::Int(2)]);
-    assert_eq!(chunk.globals, ["range", "x"]);
+    assert_eq!(chunk.globals, [Box::from("range"), Box::from("x")]);
     assert_eq!(
         chunk.code,
         [
@@ -221,7 +221,7 @@ fn for_loop() {
         chunk.constants,
         [Constant::Int(0), Constant::Int(1), Constant::Int(3)]
     );
-    assert_eq!(chunk.globals, ["range", "x"]);
+    assert_eq!(chunk.globals, [Box::from("range"), Box::from("x")]);
     assert_eq!(
         chunk.code,
         [
@@ -256,7 +256,7 @@ fn tables() {
     let parser = Parser::new(Source::TopLevel("t = {}"));
     let chunk = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, []);
-    assert_eq!(chunk.globals, ["t"]);
+    assert_eq!(chunk.globals, [Box::from("t")]);
     assert_eq!(
         chunk.code,
         [
@@ -272,14 +272,14 @@ fn tables() {
     assert_eq!(
         chunk.constants,
         [
-            Constant::String("x".to_owned()),
+            Constant::String("x".into()),
             Constant::Int(1),
             Constant::Int(2),
-            Constant::String("y".to_owned()),
-            Constant::String("hello".to_owned())
+            Constant::String("y".into()),
+            Constant::String("hello".into())
         ]
     );
-    assert_eq!(chunk.globals, ["t"]);
+    assert_eq!(chunk.globals, [Box::from("t")]);
     assert_eq!(
         chunk.code,
         [
@@ -301,18 +301,18 @@ fn tables() {
     assert_eq!(
         chunk.constants,
         [
-            Constant::String("a".to_owned()),
-            Constant::String("b".to_owned()),
+            Constant::String("a".into()),
+            Constant::String("b".into()),
             Constant::Int(2)
         ]
     );
     assert_eq!(
         chunk.globals,
         [
-            String::from("t1"),
-            String::from("f"),
-            String::from("t2"),
-            String::from("t3")
+            Box::from("t1"),
+            Box::from("f"),
+            Box::from("t2"),
+            Box::from("t3")
         ]
     );
     assert_eq!(
@@ -357,7 +357,15 @@ fn tables() {
             Constant::Int(3)
         ]
     );
-    assert_eq!(chunk.globals, ["t"]);
+    assert_eq!(
+        chunk // not very... nice...
+            .globals
+            .iter()
+            .map(|name| name.as_ref())
+            .collect::<Vec<&str>>()
+            .as_slice(),
+        ["t"]
+    );
     assert_eq!(
         chunk.code,
         [
@@ -387,7 +395,15 @@ fn functions() {
     let parser = Parser::new(Source::TopLevel("fn f() return 0 end x = f()"));
     let chunk = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, []);
-    assert_eq!(chunk.globals, ["f", "x"]);
+    assert_eq!(
+        chunk // not very... nice...
+            .globals
+            .iter()
+            .map(|name| name.as_ref())
+            .collect::<Vec<&str>>()
+            .as_slice(),
+        ["f", "x"]
+    );
     assert_eq!(
         chunk.code,
         [
@@ -425,7 +441,15 @@ fn functions() {
     ));
     let chunk = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(0)]);
-    assert_eq!(chunk.globals, ["x", "f"]);
+    assert_eq!(
+        chunk // not very... nice...
+            .globals
+            .iter()
+            .map(|name| name.as_ref())
+            .collect::<Vec<&str>>()
+            .as_slice(),
+        ["x", "f"]
+    );
     assert_eq!(
         chunk.code,
         [
@@ -482,7 +506,7 @@ fn functions() {
     ));
     let chunk = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, []);
-    assert_eq!(chunk.globals, ["x"]);
+    assert_eq!(chunk.globals[0].as_ref(), "x");
     assert_eq!(
         chunk.code,
         [
@@ -538,7 +562,15 @@ fn functions() {
     let chunk = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(0)]);
     assert_eq!(chunk.captures, []);
-    assert_eq!(chunk.globals, ["x", "y"]);
+    assert_eq!(
+        chunk // not very... nice...
+            .globals
+            .iter()
+            .map(|name| name.as_ref())
+            .collect::<Vec<&str>>()
+            .as_slice(),
+        ["x", "y"]
+    );
     assert_eq!(
         chunk.code,
         [

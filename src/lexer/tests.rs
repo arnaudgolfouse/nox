@@ -60,7 +60,7 @@ fn strings() {
             .unwrap()
             .unwrap()
             .kind,
-        TokenKind::Str("hello'\" world".to_owned())
+        TokenKind::Str("hello'\" world".into())
     );
     assert_eq!(
         Lexer::top_level(r#""\u{0052}\u{75}\u{73}\u{74} \u{1f609}""#)
@@ -68,7 +68,7 @@ fn strings() {
             .unwrap()
             .unwrap()
             .kind,
-        TokenKind::Str("Rust 😉".to_owned())
+        TokenKind::Str("Rust 😉".into())
     );
 
     assert_eq!(
@@ -77,6 +77,6 @@ fn strings() {
             .unwrap()
             .unwrap()
             .kind,
-        TokenKind::Str("hello#\r\nworld!\\\0".to_owned())
+        TokenKind::Str("hello#\r\nworld!\\\0".into())
     );
 }

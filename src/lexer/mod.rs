@@ -109,7 +109,7 @@ impl<'a> Lexer<'a> {
     /// let mut tokens = lexer.tokens().unwrap();
     /// assert_eq!(TokenKind::Float(4.1), tokens.pop().unwrap().kind);
     /// assert_eq!(TokenKind::Op(Operation::Multiply), tokens.pop().unwrap().kind);
-    /// assert_eq!(TokenKind::Id("b".to_owned()), tokens.pop().unwrap().kind);
+    /// assert_eq!(TokenKind::Id("b".into()), tokens.pop().unwrap().kind);
     /// ```
     pub fn tokens(&mut self) -> Result<Vec<Token>, LexerError<'a>> {
         let mut result = Vec::new();
@@ -152,7 +152,7 @@ impl<'a> Lexer<'a> {
             ';' => TokenKind::SemiColon,
             c if c.is_alphanumeric() || c == '_' => {
                 let word = self.identifier(next_char);
-                match word.as_str() {
+                match word.as_ref() {
                     "and" => TokenKind::Op(Operation::And),
                     "or" => TokenKind::Op(Operation::Or),
                     "xor" => TokenKind::Op(Operation::Xor),
@@ -213,7 +213,7 @@ impl<'a> Lexer<'a> {
     /// let tokens = [
     ///     TokenKind::Int(3),
     ///     TokenKind::Op(Operation::Multiply),
-    ///     TokenKind::Str("hello".to_owned()),
+    ///     TokenKind::Str("hello".into()),
     ///     TokenKind::Op(Operation::Pow),
     ///     TokenKind::Int(2),
     /// ];
@@ -249,7 +249,7 @@ impl<'a> Lexer<'a> {
     ///     TokenKind::Int(3),
     ///     TokenKind::Op(Operation::Multiply),
     ///     TokenKind::Op(Operation::Multiply),
-    ///     TokenKind::Str("hello".to_owned()),
+    ///     TokenKind::Str("hello".into()),
     /// ];
     /// let mut lexer = Lexer::top_level(source);
     /// assert_eq!(tokens[0], lexer.next().unwrap().unwrap().kind);
@@ -316,7 +316,7 @@ impl<'a> Lexer<'a> {
 
     /// Will make a string out of all the next characters, until
     /// `matching_character`.
-    fn string(&mut self, matching_character: char) -> Result<String, LexerError<'a>> {
+    fn string(&mut self, matching_character: char) -> Result<Box<str>, LexerError<'a>> {
         let mut result = String::new();
         loop {
             let next_char = match self.next_char_raw() {
@@ -406,11 +406,11 @@ impl<'a> Lexer<'a> {
             result.push(next_char)
         }
 
-        Ok(result)
+        Ok(result.into_boxed_str())
     }
 
     /// Parse all the following letters/numbers as part of an identifier, until a whitespace character is met.
-    fn identifier(&mut self, first_letter: char) -> String {
+    fn identifier(&mut self, first_letter: char) -> Box<str> {
         let mut result = String::with_capacity(1);
         result.push(first_letter);
 
@@ -425,7 +425,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        result
+        result.into_boxed_str()
     }
 
     /// Parse an operator, and eventually make it an assignement.

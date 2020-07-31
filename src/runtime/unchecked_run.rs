@@ -63,7 +63,7 @@ impl VM {
     /// Root and write the given global value, unrooting any potential previous
     /// value.
     #[inline]
-    fn write_global(&mut self, name: String, global: Value) {
+    fn write_global(&mut self, name: Box<str>, global: Value) {
         if let Some(mut value) = if global == Value::Nil {
             self.global_variables.remove(&name)
         } else {

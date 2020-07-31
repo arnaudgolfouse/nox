@@ -341,7 +341,7 @@ pub enum Constant {
     Int(i64),
     Bool(bool),
     Float(f64),
-    String(String),
+    String(Box<str>),
 }
 
 impl TryFrom<TokenKind> for Constant {
@@ -380,7 +380,7 @@ impl fmt::Display for Constant {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Chunk {
     /// Name of this chunk
-    pub(crate) name: String,
+    pub(crate) name: Box<str>,
     /// Vector of line information for the instructions
     pub(crate) lines: Vec<(u32, u32)>,
     /// bytecode instructions
@@ -390,7 +390,7 @@ pub struct Chunk {
     /// Constants associated with the chunk
     pub(crate) constants: Vec<Constant>,
     /// Global names associated with the chunk
-    pub(crate) globals: Vec<String>,
+    pub(crate) globals: Vec<Box<str>>,
     /// Number of locals needed when loading the function
     pub(crate) locals_number: u32,
     /// Captured variables from this function's parent.
@@ -401,7 +401,7 @@ pub struct Chunk {
 
 impl Chunk {
     /// Create a new Chunk with the name `name`.
-    pub(crate) fn new(name: String) -> Self {
+    pub(crate) fn new(name: Box<str>) -> Self {
         Self {
             name,
             lines: Vec::new(),
@@ -415,7 +415,7 @@ impl Chunk {
         }
     }
 
-    pub fn name(&self) -> &String {
+    pub fn name(&self) -> &str {
         &self.name
     }
 
@@ -465,7 +465,7 @@ impl Chunk {
     }
 
     /// Add a string to the Chunk, and return it's index for future reference.
-    pub(crate) fn add_string(&mut self, global: String) -> u32 {
+    pub(crate) fn add_string(&mut self, global: Box<str>) -> u32 {
         if let Some((index, _)) = self
             .globals
             .iter()
@@ -517,7 +517,7 @@ impl Chunk {
         write!(formatter, "{:<14}    ", instruction.name())?;
         let operand_value = match instruction {
             Instruction::ReadConstant(_) => {
-                format!("{}", self.constants[operand.unwrap_or_default() as usize])
+                format!("{}", self.constants[operand.unwrap_or_default() as usize]).into_boxed_str()
             }
             Instruction::ReadGlobal(_) | Instruction::WriteGlobal(_) => {
                 self.globals[operand.unwrap_or_default() as usize].clone()
@@ -525,7 +525,7 @@ impl Chunk {
             Instruction::ReadFunction(_) => self.functions[operand.unwrap_or_default() as usize]
                 .name
                 .clone(),
-            _ => String::new(),
+            _ => Box::from(""),
         };
         let operand = if let Some(operand) = instruction.operand() {
             format!("{}", operand)
