@@ -464,8 +464,8 @@ impl Chunk {
         self.constants.len() as u32 - 1
     }
 
-    /// Add a string to the Chunk, and return it's index for future reference.
-    pub(crate) fn add_string(&mut self, global: Box<str>) -> u32 {
+    /// Add a global to the Chunk, and return it's index for future reference.
+    pub(crate) fn add_global(&mut self, global: Box<str>) -> u32 {
         if let Some((index, _)) = self
             .globals
             .iter()

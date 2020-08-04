@@ -92,6 +92,10 @@ enum VariableLocation {
 struct Function {
     /// Local variables of this function
     variables: Vec<Box<str>>,
+    /// Variables declared with the `global` keyword.
+    ///
+    /// Contains the index of the variables in the `strings` field of the `code`.
+    globals: Vec<usize>,
     /// Stack of scopes
     scopes: Vec<Scope>,
     /// Bytecode
@@ -105,6 +109,7 @@ impl Function {
         Self {
             scopes: Vec::new(),
             variables: Vec::new(),
+            globals: Vec::new(),
             code: Chunk::new(name),
             closure: false,
         }
@@ -559,6 +564,48 @@ impl<'a> Parser<'a> {
                     ))
                 }
             },
+            TokenKind::Keyword(Keyword::Global) => {
+                if let Some(token) = self.next()? {
+                    match token.kind {
+                        TokenKind::Id(variable) => {
+                            if let Some(func) = self.function_stack.last_mut() {
+                                for index in &func.globals {
+                                    if variable == func.code.globals[*index] {
+                                        // TODO : emit a warning ?
+                                        return Ok(ParseReturn::Continue);
+                                    }
+                                }
+                                for var in &func.variables {
+                                    if var.as_ref() == variable.as_ref() {
+                                        return Err(self.emit_error(
+                                            ParserErrorKind::AlreadyDeclared(variable),
+                                            Continue::Stop,
+                                            token.range,
+                                        ));
+                                    }
+                                }
+                                let index = func.code.add_global(variable);
+                                func.globals.push(index as usize)
+                            } else {
+                                // TODO : emit warning
+                            }
+                        }
+                        kind => {
+                            return Err(self.emit_error(
+                                ParserErrorKind::Unexpected(kind),
+                                Continue::Continue,
+                                token.range,
+                            ));
+                        }
+                    }
+                } else {
+                    return Err(self.emit_error(
+                        ParserErrorKind::ExpectedId,
+                        Continue::Continue,
+                        self.current_range(),
+                    ));
+                }
+            }
             TokenKind::Id(_) => {
                 let range = first_token.range;
                 let expression_type = self.parse_expression(Some(first_token), false)?;
@@ -631,6 +678,13 @@ impl<'a> Parser<'a> {
         }
 
         if let Some(func) = self.function_stack.last() {
+            // global ?
+            for global_index in &func.globals {
+                if func.code.globals[*global_index].as_ref() == variable {
+                    return VariableLocation::Global(*global_index);
+                }
+            }
+
             // local ?
             // reverse because of for variables.
             for (index, var) in func.variables.iter().enumerate().rev() {
@@ -717,7 +771,7 @@ impl<'a> Parser<'a> {
                     Instruction::WriteLocal(index)
                 }
                 None => {
-                    let index = self.code().add_string(variable);
+                    let index = self.code().add_global(variable);
                     Instruction::WriteGlobal(index)
                 }
             },
@@ -831,6 +885,7 @@ impl<'a> Parser<'a> {
         code.arg_number = args.len() as _;
         Ok(Function {
             variables: args,
+            globals: Vec::new(),
             scopes: Vec::new(),
             code,
             closure,
@@ -870,6 +925,7 @@ pub(crate) enum ParserErrorKind {
     UnexpectedExpr,
     NonAssignable,
     EndClosure,
+    AlreadyDeclared(Box<str>),
 }
 
 impl fmt::Display for ParserErrorKind {
@@ -884,6 +940,11 @@ impl fmt::Display for ParserErrorKind {
             Self::NonAssignable => formatter.write_str("this expression cannot be assigned to"),
             Self::EndClosure => formatter.write_str(
                 "This is not an error but an internal hack : you should not be seeing this !",
+            ),
+            Self::AlreadyDeclared(name) => write!(
+                formatter,
+                "variable '{}' has already been used as a local variable",
+                name.as_ref()
             ),
         }
     }

@@ -642,4 +642,74 @@ fn functions() {
             Instruction::Return
         ]
     );
+
+    let parser = Parser::new(Source::TopLevel(
+        "
+    x = 0
+    fn g()
+        x += 1
+    end
+    fn f()
+        global x
+        x += 1
+    end
+    g()
+    f()
+    return x
+    ",
+    ));
+    let chunk = parser.parse_top_level().unwrap();
+    assert_eq!(chunk.constants, [Constant::Int(0)]);
+    assert_eq!(
+        chunk // not very... nice...
+            .globals
+            .iter()
+            .map(|name| name.as_ref())
+            .collect::<Vec<&str>>()
+            .as_slice(),
+        ["x", "g", "f"]
+    );
+    assert_eq!(
+        chunk.code,
+        [
+            Instruction::ReadConstant(0),
+            Instruction::WriteGlobal(0),
+            Instruction::ReadFunction(0),
+            Instruction::WriteGlobal(1),
+            Instruction::ReadFunction(1),
+            Instruction::WriteGlobal(2),
+            Instruction::ReadGlobal(1),
+            Instruction::Call(0),
+            Instruction::Pop(1),
+            Instruction::ReadGlobal(2),
+            Instruction::Call(0),
+            Instruction::Pop(1),
+            Instruction::ReadGlobal(0),
+            Instruction::Return,
+            Instruction::PushNil,
+            Instruction::Return
+        ]
+    );
+    assert_eq!(
+        chunk.functions[0].code,
+        [
+            Instruction::ReadGlobal(0),
+            Instruction::ReadConstant(0),
+            Instruction::Add,
+            Instruction::WriteLocal(0), // local
+            Instruction::PushNil,
+            Instruction::Return
+        ]
+    );
+    assert_eq!(
+        chunk.functions[1].code,
+        [
+            Instruction::ReadGlobal(0),
+            Instruction::ReadConstant(0),
+            Instruction::Add,
+            Instruction::WriteGlobal(0), // global
+            Instruction::PushNil,
+            Instruction::Return
+        ]
+    )
 }

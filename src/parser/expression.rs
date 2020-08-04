@@ -304,7 +304,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
 
         match self.find_variable(&variable) {
             VariableLocation::Undefined => {
-                let index = self.code().add_string(variable);
+                let index = self.code().add_global(variable);
                 self.emit_instruction(Instruction::ReadGlobal(index))
             }
             VariableLocation::Local(index) => {
