@@ -71,7 +71,13 @@ impl fmt::Display for Value {
             Self::Bool(b) => fmt::Display::fmt(b, formatter),
             Self::Int(i) => fmt::Display::fmt(i, formatter),
             Self::Float(f) => fmt::Display::fmt(f, formatter),
-            Self::String(s) => fmt::Display::fmt(s, formatter),
+            Self::String(s) => {
+                if formatter.alternate() {
+                    fmt::Debug::fmt(s, formatter)
+                } else {
+                    fmt::Display::fmt(s, formatter)
+                }
+            }
             Self::Collectable(col) => fmt::Display::fmt(unsafe { col.as_ref() }, formatter),
             Self::RustFunction(_) => formatter.write_str("<function>"),
         }

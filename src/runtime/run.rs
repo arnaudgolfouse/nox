@@ -634,7 +634,11 @@ pub enum VMError<'a> {
     /// Internal error : indicate a bug in the VM
     Internal { kind: InternalError, line: usize },
     /// Error encountered at runtime
-    Runtime { kind: RuntimeError, line: usize },
+    Runtime {
+        kind: RuntimeError,
+        line: usize,
+        unwind_message: String,
+    },
     /// Error(s) encountered while parsing
     Parser(Vec<ParserError<'a>>),
 }

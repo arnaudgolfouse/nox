@@ -123,6 +123,7 @@ impl VM {
             return Err(VMError::Runtime {
                 kind: RuntimeError::NameAlreadyDefined(library.name),
                 line: 0,
+                unwind_message: String::new(),
             });
         }
         let mut library_table = self.gc.new_table();
@@ -144,6 +145,7 @@ impl VM {
                 return Err(VMError::Runtime {
                     kind: RuntimeError::NameAlreadyDefined(name),
                     line: 0,
+                    unwind_message: String::new(),
                 });
             }
             self.global_variables.insert(name, value);
@@ -216,15 +218,19 @@ impl VM {
                 Ok(unsafe { self.make_rvalue_noroot(ok) })
             }
             Err(err) => match err {
-                VMErrorKind::Runtime(err) => Err(VMError::Runtime {
-                    kind: err,
-                    line: self.chunk().get_line(self.ip),
-                }),
+                VMErrorKind::Runtime(err) => {
+                    let err = Err(self.unwind(err));
+                    self.gc.mark_and_sweep();
+                    err
+                }
                 #[cfg(feature = "check")]
-                VMErrorKind::Internal(err) => Err(VMError::Internal {
-                    kind: err,
-                    line: self.chunk().get_line(self.ip),
-                }),
+                VMErrorKind::Internal(err) => {
+                    self.partial_reset();
+                    Err(VMError::Internal {
+                        kind: err,
+                        line: self.chunk().get_line(self.ip),
+                    })
+                }
             },
         }
     }
@@ -242,6 +248,21 @@ impl VM {
             // additional root here
             Some(value) => Some(self.make_rvalue(value)),
         }
+    }
+
+    /// Return the entire stack as a slice.
+    pub fn stack(&self) -> &[Value] {
+        &self.stack
+    }
+
+    /// Inspect the last element of the stack.
+    pub fn last(&self) -> Option<&Value> {
+        self.stack.last()
+    }
+
+    /// Return the element at `index` if it is in bounds.
+    pub fn get(&self, index: usize) -> Option<&Value> {
+        self.stack.get(index)
     }
 
     fn make_rvalue(&self, mut value: Value) -> RValue {
@@ -306,6 +327,47 @@ impl VM {
         match self.call_frames.last() {
             Some(frame) => &mut self.stack[frame.captured_start..],
             None => &mut [],
+        }
+    }
+
+    fn unwind<'a>(&mut self, error: RuntimeError) -> VMError<'a> {
+        let mut unwind_message = String::new();
+        while let Some(frame) = self.call_frames.pop() {
+            unwind_message.push_str(&format!("  -> {}(", frame.chunk.name));
+            // captured
+            for mut value in self.stack.drain(frame.captured_start..) {
+                value.unroot()
+            }
+            // locals
+            for mut value in self
+                .stack
+                .drain(frame.local_start + frame.chunk.arg_number as usize..)
+            {
+                value.unroot()
+            }
+            // arguments
+            for mut value in self
+                .stack
+                .drain(frame.local_start..frame.local_start + frame.chunk.arg_number as usize - 1)
+            {
+                unwind_message.push_str(&format!("{:#}, ", value));
+                value.unroot()
+            }
+            // last argument
+            if let Some(mut value) = self.stack.pop() {
+                unwind_message.push_str(&format!("{:#}", value));
+                value.unroot()
+            }
+            // function
+            if let Some(mut value) = self.stack.pop() {
+                value.unroot()
+            }
+            unwind_message.push_str(")\n");
+        }
+        VMError::Runtime {
+            kind: error,
+            line: self.chunk().get_line(self.ip),
+            unwind_message,
         }
     }
 }
@@ -400,13 +462,22 @@ impl<'a> fmt::Display for VMError<'a> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         use colored::Colorize;
         match self {
-            Self::Runtime { kind, line } => writeln!(
-                formatter,
-                "{} line {} :\n{}",
-                "error".red().bold(),
-                line + 1,
-                kind
-            ),
+            Self::Runtime {
+                kind,
+                line,
+                unwind_message,
+            } => {
+                if !unwind_message.is_empty() {
+                    writeln!(formatter, "stack trace :\n{}", unwind_message)?;
+                }
+                writeln!(
+                    formatter,
+                    "{} line {} :\n{}",
+                    "error".red().bold(),
+                    line + 1,
+                    kind
+                )
+            }
             #[cfg(feature = "check")]
             Self::Internal { kind, line } => {
                 writeln!(

@@ -10,7 +10,7 @@ use std::{collections::HashMap, fmt, mem::size_of, ptr::NonNull, sync::Arc};
 pub struct GCHeader {
     next: Option<NonNull<Collectable>>,
     marked: bool,
-    roots: u16,
+    roots: u32,
 }
 
 impl GCHeader {
