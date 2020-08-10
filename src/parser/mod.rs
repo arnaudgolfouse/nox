@@ -315,6 +315,7 @@ impl<'a> Parser<'a> {
         };
 
         match &first_token.kind {
+            // return <expression>
             TokenKind::Keyword(Keyword::Return) => {
                 let line = first_token.range.start.line;
                 let token = self.next()?;
@@ -322,6 +323,7 @@ impl<'a> Parser<'a> {
                 self.code()
                     .emit_instruction::<u8>(Instruction::Return, line)
             }
+            // <...> end
             TokenKind::Keyword(Keyword::End) => {
                 if let Some(scope) = self.pop_scope() {
                     match scope {
@@ -382,6 +384,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
             }
+            // if <expression> then <statements> (<else_stm>)? end
             TokenKind::Keyword(Keyword::If) => {
                 let token = self.next()?;
                 self.parse_expression(token, true)?;
@@ -402,6 +405,7 @@ impl<'a> Parser<'a> {
                 let if_address = self.code().push_jump();
                 self.push_scope(Scope::If(if_address));
             }
+            // <...> else <statements> end
             TokenKind::Keyword(Keyword::Else) => {
                 if let Some(Scope::If(if_address)) = self.pop_scope() {
                     let else_address = self.code().push_jump();
@@ -417,6 +421,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
             }
+            // while <expression> <statements> end
             TokenKind::Keyword(Keyword::While) => {
                 let prepare_loop = self.code().push_jump();
                 let token = self.next()?;
@@ -429,11 +434,13 @@ impl<'a> Parser<'a> {
                 let jump_address = self.code().push_jump();
                 self.push_scope(Scope::While(jump_address))
             }
+            // for <id> in <expression> <statements> end
+            // for _ in <expression> <statements> end
             TokenKind::Keyword(Keyword::For) => {
                 // parse the `for` loop variable and the following `in`
                 let for_variable = if let Some(token) = self.next()? {
                     match token.kind {
-                        TokenKind::Id(variable) => {
+                        TokenKind::Id(_) | TokenKind::Placeholder => {
                             if let Some(token) = self.next()? {
                                 match token.kind {
                                     TokenKind::Keyword(Keyword::In) => {}
@@ -452,7 +459,11 @@ impl<'a> Parser<'a> {
                                     self.current_range(),
                                 ));
                             }
-                            variable
+                            if let TokenKind::Id(variable) = token.kind {
+                                variable
+                            } else {
+                                Box::from("")
+                            }
                         }
                         _ => {
                             return Err(self.emit_error(
@@ -479,6 +490,7 @@ impl<'a> Parser<'a> {
                 self.code()
                     .write_jump(prepare_loop, Instruction::PrepareLoop(operand as u64));
                 let jump_address = self.code().push_jump();
+                let placeholder = for_variable.as_ref().is_empty();
                 let index = match self.function_stack.last_mut() {
                     Some(function) => {
                         function.variables.push(for_variable);
@@ -489,9 +501,14 @@ impl<'a> Parser<'a> {
                         self.top_level.variables.len() - 1
                     }
                 };
-                self.emit_instruction(Instruction::WriteLocal(index as u64));
+                if placeholder {
+                    self.emit_instruction_u8(Instruction::Pop(1))
+                } else {
+                    self.emit_instruction(Instruction::WriteLocal(index as u64))
+                }
                 self.push_scope(Scope::For(jump_address, index))
             }
+            // fn <id>((<id>,)*) <statements> end
             TokenKind::Keyword(Keyword::Fn) => {
                 let function = match self.peek()? {
                     Some(Token {
@@ -542,6 +559,7 @@ impl<'a> Parser<'a> {
                 };
                 self.function_stack.push(function);
             }
+            // break
             TokenKind::Keyword(Keyword::Break) => match self.find_enclosing_loop() {
                 EnclosingLoop::While => self.emit_instruction_u8(Instruction::Break(0)),
                 EnclosingLoop::For => self.emit_instruction_u8(Instruction::Break(1)),
@@ -553,6 +571,7 @@ impl<'a> Parser<'a> {
                     ))
                 }
             },
+            // continue
             TokenKind::Keyword(Keyword::Continue) => match self.find_enclosing_loop() {
                 EnclosingLoop::While => self.emit_instruction_u8(Instruction::Continue(0)),
                 EnclosingLoop::For => self.emit_instruction_u8(Instruction::Continue(1)),
@@ -564,6 +583,7 @@ impl<'a> Parser<'a> {
                     ))
                 }
             },
+            // global <id>
             TokenKind::Keyword(Keyword::Global) => {
                 if let Some(token) = self.next()? {
                     match token.kind {
@@ -606,6 +626,35 @@ impl<'a> Parser<'a> {
                     ));
                 }
             }
+            // _ = <expression>
+            TokenKind::Placeholder => {
+                if let Some(token) = self.next()? {
+                    match token.kind {
+                        TokenKind::Assign(Assign::Equal) => {
+                            let token = self.next()?;
+                            self.parse_expression(token, true)?;
+                            self.emit_instruction_u8(Instruction::Pop(1));
+                        }
+                        _ => {
+                            return Err(self.emit_error(
+                                ParserErrorKind::Expected(TokenKind::Assign(Assign::Equal)),
+                                Continue::Stop,
+                                token.range,
+                            ));
+                        }
+                    }
+                } else {
+                    return Err(self.emit_error(
+                        ParserErrorKind::Expected(TokenKind::Assign(Assign::Equal)),
+                        Continue::Stop,
+                        first_token.range,
+                    ));
+                }
+            }
+            // x = <expression>
+            // x.<id>
+            // x((<expression>,)*)
+            // x[<expression>]
             TokenKind::Id(_) => {
                 let range = first_token.range;
                 let expression_type = self.parse_expression(Some(first_token), false)?;
@@ -641,6 +690,7 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            // (<expression>)
             TokenKind::LPar => {
                 self.parse_expression(Some(first_token), true)?;
             }

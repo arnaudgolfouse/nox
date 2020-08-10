@@ -8,6 +8,7 @@ program: statement+;
 
 statement:
 	return_stm
+	| global_stm
 	| if_stm
 	| while_stm
 	| for_stm
@@ -18,6 +19,8 @@ statement:
 	| call_expr;
 
 return_stm: 'return' expression;
+
+global_stm: 'global' identifier;
 
 if_stm:
 	'if' expression 'then' statement* 'else' statement* 'end';
@@ -61,8 +64,8 @@ expression:
 primary:
 	constant
 	| unary_op primary
-	| int_number
 	| float_number
+	| int_number
 	| string
 	| parent_expr
 	| lambda_expr
@@ -78,6 +81,7 @@ int_number:
 
 float_number: DEC_DIGIT* '.' DEC_DIGIT+;
 
+// TODO : Escape sequences ?
 string: ('"' (~'"')* '"') | ('\'' (~'\'')* '\'');
 
 identifier: ID;
@@ -116,6 +120,7 @@ call_args: (expression ',')* (expression)?;
 /* ============== TERMINALS ============== */
 /* ======================================= */
 
+// TODO : UTF8 identifiers are accepted...
 ID: [a-zA-Z_] [a-zA-Z0-9_]*;
 
 DEC_DIGIT: [0-9];
