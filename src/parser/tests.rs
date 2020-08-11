@@ -99,6 +99,83 @@ fn simple_statements() {
 }
 
 #[test]
+fn binary_ops() {
+    let parser = Parser::new(Source::TopLevel("return 1 + 2 * 3 + 4"));
+    let chunk = parser.parse_top_level().unwrap();
+    assert_eq!(
+        chunk.code,
+        [
+            Instruction::ReadConstant(0),
+            Instruction::ReadConstant(1),
+            Instruction::ReadConstant(2),
+            Instruction::Multiply,
+            Instruction::ReadConstant(3),
+            Instruction::Add,
+            Instruction::Add,
+            Instruction::Return,
+            Instruction::PushNil,
+            Instruction::Return
+        ]
+    );
+
+    let parser = Parser::new(Source::TopLevel(
+        "return (1 + 2) << 3 - 4 * 5 % 6 == 7 / -8 ^ 9",
+    ));
+    let chunk = parser.parse_top_level().unwrap();
+    assert_eq!(
+        chunk.code,
+        [
+            Instruction::ReadConstant(0),
+            Instruction::ReadConstant(1),
+            Instruction::Add,
+            Instruction::ReadConstant(2),
+            Instruction::ReadConstant(3),
+            Instruction::ReadConstant(4),
+            Instruction::ReadConstant(5),
+            Instruction::Modulo,
+            Instruction::Multiply,
+            Instruction::Subtract,
+            Instruction::ShiftL,
+            Instruction::ReadConstant(6),
+            Instruction::ReadConstant(7),
+            Instruction::Negative,
+            Instruction::ReadConstant(8),
+            Instruction::Pow,
+            Instruction::Divide,
+            Instruction::Equal,
+            Instruction::Return,
+            Instruction::PushNil,
+            Instruction::Return
+        ]
+    );
+
+    let parser = Parser::new(Source::TopLevel(
+        "return true and false or false == true xor true or not true",
+    ));
+    let chunk = parser.parse_top_level().unwrap();
+    assert_eq!(
+        chunk.code,
+        [
+            Instruction::PushTrue,
+            Instruction::PushFalse,
+            Instruction::And,
+            Instruction::PushFalse,
+            Instruction::PushTrue,
+            Instruction::Equal,
+            Instruction::PushTrue,
+            Instruction::PushTrue,
+            Instruction::Not,
+            Instruction::Or,
+            Instruction::Xor,
+            Instruction::Or,
+            Instruction::Return,
+            Instruction::PushNil,
+            Instruction::Return
+        ]
+    );
+}
+
+#[test]
 fn while_loop() {
     let parser = Parser::new(Source::TopLevel("while x > y x -= 1 end"));
     let chunk = parser.parse_top_level().unwrap();

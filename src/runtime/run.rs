@@ -178,6 +178,18 @@ impl VM {
         };
     }
 
+    /// Pop two values from the stack and applies the given operation.
+    fn binary_op(
+        &mut self,
+        op: impl Fn(Value, Value) -> Result<Value, OperationError>,
+    ) -> Result<(), VMErrorKind> {
+        let value_2 = self.pop_stack(false)?;
+        let value_1 = self.pop_stack(false)?;
+        let new_value = op(value_1.captured_value(), value_2.captured_value())?;
+        self.stack.push(new_value);
+        Ok(())
+    }
+
     pub(super) fn run_internal(&mut self) -> Result<Value, VMErrorKind> {
         loop {
             let (opcode, operand) = self.read_ip()?;
@@ -211,84 +223,21 @@ impl VM {
                     let value_1 = self.pop_stack(false)?;
                     self.stack.push(Value::Bool(value_1 != value_2))
                 }
-                Instruction::Less => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.less(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::LessEq => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.less_eq(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::More => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.more(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::MoreEq => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.more_eq(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::Add => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.add(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::Subtract => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.subtract(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::Multiply => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.multiply(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::Divide => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.divide(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::Modulo => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.modulo(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::Pow => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.pow(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::And => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.and(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::Or => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.or(value_2)?;
-                    self.stack.push(new_value)
-                }
-                Instruction::Xor => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
-                    let new_value = value_1.xor(value_2)?;
-                    self.stack.push(new_value)
-                }
+                Instruction::Less => self.binary_op(Value::less)?,
+                Instruction::LessEq => self.binary_op(Value::less_eq)?,
+                Instruction::More => self.binary_op(Value::more)?,
+                Instruction::MoreEq => self.binary_op(Value::more_eq)?,
+                Instruction::Add => self.binary_op(Value::add)?,
+                Instruction::Subtract => self.binary_op(Value::subtract)?,
+                Instruction::Multiply => self.binary_op(Value::multiply)?,
+                Instruction::Divide => self.binary_op(Value::divide)?,
+                Instruction::Modulo => self.binary_op(Value::modulo)?,
+                Instruction::Pow => self.binary_op(Value::pow)?,
+                Instruction::And => self.binary_op(Value::and)?,
+                Instruction::Or => self.binary_op(Value::or)?,
+                Instruction::Xor => self.binary_op(Value::xor)?,
+                Instruction::ShiftL => self.binary_op(Value::shift_left)?,
+                Instruction::ShiftR => self.binary_op(Value::shift_right)?,
                 Instruction::Negative => {
                     let value = self.pop_stack(false)?;
                     let new_value = value.negative()?;

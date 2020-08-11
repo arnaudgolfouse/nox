@@ -453,6 +453,14 @@ impl<'a> Lexer<'a> {
                     _ => unreachable!(),
                 }
             }
+            Some('<') if op == '<' => {
+                self.next_char();
+                TokenKind::Op(Operation::ShiftLeft)
+            }
+            Some('>') if op == '>' => {
+                self.next_char();
+                TokenKind::Op(Operation::ShiftRight)
+            }
             _ => match op {
                 '=' => TokenKind::Assign(Assign::Equal),
                 '<' => TokenKind::Op(Operation::Less),

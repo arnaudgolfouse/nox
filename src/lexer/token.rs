@@ -39,6 +39,10 @@ pub enum Operation {
     Xor,
     /// `not`
     Not,
+    /// <<
+    ShiftLeft,
+    /// >>
+    ShiftRight,
 }
 
 impl Operation {
@@ -62,22 +66,24 @@ impl Operation {
 impl Display for Operation {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            Operation::Equal => formatter.write_str("=="),
-            Operation::NEqual => formatter.write_str("!="),
-            Operation::Less => formatter.write_char('<'),
-            Operation::LessEq => formatter.write_str("<="),
-            Operation::More => formatter.write_char('>'),
-            Operation::MoreEq => formatter.write_str(">="),
-            Operation::Plus => formatter.write_char('+'),
-            Operation::Minus => formatter.write_char('-'),
-            Operation::Multiply => formatter.write_char('*'),
-            Operation::Divide => formatter.write_char('/'),
-            Operation::Modulo => formatter.write_char('%'),
-            Operation::Pow => formatter.write_char('^'),
-            Operation::And => formatter.write_str("and"),
-            Operation::Or => formatter.write_str("or"),
-            Operation::Xor => formatter.write_str("xor"),
-            Operation::Not => formatter.write_str("not"),
+            Self::Equal => formatter.write_str("=="),
+            Self::NEqual => formatter.write_str("!="),
+            Self::Less => formatter.write_char('<'),
+            Self::LessEq => formatter.write_str("<="),
+            Self::More => formatter.write_char('>'),
+            Self::MoreEq => formatter.write_str(">="),
+            Self::Plus => formatter.write_char('+'),
+            Self::Minus => formatter.write_char('-'),
+            Self::Multiply => formatter.write_char('*'),
+            Self::Divide => formatter.write_char('/'),
+            Self::Modulo => formatter.write_char('%'),
+            Self::Pow => formatter.write_char('^'),
+            Self::And => formatter.write_str("and"),
+            Self::Or => formatter.write_str("or"),
+            Self::Xor => formatter.write_str("xor"),
+            Self::Not => formatter.write_str("not"),
+            Self::ShiftLeft => formatter.write_str("<<"),
+            Self::ShiftRight => formatter.write_str(">>"),
         }
     }
 }

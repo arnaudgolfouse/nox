@@ -19,16 +19,18 @@ pub(super) enum Precedence {
     Equality = 4,
     /// `<` `>` `<=` `>=`
     Comparison = 5,
+    /// `<<`, `>>`
+    Shifts = 6,
     /// `+` `-`
-    Term = 6,
+    Term = 7,
     /// `*` `/`
-    Factor = 7,
+    Factor = 8,
     /// `%`
-    Modulo = 8,
+    Modulo = 9,
     /// '^'
-    Pow = 9,
+    Pow = 10,
     /// `not` `-`
-    Unary = 10,
+    Unary = 11,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -183,6 +185,7 @@ pub(super) trait ExpressionParser<'a>: Sized {
                             | Operation::More
                             | Operation::LessEq
                             | Operation::MoreEq => Precedence::Comparison,
+                            Operation::ShiftLeft | Operation::ShiftRight => Precedence::Shifts,
                             Operation::Plus | Operation::Minus => Precedence::Term,
                             Operation::Multiply | Operation::Divide => Precedence::Factor,
                             Operation::Pow => Precedence::Pow,
@@ -459,7 +462,9 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                 Operation::And => Instruction::And,
                 Operation::Or => Instruction::Or,
                 Operation::Xor => Instruction::Xor,
-                Operation::Not => Instruction::Add, // technically unreacheable ? meh
+                Operation::ShiftLeft => Instruction::ShiftL,
+                Operation::ShiftRight => Instruction::ShiftR,
+                _ => unreachable!(),
             },
             line,
         );

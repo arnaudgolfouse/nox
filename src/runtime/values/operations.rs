@@ -110,9 +110,7 @@ impl Value {
     ///
     /// If the two values can't be added, `OperationError(+, self, other)` is
     /// returned.
-    pub(crate) fn add(mut self, mut other: Value) -> Result<Value, OperationError> {
-        self = self.captured_value();
-        other = other.captured_value();
+    pub(crate) fn add(self, other: Value) -> Result<Value, OperationError> {
         match self {
             Value::Int(i1) => match other {
                 Value::Int(i2) => Ok(Value::Int(i1 + i2)),
@@ -133,9 +131,7 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Plus, s, o))
     }
 
-    pub(crate) fn subtract(mut self, mut other: Value) -> Result<Value, OperationError> {
-        self = self.captured_value();
-        other = other.captured_value();
+    pub(crate) fn subtract(self, other: Value) -> Result<Value, OperationError> {
         match self {
             Value::Int(i1) => match other {
                 Value::Int(i2) => Ok(Value::Int(i1 - i2)),
@@ -152,9 +148,7 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Minus, s, o))
     }
 
-    pub(crate) fn multiply(mut self, mut other: Value) -> Result<Value, OperationError> {
-        self = self.captured_value();
-        other = other.captured_value();
+    pub(crate) fn multiply(self, other: Value) -> Result<Value, OperationError> {
         match self {
             Value::Int(i1) => match other {
                 Value::Int(i2) => Ok(Value::Int(i1 * i2)),
@@ -176,9 +170,7 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Multiply, s, o))
     }
 
-    pub(crate) fn divide(mut self, mut other: Value) -> Result<Value, OperationError> {
-        self = self.captured_value();
-        other = other.captured_value();
+    pub(crate) fn divide(self, other: Value) -> Result<Value, OperationError> {
         match self {
             Value::Int(i1) => match other {
                 Value::Int(i2) => Ok(Value::Int(i1 / i2)),
@@ -195,9 +187,7 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Divide, s, o))
     }
 
-    pub(crate) fn modulo(mut self, mut other: Value) -> Result<Value, OperationError> {
-        self = self.captured_value();
-        other = other.captured_value();
+    pub(crate) fn modulo(self, other: Value) -> Result<Value, OperationError> {
         match self {
             Value::Int(i1) => match other {
                 Value::Int(i2) => Ok(Value::Int(i1 % i2)),
@@ -208,9 +198,7 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Modulo, s, o))
     }
 
-    pub(crate) fn pow(mut self, mut other: Value) -> Result<Value, OperationError> {
-        self = self.captured_value();
-        other = other.captured_value();
+    pub(crate) fn pow(self, other: Value) -> Result<Value, OperationError> {
         match self {
             Value::Int(i1) => match other {
                 Value::Int(i2) => Ok(Value::Int((i1 as f64).powf(i2 as f64) as i64)),
@@ -227,9 +215,7 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Pow, s, o))
     }
 
-    pub(crate) fn less(mut self, mut other: Value) -> Result<Value, OperationError> {
-        self = self.captured_value();
-        other = other.captured_value();
+    pub(crate) fn less(self, other: Value) -> Result<Value, OperationError> {
         match self {
             Value::Int(i1) => match other {
                 Value::Int(i2) => Ok(Value::Bool(i1 < i2)),
@@ -257,9 +243,7 @@ impl Value {
         }
     }
 
-    pub(crate) fn more(mut self, mut other: Value) -> Result<Value, OperationError> {
-        self = self.captured_value();
-        other = other.captured_value();
+    pub(crate) fn more(self, other: Value) -> Result<Value, OperationError> {
         match self {
             Value::Int(i1) => match other {
                 Value::Int(i2) => Ok(Value::Bool(i1 > i2)),
@@ -287,9 +271,7 @@ impl Value {
         }
     }
 
-    pub(crate) fn and(mut self, mut other: Value) -> Result<Value, OperationError> {
-        self = self.captured_value();
-        other = other.captured_value();
+    pub(crate) fn and(self, other: Value) -> Result<Value, OperationError> {
         match self {
             Value::Bool(b1) => match other {
                 Value::Bool(b2) => Ok(Value::Bool(b1 && b2)),
@@ -300,9 +282,7 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::And, s, o))
     }
 
-    pub(crate) fn or(mut self, mut other: Value) -> Result<Value, OperationError> {
-        self = self.captured_value();
-        other = other.captured_value();
+    pub(crate) fn or(self, other: Value) -> Result<Value, OperationError> {
         match self {
             Value::Bool(b1) => match other {
                 Value::Bool(b2) => Ok(Value::Bool(b1 || b2)),
@@ -313,9 +293,7 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Or, s, o))
     }
 
-    pub(crate) fn xor(mut self, mut other: Value) -> Result<Value, OperationError> {
-        self = self.captured_value();
-        other = other.captured_value();
+    pub(crate) fn xor(self, other: Value) -> Result<Value, OperationError> {
         match self {
             Value::Bool(b1) => match other {
                 Value::Bool(b2) => Ok(Value::Bool(b1 ^ b2)),
@@ -324,6 +302,28 @@ impl Value {
             _ => Err((self, other)),
         }
         .map_err(|(s, o)| OperationError::Binary(Operation::Xor, s, o))
+    }
+
+    pub(crate) fn shift_left(self, other: Value) -> Result<Value, OperationError> {
+        match self {
+            Value::Int(i1) => match other {
+                Value::Int(i2) => Ok(Value::Int(i1 << i2)),
+                _ => Err((self, other)),
+            },
+            _ => Err((self, other)),
+        }
+        .map_err(|(s, o)| OperationError::Binary(Operation::ShiftLeft, s, o))
+    }
+
+    pub(crate) fn shift_right(self, other: Value) -> Result<Value, OperationError> {
+        match self {
+            Value::Int(i1) => match other {
+                Value::Int(i2) => Ok(Value::Int(i1 >> i2)),
+                _ => Err((self, other)),
+            },
+            _ => Err((self, other)),
+        }
+        .map_err(|(s, o)| OperationError::Binary(Operation::ShiftRight, s, o))
     }
 
     pub(crate) fn negative(mut self) -> Result<Value, OperationError> {

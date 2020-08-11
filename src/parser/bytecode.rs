@@ -211,6 +211,16 @@ instructions! {
     ///
     /// Pop two values from the stack, 'xor' them, and push the result.
     Xor => "XOR",
+    /// `<<`
+    ///
+    /// Pop two values from the stack, shift the first by the second, and push
+    /// the result.
+    ShiftL => "SHL",
+    /// `>>`
+    ///
+    /// Pop two values from the stack, shift the first by the second, and push
+    /// the result.
+    ShiftR => "SHR",
     /// Negation (-)
     ///
     /// Pop one value from the stack, negate it, and push it back.

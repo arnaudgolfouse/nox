@@ -173,7 +173,7 @@ impl Value {
     }
 
     /// Return `self` if it is not captured, or the inner value of `self`
-    fn captured_value(self) -> Value {
+    pub(super) fn captured_value(self) -> Value {
         match self {
             Self::Collectable(ptr) => {
                 let captured = unsafe { &ptr.as_ref().object };

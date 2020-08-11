@@ -161,6 +161,7 @@ impl<'a> Parser<'a> {
         Range::new(self.lexer.position, self.lexer.position)
     }
 
+    /// Returns the code for the function we are currently parsing.
     #[inline]
     fn code(&mut self) -> &mut Chunk {
         if let Some(func) = self.function_stack.last_mut() {
@@ -177,7 +178,8 @@ impl<'a> Parser<'a> {
         self.code().emit_instruction(instruction, line)
     }
 
-    /// emit a new u8 instruction at the current line. Same as `emit_instruction::<u8>`.
+    /// emit a new u8 instruction at the current line. Same as
+    /// `emit_instruction::<u8>`.
     #[inline(always)]
     fn emit_instruction_u8(&mut self, instruction: Instruction<u8>) {
         let line = self.lexer.position.line;
@@ -202,6 +204,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Push a scope in either the current function or the top-level.
     fn push_scope(&mut self, scope: Scope) {
         if let Some(func) = self.function_stack.last_mut() {
             func.scopes.push(scope)
@@ -210,6 +213,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Pop a scope from either the current function or the top-level.
     fn pop_scope(&mut self) -> Option<Scope> {
         match self.function_stack.last_mut() {
             Some(func) => func.scopes.pop(),
@@ -302,6 +306,8 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Main parsing function : parse statements until it reaches the end of the
+    /// current function / the top-level, or an error is encountered.
     fn parse_statements(&mut self) -> Result<ParseReturn, ParserError<'a>> {
         let first_token = match self.lexer.next()? {
             Some(token) => token,
@@ -426,8 +432,8 @@ impl<'a> Parser<'a> {
                 let prepare_loop = self.code().push_jump();
                 let token = self.next()?;
                 self.parse_expression(token, true)?;
-                // We can subtract 1 because parsing an expression always produces instructions.
-                // We NEED to because the offset is from the instruction right AFTER the `PrepareWhile`
+                // We **can** subtract 1 because parsing an expression always produces instructions.
+                // We **need** to because the offset is from the instruction right AFTER the `PrepareWhile`
                 let operand = self.code().code.len() - prepare_loop - 1;
                 self.code()
                     .write_jump(prepare_loop, Instruction::PrepareLoop(operand as u64));
@@ -438,6 +444,7 @@ impl<'a> Parser<'a> {
             // for _ in <expression> <statements> end
             TokenKind::Keyword(Keyword::For) => {
                 // parse the `for` loop variable and the following `in`
+                // Returns an empty `Box<str>` if the variable is a placeholder.
                 let for_variable = if let Some(token) = self.next()? {
                     match token.kind {
                         TokenKind::Id(_) | TokenKind::Placeholder => {
@@ -490,6 +497,7 @@ impl<'a> Parser<'a> {
                 self.code()
                     .write_jump(prepare_loop, Instruction::PrepareLoop(operand as u64));
                 let jump_address = self.code().push_jump();
+                // the variable will be moved.
                 let placeholder = for_variable.as_ref().is_empty();
                 let index = match self.function_stack.last_mut() {
                     Some(function) => {
@@ -572,17 +580,19 @@ impl<'a> Parser<'a> {
                 }
             },
             // continue
-            TokenKind::Keyword(Keyword::Continue) => match self.find_enclosing_loop() {
-                EnclosingLoop::While => self.emit_instruction_u8(Instruction::Continue(0)),
-                EnclosingLoop::For => self.emit_instruction_u8(Instruction::Continue(1)),
-                EnclosingLoop::None => {
-                    return Err(self.emit_error(
-                        ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::Continue)),
-                        Continue::Stop,
-                        first_token.range,
-                    ))
-                }
-            },
+            TokenKind::Keyword(Keyword::Continue) => {
+                self.emit_instruction_u8(Instruction::Continue(match self.find_enclosing_loop() {
+                    EnclosingLoop::While => 0,
+                    EnclosingLoop::For => 1,
+                    EnclosingLoop::None => {
+                        return Err(self.emit_error(
+                            ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::Continue)),
+                            Continue::Stop,
+                            first_token.range,
+                        ))
+                    }
+                }))
+            }
             // global <id>
             TokenKind::Keyword(Keyword::Global) => {
                 if let Some(token) = self.next()? {
@@ -832,6 +842,8 @@ impl<'a> Parser<'a> {
         self.emit_instruction(instruction);
     }
 
+    /// Parse a variable assignement, assuming the variable and the assignement
+    /// token have already been parsed.
     fn assign_variable(
         &mut self,
         variable: Box<str>,
@@ -858,7 +870,10 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    /// Write a table member
+    /// Parse a table member assignement (such as `t.x = ...` or `t[x] = ...`).
+    ///
+    /// Assumes that everything up to the assignement token has been parsed, and
+    /// that the table field is at the top of the stack.
     fn assign_table(&mut self, assignement: Assign) -> Result<(), ParserError<'a>> {
         match assignement {
             Assign::Equal => {}
@@ -965,16 +980,30 @@ impl<'a> Parser<'a> {
 ====================================================
 */
 
+/// Kinds of errors emmited by the parser.
 #[derive(Debug)]
 pub(crate) enum ParserErrorKind {
+    /// Error emitted by the lexer
     Lexer(LexerErrorKind),
+    /// Expected an expression, found something else or nothing.
     ExpectExpression,
+    /// Expected a particular token kind, found something else or nothing.
     Expected(TokenKind),
+    /// Encountered an unexpected token kind.
     Unexpected(TokenKind),
+    /// Expected an identifier, found something else or nothing.
     ExpectedId,
+    /// Parsed an expression tohat we realized later was in an incorrect
+    /// position.
     UnexpectedExpr,
+    /// Tried to assign to a read-only expression (such as `0` or `x + y`).
     NonAssignable,
+    /// Tried to end a closure, but the we were at the top-level.
+    ///
+    /// In theory this error should never be emmited, it is here to catch bugs
+    /// in the parser.
     EndClosure,
+    /// Tried to write `global x` where `x` was already used as a local variable.
     AlreadyDeclared(Box<str>),
 }
 
