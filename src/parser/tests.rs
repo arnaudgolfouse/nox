@@ -1,4 +1,7 @@
 use super::*;
+
+use Instruction::*;
+
 #[test]
 fn errors() {
     // no expression after 'return'
@@ -8,6 +11,19 @@ fn errors() {
     // no 'end' to close this 'if'
     let parser = Parser::new(Source::TopLevel("if true then return 0 else return 1"));
     assert!(parser.parse_top_level().is_err());
+
+    // 'break' in an incorrect position
+    let parser = Parser::new(Source::TopLevel("return break"));
+    assert!(parser.parse_top_level().is_err());
+
+    // Expected an identifier, found something else.
+    let parser = Parser::new(Source::TopLevel("for 0 in range(1, 2) print(1) end"));
+    assert!(parser.parse_top_level().is_err());
+
+    // Parsed an expression that we realized later was in an incorrect
+    // position.
+    let parser = Parser::new(Source::TopLevel("x + 1"));
+    assert!(parser.parse_top_level().is_err());
 }
 
 #[test]
@@ -15,15 +31,7 @@ fn simple_statements() {
     let parser = Parser::new(Source::TopLevel("return 1"));
     let chunk = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1)]);
-    assert_eq!(
-        chunk.code,
-        [
-            Instruction::ReadConstant(0),
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
-        ]
-    );
+    assert_eq!(chunk.code, [ReadConstant(0), Return, PushNil, Return]);
 
     let parser = Parser::new(Source::TopLevel("if 1 + 2 then return 3 end"));
     let chunk = parser.parse_top_level().unwrap();
@@ -34,14 +42,14 @@ fn simple_statements() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::ReadConstant(1),
-            Instruction::Add,
-            Instruction::JumpPopFalse(3),
-            Instruction::ReadConstant(2),
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            ReadConstant(1),
+            Add,
+            JumpPopFalse(3),
+            ReadConstant(2),
+            Return,
+            PushNil,
+            Return
         ]
     );
 
@@ -70,30 +78,30 @@ fn simple_statements() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::ReadConstant(1),
-            Instruction::Add,
-            Instruction::ReadConstant(2),
-            Instruction::Equal,
-            Instruction::JumpPopFalse(7),
-            Instruction::ReadGlobal(0),
-            Instruction::ReadConstant(3),
-            Instruction::PushTrue,
-            Instruction::Call(2),
-            Instruction::Return,
-            Instruction::Jump(11),
-            Instruction::ReadConstant(4),
-            Instruction::ReadGlobal(0),
-            Instruction::ReadGlobal(1),
-            Instruction::Subtract,
-            Instruction::ReadConstant(5),
-            Instruction::Call(1),
-            Instruction::ReadConstant(6),
-            Instruction::Multiply,
-            Instruction::Subtract,
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            ReadConstant(1),
+            Add,
+            ReadConstant(2),
+            Equal,
+            JumpPopFalse(7),
+            ReadGlobal(0),
+            ReadConstant(3),
+            PushTrue,
+            Call(2),
+            Return,
+            Jump(11),
+            ReadConstant(4),
+            ReadGlobal(0),
+            ReadGlobal(1),
+            Subtract,
+            ReadConstant(5),
+            Call(1),
+            ReadConstant(6),
+            Multiply,
+            Subtract,
+            Return,
+            PushNil,
+            Return
         ]
     );
 }
@@ -105,16 +113,16 @@ fn binary_ops() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::ReadConstant(1),
-            Instruction::ReadConstant(2),
-            Instruction::Multiply,
-            Instruction::ReadConstant(3),
-            Instruction::Add,
-            Instruction::Add,
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            ReadConstant(1),
+            ReadConstant(2),
+            Multiply,
+            ReadConstant(3),
+            Add,
+            Add,
+            Return,
+            PushNil,
+            Return
         ]
     );
 
@@ -125,52 +133,39 @@ fn binary_ops() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::ReadConstant(1),
-            Instruction::Add,
-            Instruction::ReadConstant(2),
-            Instruction::ReadConstant(3),
-            Instruction::ReadConstant(4),
-            Instruction::ReadConstant(5),
-            Instruction::Modulo,
-            Instruction::Multiply,
-            Instruction::Subtract,
-            Instruction::ShiftL,
-            Instruction::ReadConstant(6),
-            Instruction::ReadConstant(7),
-            Instruction::Negative,
-            Instruction::ReadConstant(8),
-            Instruction::Pow,
-            Instruction::Divide,
-            Instruction::Equal,
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            ReadConstant(1),
+            Add,
+            ReadConstant(2),
+            ReadConstant(3),
+            ReadConstant(4),
+            ReadConstant(5),
+            Modulo,
+            Multiply,
+            Subtract,
+            ShiftL,
+            ReadConstant(6),
+            ReadConstant(7),
+            Negative,
+            ReadConstant(8),
+            Pow,
+            Divide,
+            Equal,
+            Return,
+            PushNil,
+            Return
         ]
     );
 
     let parser = Parser::new(Source::TopLevel(
-        "return true and false or false == true xor true or not true",
+        "return not true and false or false == true xor true or not true",
     ));
     let chunk = parser.parse_top_level().unwrap();
     assert_eq!(
         chunk.code,
         [
-            Instruction::PushTrue,
-            Instruction::PushFalse,
-            Instruction::And,
-            Instruction::PushFalse,
-            Instruction::PushTrue,
-            Instruction::Equal,
-            Instruction::PushTrue,
-            Instruction::PushTrue,
-            Instruction::Not,
-            Instruction::Or,
-            Instruction::Xor,
-            Instruction::Or,
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            PushTrue, Not, PushFalse, And, PushFalse, PushTrue, Equal, PushTrue, PushTrue, Not, Or,
+            Xor, Or, Return, PushNil, Return
         ]
     );
 }
@@ -184,18 +179,18 @@ fn while_loop() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::PrepareLoop(3),
-            Instruction::ReadGlobal(0),
-            Instruction::ReadGlobal(1),
-            Instruction::More,
-            Instruction::JumpEndWhile(6),
-            Instruction::ReadGlobal(0),
-            Instruction::ReadConstant(0),
-            Instruction::Subtract,
-            Instruction::WriteGlobal(0),
-            Instruction::Continue(0),
-            Instruction::PushNil,
-            Instruction::Return
+            PrepareLoop(3),
+            ReadGlobal(0),
+            ReadGlobal(1),
+            More,
+            JumpEndWhile(6),
+            ReadGlobal(0),
+            ReadConstant(0),
+            Subtract,
+            WriteGlobal(0),
+            Continue(0),
+            PushNil,
+            Return
         ]
     );
 
@@ -218,33 +213,21 @@ fn while_loop() {
     assert_eq!(
         chunk.code[0..6],
         [
-            Instruction::PrepareLoop(3),
-            Instruction::ReadGlobal(0),
-            Instruction::ReadGlobal(1),
-            Instruction::More,
-            Instruction::Extended(1),
-            Instruction::JumpEndWhile(2),
+            PrepareLoop(3),
+            ReadGlobal(0),
+            ReadGlobal(1),
+            More,
+            Extended(1),
+            JumpEndWhile(2),
         ]
     );
     for i in 1..65 {
         assert_eq!(
             chunk.code[(i * 4 + 2)..(i + 1) * 4 + 2],
-            [
-                Instruction::ReadGlobal(0),
-                Instruction::ReadConstant(0),
-                Instruction::Subtract,
-                Instruction::WriteGlobal(0),
-            ]
+            [ReadGlobal(0), ReadConstant(0), Subtract, WriteGlobal(0),]
         );
     }
-    assert_eq!(
-        chunk.code[262..],
-        [
-            Instruction::Continue(0),
-            Instruction::PushNil,
-            Instruction::Return
-        ]
-    );
+    assert_eq!(chunk.code[262..], [Continue(0), PushNil, Return]);
 }
 
 #[test]
@@ -262,22 +245,22 @@ fn for_loop() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadGlobal(0),
-            Instruction::ReadConstant(0),
-            Instruction::ReadConstant(1),
-            Instruction::Call(2),
-            Instruction::PrepareLoop(2),
-            Instruction::DuplicateTop(0),
-            Instruction::Call(0),
-            Instruction::JumpEndFor(7),
-            Instruction::WriteLocal(0),
-            Instruction::ReadGlobal(1),
-            Instruction::ReadConstant(0),
-            Instruction::Add,
-            Instruction::WriteGlobal(1),
-            Instruction::Continue(1),
-            Instruction::PushNil,
-            Instruction::Return
+            ReadGlobal(0),
+            ReadConstant(0),
+            ReadConstant(1),
+            Call(2),
+            PrepareLoop(2),
+            DuplicateTop(0),
+            Call(0),
+            JumpEndFor(7),
+            WriteLocal(0),
+            ReadGlobal(1),
+            ReadConstant(0),
+            Add,
+            WriteGlobal(1),
+            Continue(1),
+            PushNil,
+            Return
         ]
     );
 
@@ -302,28 +285,28 @@ fn for_loop() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadFunction(0),
-            Instruction::WriteGlobal(0),
-            Instruction::ReadConstant(0),
-            Instruction::WriteGlobal(1),
-            Instruction::ReadGlobal(0),
-            Instruction::ReadConstant(1),
-            Instruction::ReadConstant(2),
-            Instruction::Call(2),
-            Instruction::PrepareLoop(2),
-            Instruction::DuplicateTop(0),
-            Instruction::Call(0),
-            Instruction::JumpEndFor(7),
-            Instruction::WriteLocal(0),
-            Instruction::ReadGlobal(1),
-            Instruction::ReadConstant(1),
-            Instruction::Add,
-            Instruction::WriteGlobal(1),
-            Instruction::Continue(1),
-            Instruction::ReadGlobal(1),
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadFunction(0),
+            WriteGlobal(0),
+            ReadConstant(0),
+            WriteGlobal(1),
+            ReadGlobal(0),
+            ReadConstant(1),
+            ReadConstant(2),
+            Call(2),
+            PrepareLoop(2),
+            DuplicateTop(0),
+            Call(0),
+            JumpEndFor(7),
+            WriteLocal(0),
+            ReadGlobal(1),
+            ReadConstant(1),
+            Add,
+            WriteGlobal(1),
+            Continue(1),
+            ReadGlobal(1),
+            Return,
+            PushNil,
+            Return
         ]
     );
 }
@@ -334,15 +317,7 @@ fn tables() {
     let chunk = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, []);
     assert_eq!(chunk.globals, [Box::from("t")]);
-    assert_eq!(
-        chunk.code,
-        [
-            Instruction::MakeTable(0),
-            Instruction::WriteGlobal(0),
-            Instruction::PushNil,
-            Instruction::Return
-        ]
-    );
+    assert_eq!(chunk.code, [MakeTable(0), WriteGlobal(0), PushNil, Return]);
 
     let parser = Parser::new(Source::TopLevel("t = { x = 1 + 2, y = \"hello\" }"));
     let chunk = parser.parse_top_level().unwrap();
@@ -360,16 +335,16 @@ fn tables() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::ReadConstant(1),
-            Instruction::ReadConstant(2),
-            Instruction::Add,
-            Instruction::ReadConstant(3),
-            Instruction::ReadConstant(4),
-            Instruction::MakeTable(2),
-            Instruction::WriteGlobal(0),
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            ReadConstant(1),
+            ReadConstant(2),
+            Add,
+            ReadConstant(3),
+            ReadConstant(4),
+            MakeTable(2),
+            WriteGlobal(0),
+            PushNil,
+            Return
         ]
     );
 
@@ -395,26 +370,26 @@ fn tables() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadGlobal(0),
-            Instruction::ReadGlobal(0),
-            Instruction::ReadConstant(0),
-            Instruction::ReadTable,
-            Instruction::ReadGlobal(1),
-            Instruction::Call(0),
-            Instruction::Add,
-            Instruction::DuplicateTop(1),
-            Instruction::ReadTable,
-            Instruction::ReadGlobal(2),
-            Instruction::ReadConstant(1),
-            Instruction::ReadTable,
-            Instruction::ReadGlobal(3),
-            Instruction::ReadConstant(2),
-            Instruction::ReadTable,
-            Instruction::ReadTable,
-            Instruction::Subtract,
-            Instruction::WriteTable,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadGlobal(0),
+            ReadGlobal(0),
+            ReadConstant(0),
+            ReadTable,
+            ReadGlobal(1),
+            Call(0),
+            Add,
+            DuplicateTop(1),
+            ReadTable,
+            ReadGlobal(2),
+            ReadConstant(1),
+            ReadTable,
+            ReadGlobal(3),
+            ReadConstant(2),
+            ReadTable,
+            ReadTable,
+            Subtract,
+            WriteTable,
+            PushNil,
+            Return
         ]
     );
 
@@ -446,23 +421,23 @@ fn tables() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::ReadConstant(1),
-            Instruction::MakeTable(1),
-            Instruction::WriteGlobal(0),
-            Instruction::ReadGlobal(0),
-            Instruction::ReadConstant(0),
-            Instruction::DuplicateTop(1),
-            Instruction::ReadTable,
-            Instruction::ReadConstant(2),
-            Instruction::Subtract,
-            Instruction::WriteTable,
-            Instruction::ReadGlobal(0),
-            Instruction::ReadConstant(0),
-            Instruction::ReadTable,
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            ReadConstant(1),
+            MakeTable(1),
+            WriteGlobal(0),
+            ReadGlobal(0),
+            ReadConstant(0),
+            DuplicateTop(1),
+            ReadTable,
+            ReadConstant(2),
+            Subtract,
+            WriteTable,
+            ReadGlobal(0),
+            ReadConstant(0),
+            ReadTable,
+            Return,
+            PushNil,
+            Return
         ]
     );
 }
@@ -484,23 +459,18 @@ fn functions() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadFunction(0),
-            Instruction::WriteGlobal(0),
-            Instruction::ReadGlobal(0),
-            Instruction::Call(0),
-            Instruction::WriteGlobal(1),
-            Instruction::PushNil,
-            Instruction::Return
+            ReadFunction(0),
+            WriteGlobal(0),
+            ReadGlobal(0),
+            Call(0),
+            WriteGlobal(1),
+            PushNil,
+            Return
         ]
     );
     assert_eq!(
         chunk.functions[0].code,
-        [
-            Instruction::ReadConstant(0),
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
-        ]
+        [ReadConstant(0), Return, PushNil, Return]
     );
 
     let parser = Parser::new(Source::TopLevel(
@@ -530,12 +500,12 @@ fn functions() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::WriteGlobal(0),
-            Instruction::ReadFunction(0),
-            Instruction::WriteGlobal(1),
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            WriteGlobal(0),
+            ReadFunction(0),
+            WriteGlobal(1),
+            PushNil,
+            Return
         ]
     );
     assert_eq!(chunk.functions[0].constants, [Constant::Int(1)]);
@@ -543,16 +513,16 @@ fn functions() {
     assert_eq!(
         chunk.functions[0].code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::WriteLocal(0),
-            Instruction::ReadFunction(0),
-            Instruction::WriteLocal(1),
-            Instruction::ReadLocal(1),
-            Instruction::ReadConstant(0),
-            Instruction::Add,
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            WriteLocal(0),
+            ReadFunction(0),
+            WriteLocal(1),
+            ReadLocal(1),
+            ReadConstant(0),
+            Add,
+            Return,
+            PushNil,
+            Return
         ]
     );
 
@@ -564,12 +534,12 @@ fn functions() {
     assert_eq!(
         chunk.functions[0].functions[0].code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::WriteLocal(0),
-            Instruction::ReadConstant(0),
-            Instruction::WriteCaptured(0),
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            WriteLocal(0),
+            ReadConstant(0),
+            WriteCaptured(0),
+            PushNil,
+            Return
         ]
     );
 
@@ -586,38 +556,33 @@ fn functions() {
     assert_eq!(chunk.globals[0].as_ref(), "x");
     assert_eq!(
         chunk.code,
-        [
-            Instruction::ReadFunction(0),
-            Instruction::WriteGlobal(0),
-            Instruction::PushNil,
-            Instruction::Return
-        ]
+        [ReadFunction(0), WriteGlobal(0), PushNil, Return]
     );
     assert_eq!(
         chunk.functions[0].code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::WriteLocal(0),
-            Instruction::ReadFunction(0),
-            Instruction::ReadConstant(0),
-            Instruction::ReadConstant(1),
-            Instruction::Call(2),
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            WriteLocal(0),
+            ReadFunction(0),
+            ReadConstant(0),
+            ReadConstant(1),
+            Call(2),
+            Return,
+            PushNil,
+            Return
         ]
     );
     assert_eq!(
         chunk.functions[0].functions[0].code,
         [
-            Instruction::ReadCaptured(0),
-            Instruction::ReadLocal(0),
-            Instruction::ReadLocal(1),
-            Instruction::Add,
-            Instruction::Add,
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadCaptured(0),
+            ReadLocal(0),
+            ReadLocal(1),
+            Add,
+            Add,
+            Return,
+            PushNil,
+            Return
         ]
     );
 
@@ -651,12 +616,12 @@ fn functions() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::WriteGlobal(0),
-            Instruction::ReadFunction(0),
-            Instruction::WriteGlobal(1),
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            WriteGlobal(0),
+            ReadFunction(0),
+            WriteGlobal(1),
+            PushNil,
+            Return
         ]
     );
     assert_eq!(chunk.functions[0].constants, [Constant::Int(1)]);
@@ -665,12 +630,12 @@ fn functions() {
     assert_eq!(
         chunk.functions[0].code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::WriteLocal(0),
-            Instruction::ReadFunction(0),
-            Instruction::WriteLocal(1),
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            WriteLocal(0),
+            ReadFunction(0),
+            WriteLocal(1),
+            PushNil,
+            Return
         ]
     );
 
@@ -686,14 +651,14 @@ fn functions() {
     assert_eq!(
         chunk.functions[0].functions[0].code,
         [
-            Instruction::ReadFunction(0),
-            Instruction::WriteLocal(0),
-            Instruction::ReadLocal(0),
-            Instruction::ReadConstant(0),
-            Instruction::Add,
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadFunction(0),
+            WriteLocal(0),
+            ReadLocal(0),
+            ReadConstant(0),
+            Add,
+            Return,
+            PushNil,
+            Return
         ]
     );
 
@@ -711,12 +676,12 @@ fn functions() {
     assert_eq!(
         chunk.functions[0].functions[0].functions[0].code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::WriteLocal(0),
-            Instruction::ReadConstant(0),
-            Instruction::WriteCaptured(0),
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            WriteLocal(0),
+            ReadConstant(0),
+            WriteCaptured(0),
+            PushNil,
+            Return
         ]
     );
 
@@ -749,44 +714,44 @@ fn functions() {
     assert_eq!(
         chunk.code,
         [
-            Instruction::ReadConstant(0),
-            Instruction::WriteGlobal(0),
-            Instruction::ReadFunction(0),
-            Instruction::WriteGlobal(1),
-            Instruction::ReadFunction(1),
-            Instruction::WriteGlobal(2),
-            Instruction::ReadGlobal(1),
-            Instruction::Call(0),
-            Instruction::Pop(1),
-            Instruction::ReadGlobal(2),
-            Instruction::Call(0),
-            Instruction::Pop(1),
-            Instruction::ReadGlobal(0),
-            Instruction::Return,
-            Instruction::PushNil,
-            Instruction::Return
+            ReadConstant(0),
+            WriteGlobal(0),
+            ReadFunction(0),
+            WriteGlobal(1),
+            ReadFunction(1),
+            WriteGlobal(2),
+            ReadGlobal(1),
+            Call(0),
+            Pop(1),
+            ReadGlobal(2),
+            Call(0),
+            Pop(1),
+            ReadGlobal(0),
+            Return,
+            PushNil,
+            Return
         ]
     );
     assert_eq!(
         chunk.functions[0].code,
         [
-            Instruction::ReadGlobal(0),
-            Instruction::ReadConstant(0),
-            Instruction::Add,
-            Instruction::WriteLocal(0), // local
-            Instruction::PushNil,
-            Instruction::Return
+            ReadGlobal(0),
+            ReadConstant(0),
+            Add,
+            WriteLocal(0), // local
+            PushNil,
+            Return
         ]
     );
     assert_eq!(
         chunk.functions[1].code,
         [
-            Instruction::ReadGlobal(0),
-            Instruction::ReadConstant(0),
-            Instruction::Add,
-            Instruction::WriteGlobal(0), // global
-            Instruction::PushNil,
-            Instruction::Return
+            ReadGlobal(0),
+            ReadConstant(0),
+            Add,
+            WriteGlobal(0), // global
+            PushNil,
+            Return
         ]
     )
 }

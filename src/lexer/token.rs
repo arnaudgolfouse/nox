@@ -105,50 +105,7 @@ pub enum Assign {
     Modulo,
 }
 
-macro_rules! keywords {
-    (
-        $(#[$doc:meta])*
-        pub enum $K:ident {
-            $(
-                $(#[$keyword_doc:meta])*
-                $keyword:ident => $name:literal,
-            )*
-        }
-    ) => {
-$(#[$doc])*
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum $K {
-    $(
-        $(#[$keyword_doc])*
-        $keyword,
-    )*
-}
-
-impl Display for $K {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            $(
-                Self::$keyword => formatter.write_str($name),
-            )*
-        }
-    }
-}
-
-impl convert::TryFrom<&str> for $K {
-    type Error = ();
-    fn try_from(word: &str) -> Result<Self, <Self as convert::TryFrom<&str>>::Error> {
-        match word {
-            $(
-                $name => Ok(Self::$keyword),
-            )*
-            _ => Err(()),
-        }
-    }
-}
-    };
-}
-
-keywords! {
+#[derive(Debug, PartialEq, Clone, Copy)]
 /// Keywords of the language
 ///
 /// # Remark
@@ -157,54 +114,103 @@ keywords! {
 /// [Operation](enum.Operation.html) enum.
 pub enum Keyword {
     /// `fn`
-    Fn => "fn",
+    ///
+    /// Starts a function
+    Fn,
     /// `global`
-    Global => "global",
+    ///
+    /// Declare a variable in a function as global.
+    Global,
     /// `if`
-    If => "if",
+    If,
     /// `then`
-    Then => "then",
+    Then,
     /// `else`
-    Else => "else",
+    Else,
     /// `for`
     ///
     /// Start a `for` loop
-    For => "for",
+    For,
     /// `in`
-    In => "in",
+    In,
     /// `while`
     ///
     /// Start a `while` loop
-    While => "while",
+    While,
     /// `end`
     ///
     /// End the current `fn`, `if`, `else`, `while`, or `for` block.
-    End => "end",
+    End,
     /// `break`
     ///
     /// Break out of the current loop
-    Break => "break",
+    Break,
     /// `continue`
     ///
     /// Skip to the next iteration of the current loop
-    Continue => "continue",
+    Continue,
     /// `return`
     ///
     /// Return from the currently executing code
-    Return => "return",
+    Return,
     /// `true`
     ///
     /// Boolean constant `true`
-    True => "true",
+    True,
     /// `false`
     ///
     /// Boolean constant `false`
-    False => "false",
+    False,
     /// `nil`
     ///
     /// Constant `nil`
-    Nil => "nil",
+    Nil,
 }
+
+impl Display for Keyword {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        formatter.write_str(match self {
+            Self::Fn => "fn",
+            Self::Global => "global",
+            Self::If => "if",
+            Self::Then => "then",
+            Self::Else => "else",
+            Self::For => "for",
+            Self::In => "in",
+            Self::While => "while",
+            Self::End => "end",
+            Self::Break => "break",
+            Self::Continue => "continue",
+            Self::Return => "return",
+            Self::True => "true",
+            Self::False => "false",
+            Self::Nil => "nil",
+        })
+    }
+}
+
+impl convert::TryFrom<&str> for Keyword {
+    type Error = ();
+    fn try_from(word: &str) -> Result<Self, <Self as convert::TryFrom<&str>>::Error> {
+        match word {
+            "fn" => Ok(Self::Fn),
+            "global" => Ok(Self::Global),
+            "if" => Ok(Self::If),
+            "then" => Ok(Self::Then),
+            "else" => Ok(Self::Else),
+            "for" => Ok(Self::For),
+            "in" => Ok(Self::In),
+            "while" => Ok(Self::While),
+            "end" => Ok(Self::End),
+            "break" => Ok(Self::Break),
+            "continue" => Ok(Self::Continue),
+            "return" => Ok(Self::Return),
+            "true" => Ok(Self::True),
+            "false" => Ok(Self::False),
+            "nil" => Ok(Self::Nil),
+            _ => Err(()),
+        }
+    }
 }
 
 /// Kind of token encountered. This can be an operator, a keyword, a variable

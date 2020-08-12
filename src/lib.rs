@@ -102,6 +102,52 @@ impl Range {
     pub fn new(start: Position, end: Position) -> Self {
         Self { start, end }
     }
+
+    /// Returns a subslice of the given `source` corresponding to the range,
+    /// removing line skips.
+    pub fn substr(self, source: &str) -> String {
+        let mut first_line = true;
+        let mut col_start = 0;
+        let mut col_end = 0;
+
+        let mut result = String::new();
+
+        for (line_index, line) in source
+            .lines()
+            .enumerate()
+            .take(self.end.line as usize + 1)
+            .skip(self.start.line as usize)
+        {
+            let mut chars = line.chars();
+            if first_line {
+                first_line = false;
+                loop {
+                    if col_start >= self.start.column as usize {
+                        break;
+                    }
+                    match chars.next() {
+                        None => break,
+                        Some(c) => {
+                            col_start += c.len_utf8();
+                        }
+                    }
+                }
+                col_end = col_start;
+            }
+            for c in chars {
+                result.push(c);
+                if line_index == self.end.line as usize {
+                    if col_end >= self.end.column as usize {
+                        break;
+                    } else {
+                        col_end += c.len_utf8();
+                    }
+                }
+            }
+        }
+
+        result
+    }
 }
 
 impl fmt::Display for Range {

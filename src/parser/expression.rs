@@ -111,7 +111,8 @@ pub(super) trait ExpressionParser<'a>: Sized {
         self.parse_precedence(Precedence::None, token, read_only)
     }
 
-    /// Parse an expression with the given precedence, with `prefix_token` as its first Token.
+    /// Parse an expression with the given precedence, with `prefix_token` as
+    /// its first Token.
     fn parse_precedence(
         &mut self,
         precedence: Precedence,
@@ -544,7 +545,7 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
             }
         } else {
             return Err(self.emit_error(
-                ParserErrorKind::ExpectedId,
+                ParserErrorKind::ExpectedId(None),
                 Continue::Continue,
                 Range::new(self.current_position(), self.current_position()),
             ));

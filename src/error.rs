@@ -43,15 +43,23 @@ fn int_width(i: u32) -> usize {
 ///
 /// error : unexpected dot
 /// ```
-pub fn display_error<F: Fn(&mut fmt::Formatter) -> Result<(), fmt::Error>>(
-    display_message: F,
+pub fn display_error<T: fmt::Display, U: fmt::Display>(
+    message: T,
+    note: Option<U>,
     range: Range,
     source: &Source,
     warning: bool,
     formatter: &mut fmt::Formatter,
 ) -> Result<(), fmt::Error> {
     display_error_internal(range, source, warning, formatter)?;
-    display_message(formatter)
+    write!(formatter, "{}", message)?;
+    if let Some(note) = note {
+        writeln!(formatter)?;
+        writeln!(formatter)?;
+        write!(formatter, "{} : {}", "note".blue().bold(), note)
+    } else {
+        Ok(())
+    }
 }
 
 /// Avoids code duplication
@@ -68,6 +76,14 @@ fn display_error_internal(
             <&str>::red(x)
         }
     };
+    let color_str = |x: String| {
+        if warning {
+            <&str>::yellow(&x)
+        } else {
+            <&str>::red(&x)
+        }
+    };
+
     // helper function to print a line with its number (and and optional error trail)
     let print_line = |formatter: &mut fmt::Formatter,
                       line: String,
@@ -95,7 +111,7 @@ fn display_error_internal(
             }
         )?;
         if error_trail {
-            formatter.write_str(&color("| "))?
+            write!(formatter, "{} ", color("|"))?;
         }
         for c in line.chars() {
             if c == '\t' {
@@ -138,10 +154,10 @@ fn display_error_internal(
                 .red()
             }
         )?;
-        let mut underline = format!("{1:0$} {2} ", number_width, "", color(" "));
+        let mut underline = format!("{1:0$}   ", number_width, "");
         if error_trail {
             write!(formatter, "{}", color("| "))?;
-            underline.push_str(&format!("{}, ", color("|_")))
+            underline.push_str("|_")
         }
         let mut column_max = 0;
         for (i, c) in line.chars().enumerate() {
@@ -150,31 +166,31 @@ fn display_error_internal(
                 // tab as 4 spaces
                 formatter.write_str("    ")?;
                 if i < error_end && i >= error_start {
-                    underline.push_str(&color("____"))
+                    underline.push_str("____")
                 } else if i < error_start {
                     underline.push_str("    ")
                 }
             } else {
                 write!(formatter, "{}", c)?;
                 if i < error_end && i >= error_start {
-                    underline.push_str(&color("_"))
+                    underline.push_str("_")
                 } else if i < error_start {
                     underline.push(' ')
                 }
             }
             if i == error_end {
-                underline.push_str(&color("^"))
+                underline.push_str("^")
             }
         }
         while error_end > column_max {
             column_max += 1;
-            underline.push_str(&color("_"))
+            underline.push_str("_")
         }
         if error_end == column_max {
-            underline.push_str(&color("^"))
+            underline.push_str("^")
         }
         writeln!(formatter)?;
-        Ok(underline)
+        Ok(color_str(underline).to_string())
     };
 
     writeln!(

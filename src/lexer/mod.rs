@@ -28,12 +28,16 @@ pub struct Lexer<'a> {
     next_token: Result<Option<Token>, LexerError<'a>>,
     /// Start position of the current token
     current_start: Position,
+    /// End position of the current token
+    pub(crate) current_end: Position,
+    /// Start position of the previous token
+    pub(crate) previous_start: Position,
+    /// End position of the previous token
+    pub(crate) previous_end: Position,
     /// Current position on the source
     pub(crate) position: Position,
-    /// Position of the next token in the source
+    /// Next position in the source
     next_position: Position,
-    /// Position of the previous token in the source
-    pub(crate) previous_position: Position,
 }
 
 impl<'a> Lexer<'a> {
@@ -43,9 +47,11 @@ impl<'a> Lexer<'a> {
             iterator: source.content().chars().peekable(),
             next_token: Ok(None),
             current_start: Position::default(),
+            current_end: Position::default(),
+            previous_start: Position::default(),
+            previous_end: Position::default(),
             position: Position::default(),
             next_position: Position::default(),
-            previous_position: Position::default(),
             source,
         };
         lexer.next_token = lexer.advance();
@@ -58,9 +64,11 @@ impl<'a> Lexer<'a> {
             iterator: source.chars().peekable(),
             next_token: Ok(None),
             current_start: Position::default(),
+            current_end: Position::default(),
+            previous_start: Position::default(),
+            previous_end: Position::default(),
             position: Position::default(),
             next_position: Position::default(),
-            previous_position: Position::default(),
             source: Source::TopLevel(source),
         };
         lexer.next_token = lexer.advance();
@@ -122,6 +130,8 @@ impl<'a> Lexer<'a> {
 
     /// Advance to the next token
     fn advance(&mut self) -> Result<Option<Token>, LexerError<'a>> {
+        self.previous_start = self.current_start;
+        self.previous_end = self.current_end;
         // skip whitespace
         #[allow(unused_assignments)]
         let mut next_char = ' ';
@@ -138,6 +148,7 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
+
         self.current_start = self.position;
 
         let token = match next_char {
@@ -175,8 +186,14 @@ impl<'a> Lexer<'a> {
                     }
                 }
             }
-            '"' => TokenKind::Str(self.string('"')?),
-            '\'' => TokenKind::Str(self.string('\'')?),
+            '"' => TokenKind::Str(match self.string('"') {
+                Ok(ok) => ok,
+                Err(err) => return Err(self.string_error('"', err)),
+            }),
+            '\'' => TokenKind::Str(match self.string('\'') {
+                Ok(ok) => ok,
+                Err(err) => return Err(self.string_error('\'', err)),
+            }),
             '=' | '<' | '>' | '+' | '-' | '*' | '/' | '%' => self.op_or_equal(next_char),
             '!' => match self.iterator.peek() {
                 Some('=') => {
@@ -189,11 +206,12 @@ impl<'a> Lexer<'a> {
             c => return Err(self.emit_error(LexerErrorKind::UnknownCharacter(c), Continue::Stop)),
         };
 
+        self.current_end = self.position;
         Ok(Some(Token {
             kind: token,
             range: Range {
                 start: self.current_start,
-                end: self.position,
+                end: self.current_end,
             },
         }))
     }
@@ -274,9 +292,12 @@ impl<'a> Lexer<'a> {
         match next_char {
             Some('.') => {
                 if base != 10 {
-                    return Err(
-                        self.emit_error(LexerErrorKind::NumberUnexpectedDot(base), Continue::Stop)
-                    );
+                    return Err(LexerError {
+                        source: self.source.clone(),
+                        kind: LexerErrorKind::NumberUnexpectedDot(base),
+                        continuable: Continue::Stop,
+                        range: Range::new(self.current_start, self.next_position),
+                    });
                 }
                 self.next_char();
                 match self.next_char() {
@@ -336,6 +357,7 @@ impl<'a> Lexer<'a> {
                             ))
                         }
                     };
+                    let start_pos = self.position;
                     match c {
                         '\\' => '\\',
                         '\'' => '\'',
@@ -351,10 +373,12 @@ impl<'a> Lexer<'a> {
                             match self.next_char_raw() {
                                 Some('{') => {}
                                 c => {
-                                    return Err(self.emit_error(
-                                        LexerErrorKind::ExpectedFound('{', c),
-                                        Continue::Stop,
-                                    ))
+                                    return Err(LexerError {
+                                        kind: LexerErrorKind::ExpectedFound('{', c),
+                                        continuable: Continue::Stop,
+                                        source: self.source.clone(),
+                                        range: Range::new(start_pos, self.position),
+                                    })
                                 }
                             }
                             let mut code_point = String::new();
@@ -362,6 +386,17 @@ impl<'a> Lexer<'a> {
                                 if let Some(c) = self.next_char_raw() {
                                     match c {
                                         '}' => break,
+                                        c if c == matching_character => {
+                                            return Err(LexerError {
+                                                kind: LexerErrorKind::ExpectedFound(
+                                                    '}',
+                                                    Some(matching_character),
+                                                ),
+                                                source: self.source.clone(),
+                                                continuable: Continue::Stop,
+                                                range: Range::new(start_pos, self.position),
+                                            })
+                                        }
                                         _ => code_point.push(c),
                                     }
                                 } else {
@@ -375,23 +410,32 @@ impl<'a> Lexer<'a> {
                                 Ok(code) => match std::char::from_u32(code) {
                                     Some(c) => c,
                                     None => {
-                                        return Err(self.emit_error(
-                                            LexerErrorKind::InvalidCodePoint(code),
-                                            Continue::Stop,
-                                        ))
+                                        return Err(LexerError {
+                                            source: self.source.clone(),
+                                            continuable: Continue::Stop,
+                                            kind: LexerErrorKind::InvalidCodePoint(code),
+                                            range: Range::new(start_pos, self.position),
+                                        })
                                     }
                                 },
                                 Err(err) => {
-                                    return Err(self
-                                        .emit_error(LexerErrorKind::Parseint(err), Continue::Stop))
+                                    return Err(LexerError {
+                                        source: self.source.clone(),
+                                        continuable: Continue::Stop,
+                                        kind: LexerErrorKind::Parseint(err),
+                                        range: Range::new(start_pos, self.position),
+                                    })
                                 }
                             }
                         }
                         c if c == matching_character => c,
                         _ => {
-                            return Err(
-                                self.emit_error(LexerErrorKind::UnknownEscape(c), Continue::Stop)
-                            )
+                            return Err(LexerError {
+                                kind: LexerErrorKind::UnknownEscape(c),
+                                continuable: Continue::Stop,
+                                source: self.source.clone(),
+                                range: Range::new(start_pos, self.position),
+                            })
                         }
                     }
                 }
@@ -407,6 +451,19 @@ impl<'a> Lexer<'a> {
         }
 
         Ok(result.into_boxed_str())
+    }
+
+    /// If an error is encountered in a string, we go to the end of said string
+    /// before reporting it.
+    fn string_error(&mut self, matching_character: char, error: LexerError<'a>) -> LexerError<'a> {
+        loop {
+            match self.next_char() {
+                Some(c) if c == matching_character => break,
+                None => break,
+                _ => {}
+            }
+        }
+        error
     }
 
     /// Parse all the following letters/numbers as part of an identifier, until a whitespace character is met.
@@ -478,12 +535,14 @@ impl<'a> Lexer<'a> {
     /// Gives next char with side-effects : it skips commentary and advance the
     /// position.
     fn next_char(&mut self) -> Option<char> {
-        self.previous_position = self.position;
         self.position = self.next_position;
         match self.iterator.next() {
             None => None,
             Some('\n') => {
-                self.next_position.line += 1;
+                self.next_position = Position {
+                    column: 0,
+                    line: self.next_position.line + 1,
+                };
                 Some('\n')
             }
             Some('#') => {
@@ -508,7 +567,6 @@ impl<'a> Lexer<'a> {
 
     /// Gives next char and advance the position.
     fn next_char_raw(&mut self) -> Option<char> {
-        self.previous_position = self.position;
         self.position = self.next_position;
         match self.iterator.next() {
             None => None,
@@ -529,11 +587,13 @@ impl<'a> Lexer<'a> {
 pub enum LexerErrorKind {
     /// A number was malformed because in contained a dot where it should'nt.
     ///
-    /// For example, floating point numbers are not supported in base 16, so parsing '0x2.1' will trigger this error.
+    /// For example, floating point numbers are not supported in base 16, so
+    /// parsing '0x2.1' will trigger this error.
     NumberUnexpectedDot(u32),
     /// Unknown character.
     ///
-    /// This include emoji and some unrecognised non-alphanumeric character (`$` for example).
+    /// This include emoji and some unrecognised non-alphanumeric character (`$`
+    /// for example).
     UnknownCharacter(char),
     /// Expected a character, but the input was over
     ExpectedCharacterAfter(char),
@@ -548,8 +608,12 @@ pub enum LexerErrorKind {
     /// Emmitted with "\u{code}"
     InvalidCodePoint(u32),
     /// Error while parsing an integer
+    ///
+    /// TODO : make our own parsing functions and errors
     Parseint(std::num::ParseIntError),
     /// Error while parsing a float
+    ///
+    /// TODO : make our own parsing functions and errors
     Parsefloat(std::num::ParseFloatError),
 }
 
@@ -584,7 +648,7 @@ impl Display for LexerErrorKind {
             Self::UnknownEscape(c) => {
                 write!(formatter, "unknown escape sequence in string : '\\{}'", c)
             }
-            Self::InvalidCodePoint(c) => write!(formatter, "invalid utf8 code point : '{}'", c),
+            Self::InvalidCodePoint(c) => write!(formatter, "invalid utf8 code point : '{:x}'", c),
             Self::Parseint(err) => write!(formatter, "{}", err),
             Self::Parsefloat(err) => write!(formatter, "{}", err),
         }
@@ -593,11 +657,8 @@ impl Display for LexerErrorKind {
 
 /// A lexer error.
 ///
-/// Contains its kind, as well as other information such as the position of the error in the input
-/// text.
-///
-/// This can be used as such, but it is often preferable to convert it to [Error](../struct.Error.html),
-/// which has nicer formatting.
+/// Contains its kind, as well as other information such as the position of the
+/// error in the input text.
 #[derive(Debug, Clone)]
 pub struct LexerError<'a> {
     pub(crate) kind: LexerErrorKind,
@@ -608,7 +669,7 @@ pub struct LexerError<'a> {
 
 impl<'a> fmt::Display for LexerError<'a> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        let display_message = |formatter: &mut fmt::Formatter| write!(formatter, "{}", self.kind);
-        display_error(display_message, self.range, &self.source, false, formatter)
+        // we need a displayable type, i32 will do
+        display_error::<_, i32>(&self.kind, None, self.range, &self.source, false, formatter)
     }
 }

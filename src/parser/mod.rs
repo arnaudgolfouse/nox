@@ -282,7 +282,7 @@ impl<'a> Parser<'a> {
     fn panic_mode(&mut self) -> bool {
         #[allow(unused_must_use)]
         loop {
-            match self.lexer.peek() {
+            match self.peek() {
                 Ok(Some(token)) => match token.kind {
                     TokenKind::Keyword(Keyword::Return)
                     | TokenKind::Keyword(Keyword::If)
@@ -299,17 +299,17 @@ impl<'a> Parser<'a> {
                 },
                 Ok(None) => return true,
                 Err(err) => {
-                    self.errors.push(err.into());
+                    self.errors.push(err);
                 }
             }
-            self.lexer.next();
+            self.next();
         }
     }
 
     /// Main parsing function : parse statements until it reaches the end of the
     /// current function / the top-level, or an error is encountered.
     fn parse_statements(&mut self) -> Result<ParseReturn, ParserError<'a>> {
-        let first_token = match self.lexer.next()? {
+        let first_token = match self.next()? {
             Some(token) => token,
             None => {
                 return if self.scope().is_some() || !self.function_stack.is_empty() {
@@ -474,7 +474,7 @@ impl<'a> Parser<'a> {
                         }
                         _ => {
                             return Err(self.emit_error(
-                                ParserErrorKind::Unexpected(token.kind),
+                                ParserErrorKind::ExpectedId(Some(token.kind)),
                                 Continue::Stop,
                                 token.range,
                             ))
@@ -482,7 +482,7 @@ impl<'a> Parser<'a> {
                     }
                 } else {
                     return Err(self.emit_error(
-                        ParserErrorKind::ExpectedId,
+                        ParserErrorKind::ExpectedId(None),
                         Continue::Continue,
                         self.current_range(),
                     ));
@@ -555,7 +555,7 @@ impl<'a> Parser<'a> {
                     }
                     token => {
                         return Err(self.emit_error(
-                            ParserErrorKind::ExpectedId,
+                            ParserErrorKind::ExpectedId(token.map(|t| t.kind.clone())),
                             Continue::Stop,
                             if let Some(token) = token {
                                 token.range
@@ -622,15 +622,15 @@ impl<'a> Parser<'a> {
                         }
                         kind => {
                             return Err(self.emit_error(
-                                ParserErrorKind::Unexpected(kind),
-                                Continue::Continue,
+                                ParserErrorKind::ExpectedId(Some(kind)),
+                                Continue::Stop,
                                 token.range,
                             ));
                         }
                     }
                 } else {
                     return Err(self.emit_error(
-                        ParserErrorKind::ExpectedId,
+                        ParserErrorKind::ExpectedId(None),
                         Continue::Continue,
                         self.current_range(),
                     ));
@@ -668,33 +668,43 @@ impl<'a> Parser<'a> {
             TokenKind::Id(_) => {
                 let range = first_token.range;
                 let expression_type = self.parse_expression(Some(first_token), false)?;
+                let expression_range = Range::new(range.start, self.lexer.previous_end);
                 match expression_type {
                     ExpressionType::Assign(var, ass, _) => {
-                        self.lexer.next()?;
+                        self.next()?;
                         self.assign_variable(var, ass)?
                     }
                     ExpressionType::TableWrite(ass) => {
-                        self.lexer.next()?;
+                        self.next()?;
                         self.assign_table(ass)?
                     }
-                    ExpressionType::Call => self.emit_instruction_u8(Instruction::Pop(1)),
+                    ExpressionType::Call => {
+                        if matches!(self.peek(), Ok(Some(Token { kind: TokenKind::Assign(_), .. })))
+                        {
+                            return Err(self.emit_error(
+                                ParserErrorKind::NonAssignable,
+                                Continue::Stop,
+                                expression_range,
+                            ));
+                        }
+                        self.emit_instruction_u8(Instruction::Pop(1))
+                    }
                     _ => {
-                        let range = Range::new(range.start, self.lexer.previous_position);
                         return if let Some(Token {
                             kind: TokenKind::Assign(_),
                             ..
-                        }) = self.lexer.peek()?
+                        }) = self.peek()?
                         {
                             Err(self.emit_error(
                                 ParserErrorKind::NonAssignable,
                                 Continue::Stop,
-                                range,
+                                expression_range,
                             ))
                         } else {
                             Err(self.emit_error(
                                 ParserErrorKind::UnexpectedExpr,
                                 Continue::Stop,
-                                range,
+                                expression_range,
                             ))
                         };
                     }
@@ -855,7 +865,7 @@ impl<'a> Parser<'a> {
                 self.parse_variable(variable.clone(), true)?;
             }
         };
-        let token = self.lexer.next()?;
+        let token = self.next()?;
         self.parse_expression(token, true)?;
         match assignement {
             Assign::Equal => {}
@@ -883,7 +893,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let token = self.lexer.next()?;
+        let token = self.next()?;
         self.parse_expression(token, true)?;
 
         match assignement {
@@ -992,8 +1002,8 @@ pub(crate) enum ParserErrorKind {
     /// Encountered an unexpected token kind.
     Unexpected(TokenKind),
     /// Expected an identifier, found something else or nothing.
-    ExpectedId,
-    /// Parsed an expression tohat we realized later was in an incorrect
+    ExpectedId(Option<TokenKind>),
+    /// Parsed an expression that we realized later was in an incorrect
     /// position.
     UnexpectedExpr,
     /// Tried to assign to a read-only expression (such as `0` or `x + y`).
@@ -1015,7 +1025,14 @@ impl fmt::Display for ParserErrorKind {
             Self::Expected(token) => write!(formatter, "expected '{}'", token),
             Self::Unexpected(token) => write!(formatter, "unexpected token : '{}'", token),
             Self::UnexpectedExpr => formatter.write_str("unexpected expression"),
-            Self::ExpectedId => formatter.write_str("expected identifier"),
+            Self::ExpectedId(token) => {
+                formatter.write_str("expected identifier")?;
+                if let Some(token) = token {
+                    write!(formatter, ", found '{}'", token)
+                } else {
+                    Ok(())
+                }
+            }
             Self::NonAssignable => formatter.write_str("this expression cannot be assigned to"),
             Self::EndClosure => formatter.write_str(
                 "This is not an error but an internal hack : you should not be seeing this !",
@@ -1053,14 +1070,28 @@ impl<'a> From<LexerError<'a>> for ParserError<'a> {
     }
 }
 
-impl<'a> fmt::Display for ParserError<'a> {
+impl fmt::Display for ParserError<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        writeln!(formatter)?;
         display_error(
-            |f| writeln!(f, "{}", self.kind),
+            &self.kind,
+            self.note(),
             self.range,
             &self.source,
             false,
             formatter,
         )
+    }
+}
+
+impl ParserError<'_> {
+    fn note(&self) -> Option<String> {
+        match self.kind {
+            ParserErrorKind::UnexpectedExpr => Some(format!(
+                "you can evaluate the expression by wrapping it in parenthesis -> ({})",
+                self.range.substr(self.source.content())
+            )),
+            _ => None,
+        }
     }
 }
