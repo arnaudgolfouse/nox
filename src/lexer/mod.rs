@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod tests;
 
+mod num_parser;
 mod token;
 
 use crate::{
@@ -89,20 +90,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// emit an error at the current position
-    fn emit_error_at_position(
-        &self,
-        kind: LexerErrorKind,
-        continuable: Continue,
-    ) -> LexerError<'a> {
-        LexerError {
-            kind,
-            range: Range::new(self.next_position, self.next_position),
-            source: self.source.clone(),
-            continuable,
-        }
-    }
-
     /// Parse the attached `Source` into a vector of `Token`s.
     ///
     /// # Errors
@@ -136,9 +123,8 @@ impl<'a> Lexer<'a> {
         #[allow(unused_assignments)]
         let mut next_char = ' ';
         loop {
-            match self.next_char() {
-                Some('\n') => (),
-                Some(c) if c.is_whitespace() => (),
+            match self.next_char_skip_comment() {
+                Some(c) if c.is_whitespace() => {}
                 None => {
                     return Ok(None);
                 }
@@ -161,27 +147,35 @@ impl<'a> Lexer<'a> {
             '.' => TokenKind::Dot,
             ',' => TokenKind::Comma,
             ';' => TokenKind::SemiColon,
-            c if c.is_alphanumeric() || c == '_' => {
-                let word = self.identifier(next_char);
+            c if c.is_numeric() => {
+                use num_parser::{parse_number, IntOrFloat};
+
+                let number = self.eat_while(c, |c| c.is_alphanumeric() || c == '_' || c == '.');
+
+                parse_number(&number)
+                    .map(|int_or_float| match int_or_float {
+                        IntOrFloat::Int(i) => TokenKind::Int(i),
+                        IntOrFloat::Float(f) => TokenKind::Float(f),
+                    })
+                    .map_err(|err| {
+                        self.emit_error(LexerErrorKind::NumberError(err), Continue::Stop)
+                    })?
+            }
+            c if c.is_alphabetic() || c == '_' => {
+                let word = self.eat_while(c, |c| c.is_alphanumeric() || c == '_');
                 match word.as_ref() {
                     "and" => TokenKind::Op(Operation::And),
                     "or" => TokenKind::Op(Operation::Or),
                     "xor" => TokenKind::Op(Operation::Xor),
                     "not" => TokenKind::Op(Operation::Not),
+                    "inf" => TokenKind::Float(f64::INFINITY),
+                    "NaN" => TokenKind::Float(f64::NAN),
                     "_" => TokenKind::Placeholder,
                     s => {
                         if let Ok(keyword) = Keyword::try_from(s) {
                             TokenKind::Keyword(keyword)
-                        } else if !c.is_numeric() {
-                            TokenKind::Id(word)
-                        } else if word.starts_with("0b") {
-                            self.parse_base(&word[2..], 2)?
-                        } else if word.starts_with("0x") {
-                            self.parse_base(&word[2..], 16)?
-                        } else if word.starts_with("0o") {
-                            self.parse_base(&word[2..], 8)?
                         } else {
-                            self.parse_base(&word, 10)?
+                            TokenKind::Id(word)
                         }
                     }
                 }
@@ -282,65 +276,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn parse_base(&mut self, s: &str, base: u32) -> Result<TokenKind, LexerError<'a>> {
-        let result = match i64::from_str_radix(s, base) {
-            Ok(i) => i,
-            Err(err) => return Err(self.emit_error(LexerErrorKind::Parseint(err), Continue::Stop)),
-        };
-        // if there is a '.', this is a floating-point number
-        let next_char = self.iterator.peek();
-        match next_char {
-            Some('.') => {
-                if base != 10 {
-                    return Err(LexerError {
-                        source: self.source.clone(),
-                        kind: LexerErrorKind::NumberUnexpectedDot(base),
-                        continuable: Continue::Stop,
-                        range: Range::new(self.current_start, self.next_position),
-                    });
-                }
-                self.next_char();
-                match self.next_char() {
-                    Some(c) => {
-                        let float_part = self.identifier(c);
-                        self.number_float(&float_part, result)
-                    }
-                    None => Err(self.emit_error(
-                        LexerErrorKind::ExpectedCharacterAfter('.'),
-                        Continue::Continue,
-                    )),
-                }
-            }
-            _ => Ok(TokenKind::Int(result)),
-        }
-    }
-
-    fn number_float(&mut self, s: &str, int_part: i64) -> Result<TokenKind, LexerError<'a>> {
-        let s = {
-            let mut temp = ".".to_owned();
-            temp.push_str(s);
-            temp
-        };
-        let float_part = match s.parse::<f64>() {
-            Ok(f) => f,
-            Err(err) => {
-                return Err(self.emit_error(LexerErrorKind::Parsefloat(err), Continue::Stop))
-            }
-        };
-        // if there is a '.', throw an error
-        match self.iterator.peek() {
-            Some('.') => Err(self
-                .emit_error_at_position(LexerErrorKind::NumberUnexpectedDot(10), Continue::Stop)),
-            _ => Ok(TokenKind::Float(int_part as f64 + float_part)),
-        }
-    }
-
     /// Will make a string out of all the next characters, until
     /// `matching_character`.
     fn string(&mut self, matching_character: char) -> Result<Box<str>, LexerError<'a>> {
         let mut result = String::new();
         loop {
-            let next_char = match self.next_char_raw() {
+            let next_char = match self.next_char() {
                 None => {
                     return Err(self.emit_error(
                         LexerErrorKind::IncompleteString(matching_character),
@@ -348,7 +289,7 @@ impl<'a> Lexer<'a> {
                     ))
                 }
                 Some('\\') => {
-                    let c = match self.next_char_raw() {
+                    let c = match self.next_char() {
                         Some(c) => c,
                         None => {
                             return Err(self.emit_error(
@@ -370,7 +311,7 @@ impl<'a> Lexer<'a> {
                         // ;)
                         // this is the same as in rust : \u{code}
                         'u' => {
-                            match self.next_char_raw() {
+                            match self.next_char() {
                                 Some('{') => {}
                                 c => {
                                     return Err(LexerError {
@@ -383,7 +324,7 @@ impl<'a> Lexer<'a> {
                             }
                             let mut code_point = String::new();
                             loop {
-                                if let Some(c) = self.next_char_raw() {
+                                if let Some(c) = self.next_char() {
                                     match c {
                                         '}' => break,
                                         c if c == matching_character => {
@@ -466,19 +407,20 @@ impl<'a> Lexer<'a> {
         error
     }
 
-    /// Parse all the following letters/numbers as part of an identifier, until a whitespace character is met.
-    fn identifier(&mut self, first_letter: char) -> Box<str> {
-        let mut result = String::with_capacity(1);
-        result.push(first_letter);
+    /// Consume and collect all characters that match `predicate`.
+    fn eat_while<F>(&mut self, first_char: char, predicate: F) -> Box<str>
+    where
+        F: Fn(char) -> bool,
+    {
+        let mut result = String::new();
+        result.push(first_char);
 
-        loop {
-            match self.iterator.peek() {
-                Some(c) if c.is_alphanumeric() || *c == '_' => {
-                    if let Some(c) = self.next_char() {
-                        result.push(c)
-                    }
-                }
-                _ => break,
+        while let Some(c) = self.iterator.peek().copied() {
+            if predicate(c) {
+                result.push(c);
+                self.next_char();
+            } else {
+                break;
             }
         }
 
@@ -532,9 +474,10 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Gives next char with side-effects : it skips commentary and advance the
-    /// position.
-    fn next_char(&mut self) -> Option<char> {
+    /// Gives next char and advance the position.
+    ///
+    /// It will skips commentary, and return the newline.
+    fn next_char_skip_comment(&mut self) -> Option<char> {
         self.position = self.next_position;
         match self.iterator.next() {
             None => None,
@@ -566,7 +509,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Gives next char and advance the position.
-    fn next_char_raw(&mut self) -> Option<char> {
+    fn next_char(&mut self) -> Option<char> {
         self.position = self.next_position;
         match self.iterator.next() {
             None => None,
@@ -585,11 +528,6 @@ impl<'a> Lexer<'a> {
 /// Kind of errors returned by the lexer
 #[derive(Debug, PartialEq, Clone)]
 pub enum LexerErrorKind {
-    /// A number was malformed because in contained a dot where it should'nt.
-    ///
-    /// For example, floating point numbers are not supported in base 16, so
-    /// parsing '0x2.1' will trigger this error.
-    NumberUnexpectedDot(u32),
     /// Unknown character.
     ///
     /// This include emoji and some unrecognised non-alphanumeric character (`$`
@@ -599,6 +537,8 @@ pub enum LexerErrorKind {
     ExpectedCharacterAfter(char),
     /// Expected the first character, found the second or nothing
     ExpectedFound(char, Option<char>),
+    /// Expected a digit, found something else.
+    ExpectedDigit(char),
     /// Missing ending character in a string
     IncompleteString(char),
     /// Unknown escape character in a string
@@ -607,30 +547,15 @@ pub enum LexerErrorKind {
     ///
     /// Emmitted with "\u{code}"
     InvalidCodePoint(u32),
-    /// Error while parsing an integer
-    ///
-    /// TODO : make our own parsing functions and errors
+    /// Error while parsing an integer in `\u{...}`
     Parseint(std::num::ParseIntError),
-    /// Error while parsing a float
-    ///
-    /// TODO : make our own parsing functions and errors
-    Parsefloat(std::num::ParseFloatError),
+    /// Error while parsing a number
+    NumberError(num_parser::NumberError),
 }
 
 impl Display for LexerErrorKind {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            Self::NumberUnexpectedDot(base) => {
-                if *base == 10 {
-                    write!(formatter, "unexpected dot")
-                } else {
-                    write!(
-                        formatter,
-                        "floating-point numbers are not supported for base {}",
-                        base
-                    )
-                }
-            }
             Self::UnknownCharacter(c) => write!(formatter, "unknown character : '{}'", c),
             Self::ExpectedCharacterAfter(c) => {
                 write!(formatter, "expected character after '{}'", c)
@@ -644,13 +569,14 @@ impl Display for LexerErrorKind {
                     None => "nothing".to_owned(),
                 }
             ),
+            Self::ExpectedDigit(c) => write!(formatter, "expected a digit, found {}", c),
             Self::IncompleteString(c) => write!(formatter, "expected {} to end the string", c),
             Self::UnknownEscape(c) => {
                 write!(formatter, "unknown escape sequence in string : '\\{}'", c)
             }
             Self::InvalidCodePoint(c) => write!(formatter, "invalid utf8 code point : '{:x}'", c),
             Self::Parseint(err) => write!(formatter, "{}", err),
-            Self::Parsefloat(err) => write!(formatter, "{}", err),
+            Self::NumberError(err) => write!(formatter, "{}", err),
         }
     }
 }
@@ -670,6 +596,16 @@ pub struct LexerError<'a> {
 impl<'a> fmt::Display for LexerError<'a> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         // we need a displayable type, i32 will do
-        display_error::<_, i32>(&self.kind, None, self.range, &self.source, false, formatter)
+        display_error::<_, i32>(
+            &self.kind,
+            None,
+            self.range,
+            self.source.content(),
+            self.source.name(),
+            false,
+            formatter,
+        )
     }
 }
+
+impl std::error::Error for LexerError<'_> {}

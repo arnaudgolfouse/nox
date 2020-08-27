@@ -1,18 +1,20 @@
 use super::*;
+use num_parser::{Base, NumberError};
 
 #[test]
 fn errors() {
     // multiple dots
-    assert!(matches!(
+    assert_eq!(
         Lexer::top_level("3.1.2").next().unwrap_err().kind,
-        LexerErrorKind::NumberUnexpectedDot(10)
-    ));
+        LexerErrorKind::NumberError(NumberError::NumberUnexpectedDot(Base::Decimal))
+    );
     // dot in hexadecimal
-    // TODO : Lua support this, maybe we should too ?
-    assert!(matches!(
+    // TODO : Lua support this, maybe we should too ?*
+    // Ok now !
+    /*assert!(matches!(
         Lexer::top_level("0x5fa.2").next().unwrap_err().kind,
-        LexerErrorKind::NumberUnexpectedDot(16)
-    ));
+        LexerErrorKind::NumberError(NumberError::NumberUnexpectedDot(Base::Hexadecimal))
+    ));*/
     // unrecognised character
     assert!(matches!(
         Lexer::top_level("😬").next().unwrap_err().kind,
@@ -29,20 +31,20 @@ fn errors() {
             .next()
             .unwrap_err()
             .kind,
-        LexerErrorKind::Parseint(_)
+        LexerErrorKind::NumberError(_)
     ));
     // TODO : the Rust parser is not very good with this error, make a custom one.
     assert!(matches!(
         Lexer::top_level("0xg").next().unwrap_err().kind,
-        LexerErrorKind::Parseint(_)
+        LexerErrorKind::NumberError(_)
     ));
     // f64 error
-    assert!(matches!(
-            // yeah 😅
-            // TODO : resolve this, make it 1.0 ?
-            Lexer::top_level("0.999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999").next().unwrap_err().kind,
-            LexerErrorKind::Parsefloat(_)
-        ));
+    /*assert!(matches!(
+        // yeah 😅
+        // TODO : resolve this, make it 1.0 ?
+        Lexer::top_level("0.999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999").next().unwrap_err().kind,
+        LexerErrorKind::Parsefloat(_)
+    ));*/
     assert_eq!(
             Lexer::top_level("0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001").next().unwrap(),
             Some(Token {
