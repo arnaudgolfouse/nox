@@ -23,7 +23,7 @@ use crate::{
 };
 pub use bytecode::Chunk;
 pub(crate) use bytecode::{Constant, Instruction};
-use expression::{ExpressionParser, ExpressionType};
+use expression::ExpressionType;
 use std::fmt;
 
 /// Indicate what to do after successfully parsing a statement.
@@ -126,7 +126,7 @@ pub struct Parser<'a> {
     /// Associated lexer
     lexer: Lexer<'a>,
     /// Errors encoutered while parsing
-    errors: Vec<ParserError<'a>>,
+    errors: Vec<ParserError>,
     /// Root function
     top_level: Function,
     /// Nested functions
@@ -174,7 +174,7 @@ impl<'a> Parser<'a> {
     /// emit a new instruction at the current line.
     #[inline(always)]
     fn emit_instruction<Op: bytecode::Operand>(&mut self, instruction: Instruction<Op>) {
-        let line = self.lexer.position.line;
+        let line = self.lexer.previous_start.line;
         self.code().emit_instruction(instruction, line)
     }
 
@@ -182,13 +182,44 @@ impl<'a> Parser<'a> {
     /// `emit_instruction::<u8>`.
     #[inline(always)]
     fn emit_instruction_u8(&mut self, instruction: Instruction<u8>) {
-        let line = self.lexer.position.line;
+        let line = self.lexer.previous_start.line;
         self.code().emit_instruction_u8(instruction, line)
+    }
+
+    #[inline]
+    fn next(&mut self) -> Result<Option<Token>, ParserError> {
+        self.lexer.next().map_err(ParserError::from)
+    }
+
+    #[inline]
+    fn peek(&self) -> Result<Option<&Token>, ParserError> {
+        self.lexer.peek().map_err(ParserError::from)
+    }
+
+    #[inline]
+    fn current_position(&self) -> crate::Position {
+        self.lexer.position
+    }
+
+    #[inline]
+    fn emit_error(
+        &self,
+        kind: ParserErrorKind,
+        continuable: Continue,
+        range: Range,
+    ) -> ParserError {
+        ParserError {
+            kind,
+            continuable,
+            range,
+            source: self.lexer.source.content().into(),
+            source_name: self.lexer.source.name().into(),
+        }
     }
 
     /// Emit a `Expected [token]` error at the current position, continuable.
     #[inline]
-    fn expected_token(&self, kind: TokenKind) -> ParserError<'a> {
+    fn expected_token(&self, kind: TokenKind) -> ParserError {
         self.emit_error(
             ParserErrorKind::Expected(kind),
             Continue::Continue,
@@ -232,7 +263,7 @@ impl<'a> Parser<'a> {
     ///
     /// This allow the parser to find multiple errors, although there might be
     /// false positives.
-    pub fn parse_top_level(mut self) -> Result<Chunk, Vec<ParserError<'a>>> {
+    pub fn parse_top_level(mut self) -> Result<Chunk, Vec<ParserError>> {
         loop {
             match self.parse_statements() {
                 Err(err) => {
@@ -308,7 +339,7 @@ impl<'a> Parser<'a> {
 
     /// Main parsing function : parse statements until it reaches the end of the
     /// current function / the top-level, or an error is encountered.
-    fn parse_statements(&mut self) -> Result<ParseReturn, ParserError<'a>> {
+    fn parse_statements(&mut self) -> Result<ParseReturn, ParserError> {
         let first_token = match self.next()? {
             Some(token) => token,
             None => {
@@ -399,9 +430,9 @@ impl<'a> Parser<'a> {
                         TokenKind::Keyword(Keyword::Then) => {}
                         _ => {
                             return Err(self.emit_error(
-                                ParserErrorKind::Unexpected(token.kind),
+                                ParserErrorKind::Expected(TokenKind::Keyword(Keyword::Then)),
                                 Continue::Stop,
-                                token.range,
+                                Range::new(token.range.start, token.range.start),
                             ))
                         }
                     }
@@ -542,8 +573,9 @@ impl<'a> Parser<'a> {
                                 ))
                             }
                         };
+                        let line = self.lexer.position.line;
                         let func = self.parse_prototype(func_name.clone(), false)?;
-                        self.write_variable(func_name);
+                        self.write_variable(func_name, line);
                         func
                     }
                     Some(Token {
@@ -670,9 +702,13 @@ impl<'a> Parser<'a> {
                 let expression_type = self.parse_expression(Some(first_token), false)?;
                 let expression_range = Range::new(range.start, self.lexer.previous_end);
                 match expression_type {
-                    ExpressionType::Assign(var, ass, _) => {
+                    ExpressionType::Assign {
+                        variable,
+                        assign_type,
+                        ..
+                    } => {
                         self.next()?;
-                        self.assign_variable(var, ass)?
+                        self.assign_variable(variable, assign_type)?
                     }
                     ExpressionType::TableWrite(ass) => {
                         self.next()?;
@@ -832,7 +868,7 @@ impl<'a> Parser<'a> {
 
     /// Emit the correct instruction to write a variable, assuming everything
     /// else has already been parsed.
-    fn write_variable(&mut self, variable: Box<str>) {
+    fn write_variable(&mut self, variable: Box<str>, line: u32) {
         let instruction = match self.find_variable(&variable) {
             VariableLocation::Undefined => match self.function_stack.last_mut() {
                 Some(func) => {
@@ -849,7 +885,7 @@ impl<'a> Parser<'a> {
             VariableLocation::Global(index) => Instruction::WriteGlobal(index as u32),
             VariableLocation::Captured(index) => Instruction::WriteCaptured(index as u32),
         };
-        self.emit_instruction(instruction);
+        self.code().emit_instruction(instruction, line)
     }
 
     /// Parse a variable assignement, assuming the variable and the assignement
@@ -858,7 +894,8 @@ impl<'a> Parser<'a> {
         &mut self,
         variable: Box<str>,
         assignement: Assign,
-    ) -> Result<(), ParserError<'a>> {
+    ) -> Result<(), ParserError> {
+        let line = self.lexer.position.line;
         match assignement {
             Assign::Equal => {}
             _ => {
@@ -876,7 +913,7 @@ impl<'a> Parser<'a> {
             Assign::Modulo => self.emit_instruction_u8(Instruction::Modulo),
         }
 
-        self.write_variable(variable);
+        self.write_variable(variable, line);
         Ok(())
     }
 
@@ -884,7 +921,7 @@ impl<'a> Parser<'a> {
     ///
     /// Assumes that everything up to the assignement token has been parsed, and
     /// that the table field is at the top of the stack.
-    fn assign_table(&mut self, assignement: Assign) -> Result<(), ParserError<'a>> {
+    fn assign_table(&mut self, assignement: Assign) -> Result<(), ParserError> {
         match assignement {
             Assign::Equal => {}
             _ => {
@@ -913,11 +950,7 @@ impl<'a> Parser<'a> {
     /// Parse a function prototype, e.g. 'fn f(a, b)'
     ///
     /// Assumes the opening `(` has been parsed.
-    fn parse_prototype(
-        &mut self,
-        name: Box<str>,
-        closure: bool,
-    ) -> Result<Function, ParserError<'a>> {
+    fn parse_prototype(&mut self, name: Box<str>, closure: bool) -> Result<Function, ParserError> {
         let mut args = Vec::new();
         loop {
             if let Some(token) = self.next()? {
@@ -1048,29 +1081,43 @@ impl fmt::Display for ParserErrorKind {
 
 /// Error emitted during parsing.
 #[derive(Debug)]
-pub struct ParserError<'a> {
+pub struct ParserError {
     /// kind of error
     kind: ParserErrorKind,
     /// range of this error in the `Source`
     range: Range,
     /// [Source](../enum.Source.html) of this error
-    source: Source<'a>,
+    source: Box<str>,
+    source_name: Box<str>,
     /// Indicate wether adding more tokens might remove this error.
     pub continuable: Continue,
 }
 
-impl<'a> From<LexerError<'a>> for ParserError<'a> {
-    fn from(lexer_error: LexerError<'a>) -> Self {
+impl ParserError {
+    fn note(&self) -> Option<String> {
+        match self.kind {
+            ParserErrorKind::UnexpectedExpr => Some(format!(
+                "you can evaluate the expression by wrapping it in parenthesis -> ({})",
+                self.range.substr(&self.source)
+            )),
+            _ => None,
+        }
+    }
+}
+
+impl From<LexerError<'_>> for ParserError {
+    fn from(lexer_error: LexerError<'_>) -> Self {
         Self {
             kind: ParserErrorKind::Lexer(lexer_error.kind),
             range: lexer_error.range,
-            source: lexer_error.source,
+            source: lexer_error.source.content().into(),
+            source_name: lexer_error.source.name().into(),
             continuable: lexer_error.continuable,
         }
     }
 }
 
-impl fmt::Display for ParserError<'_> {
+impl fmt::Display for ParserError {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         writeln!(formatter)?;
         display_error(
@@ -1078,20 +1125,11 @@ impl fmt::Display for ParserError<'_> {
             self.note(),
             self.range,
             &self.source,
+            &self.source_name,
             false,
             formatter,
         )
     }
 }
 
-impl ParserError<'_> {
-    fn note(&self) -> Option<String> {
-        match self.kind {
-            ParserErrorKind::UnexpectedExpr => Some(format!(
-                "you can evaluate the expression by wrapping it in parenthesis -> ({})",
-                self.range.substr(self.source.content())
-            )),
-            _ => None,
-        }
-    }
-}
+impl std::error::Error for ParserError {}

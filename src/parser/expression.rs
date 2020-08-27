@@ -4,9 +4,10 @@ use super::{
 use crate::{
     error::Continue,
     lexer::{Assign, Keyword, Operation, Token, TokenKind},
-    Position, Range,
+    Range,
 };
 
+/// Precendence of the various binary operators
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
 #[repr(u8)]
 pub(super) enum Precedence {
@@ -33,81 +34,46 @@ pub(super) enum Precedence {
     Unary = 11,
 }
 
+/// Type of the expression we just parsed, and/or wether it will be assigned to,
+/// so that we can decide if it is valid in a given context.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum ExpressionType {
+    /// A constant literal : `1`, `8.2`, `"hello"`, ...
     Constant,
-    Assign(Box<str>, Assign, Range),
+    /// An expression followed by a assignement token.
+    ///
+    /// The assignement has already been eaten in this case.
+    Assign {
+        variable: Box<str>,
+        assign_type: Assign,
+    },
+    /// An unary operation : `- ...`, `not ...`
     UnaryOp,
+    /// An binary operation : `... + ...`, `... and ...`, ...
     BinaryOp,
+    /// A call expression : `...(a, b)`
     Call,
+    /// A variable : `x`, `my_variable`
     Variable,
+    /// A table literal : `{ x = 5 }`, `{}`, ...
     Table,
+    /// A table read operation : `t[5]`, `t.x`, ...
     TableRead,
+    /// A table write operation : `t[5] = ...`, `t.x = ...`, ...
+    ///
+    /// The assignement has already been eaten in this case.
     TableWrite(Assign),
 }
 
-/// Collection of methods for parsing expressions.
-///
-/// This allow to implement every individual parsing block (constants,
-/// variables, ...), while having the default implementation handle putting them
-/// together.
-pub(super) trait ExpressionParser<'a>: Sized {
-    /// Parse a constant.
-    fn parse_constant(&mut self, constant: Constant);
-    /// Parse a variable name.
-    fn parse_variable(
-        &mut self,
-        variable: Box<str>,
-        read_only: bool,
-    ) -> Result<ExpressionType, ParserError<'a>>;
-    /// Parse a parenthesised expression.
-    ///
-    /// The opening `(` token has already been eaten.
-    fn parse_grouping(&mut self) -> Result<ExpressionType, ParserError<'a>>;
-    /// Parse a lambda.
-    ///
-    /// The opening `fn` token has already been eaten.
-    fn parse_lambda(&mut self) -> Result<ExpressionType, ParserError<'a>>;
-    /// Parse a unary operation.
-    fn parse_unary(&mut self, operator: Operation) -> Result<(), ParserError<'a>>;
-    /// Parse an table.
-    ///
-    /// The opening `{` token has already been eaten.
-    fn parse_braces(&mut self) -> Result<ExpressionType, ParserError<'a>>;
-    /// Parse a binary operation.
-    ///
-    /// `range` is the range of the operator in the text.
-    fn parse_binary(&mut self, operator: Operation, range: Range) -> Result<(), ParserError<'a>>;
-    /// Parse a function call, e.g. `f(a, 1, 3 + 2)`.
-    ///
-    /// Assumes we already parsed all the arguments and the parenthesis : All that is left to do is issuing the call itself.
-    fn parse_call(&mut self, arg_num: u32) -> Result<(), ParserError<'a>>;
-    /// Parse an indexing operation, e.g. `table[x]`
-    ///
-    /// The opening `[` token has already been eaten.
-    fn parse_brackets(&mut self, read_only: bool) -> Result<ExpressionType, ParserError<'a>>;
-    /// Parse an dot operation, e.g. `table.x`
-    ///
-    /// Assumes we already ate the dot (`.`) token.
-    fn parse_dot(&mut self, read_only: bool) -> Result<ExpressionType, ParserError<'a>>;
-    fn next(&mut self) -> Result<Option<Token>, ParserError<'a>>;
-    fn peek(&self) -> Result<Option<&Token>, ParserError<'a>>;
-    fn emit_error(
-        &self,
-        kind: ParserErrorKind,
-        continuable: Continue,
-        range: Range,
-    ) -> ParserError<'a>;
-    fn current_position(&self) -> Position;
-
+impl<'a> super::Parser<'a> {
     /// Parse an expression, with `token` as its first Token.
     ///
     /// Equivalent with `parse_precedence(Precendence::None)`.
-    fn parse_expression(
+    pub(super) fn parse_expression(
         &mut self,
         token: Option<Token>,
         read_only: bool,
-    ) -> Result<ExpressionType, ParserError<'a>> {
+    ) -> Result<ExpressionType, ParserError> {
         self.parse_precedence(Precedence::None, token, read_only)
     }
 
@@ -119,7 +85,7 @@ pub(super) trait ExpressionParser<'a>: Sized {
         // prefix : '-', 'not', '(', ...
         prefix_token: Option<Token>,
         read_only: bool,
-    ) -> Result<ExpressionType, ParserError<'a>> {
+    ) -> Result<ExpressionType, ParserError> {
         use std::convert::TryFrom;
 
         let mut expression_type = if let Some(token) = prefix_token {
@@ -163,7 +129,7 @@ pub(super) trait ExpressionParser<'a>: Sized {
 
         // infix operations : '+', '*', '/', ... but also 'a.b' and others !
         loop {
-            if matches!(expression_type, ExpressionType::Assign(_, _, _)) {
+            if matches!(expression_type, ExpressionType::Assign{..}) {
                 return Ok(expression_type);
             }
             if let Some(token) = self.peek()? {
@@ -207,7 +173,7 @@ pub(super) trait ExpressionParser<'a>: Sized {
                     }
                     TokenKind::LPar => {
                         self.next()?;
-                        let arg_num = parse_call_internal(self)?;
+                        let arg_num = self.parse_call_internal()?;
                         self.parse_call(arg_num).map(|_| ExpressionType::Call)
                     }
                     _ => break,
@@ -219,55 +185,8 @@ pub(super) trait ExpressionParser<'a>: Sized {
 
         Ok(expression_type)
     }
-}
 
-/// Assumes we already ate the opening `(`.
-fn parse_call_internal<'a, P: ExpressionParser<'a>>(
-    parser: &mut P,
-) -> Result<u32, ParserError<'a>> {
-    let mut arg_num = 0;
-    loop {
-        let next_token = parser.next()?;
-        if let Some(ref token) = next_token {
-            match token.kind {
-                TokenKind::RPar => break,
-                _ => {
-                    parser.parse_expression(next_token, true)?;
-                    arg_num += 1;
-                    if let Some(token) = parser.next()? {
-                        match token.kind {
-                            TokenKind::Comma => {}
-                            TokenKind::RPar => break,
-                            _ => {
-                                return Err(parser.emit_error(
-                                    ParserErrorKind::Unexpected(token.kind),
-                                    Continue::Stop,
-                                    token.range,
-                                ))
-                            }
-                        }
-                    } else {
-                        return Err(parser.emit_error(
-                            ParserErrorKind::Expected(TokenKind::Comma),
-                            Continue::Stop,
-                            Range::new(parser.current_position(), parser.current_position()),
-                        ));
-                    }
-                }
-            }
-        } else {
-            return Err(parser.emit_error(
-                ParserErrorKind::ExpectExpression,
-                Continue::Continue,
-                Range::new(parser.current_position(), parser.current_position()),
-            ));
-        }
-    }
-    Ok(arg_num)
-}
-
-/// Implementation of `ExpressionParser` for `Parser`.
-impl<'a> ExpressionParser<'a> for super::Parser<'a> {
+    /// Parse a constant.
     fn parse_constant(&mut self, constant: Constant) {
         match constant {
             Constant::Bool(true) => self.emit_instruction_u8(Instruction::PushTrue),
@@ -284,11 +203,12 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         }
     }
 
-    fn parse_variable(
+    /// Parse a variable name.
+    pub(super) fn parse_variable(
         &mut self,
         variable: Box<str>,
         read_only: bool,
-    ) -> Result<ExpressionType, ParserError<'a>> {
+    ) -> Result<ExpressionType, ParserError> {
         if let Some(Token {
             kind: TokenKind::Assign(ass),
             range,
@@ -302,7 +222,10 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
                     range,
                 ))
             } else {
-                Ok(ExpressionType::Assign(variable, ass, range))
+                Ok(ExpressionType::Assign {
+                    variable,
+                    assign_type: ass,
+                })
             };
         }
 
@@ -325,7 +248,10 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         Ok(ExpressionType::Variable)
     }
 
-    fn parse_grouping(&mut self) -> Result<ExpressionType, ParserError<'a>> {
+    /// Parse a parenthesised expression.
+    ///
+    /// The opening `(` token has already been eaten.
+    fn parse_grouping(&mut self) -> Result<ExpressionType, ParserError> {
         let token = self.lexer.next()?;
         let expression_type = self.parse_expression(token, true)?;
         match self.lexer.next()? {
@@ -341,7 +267,10 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         }
     }
 
-    fn parse_lambda(&mut self) -> Result<ExpressionType, ParserError<'a>> {
+    /// Parse a lambda.
+    ///
+    /// The opening `fn` token has already been eaten.
+    fn parse_lambda(&mut self) -> Result<ExpressionType, ParserError> {
         if let Some(Token {
             kind: TokenKind::LPar,
             ..
@@ -371,7 +300,8 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         }
     }
 
-    fn parse_unary(&mut self, operator: Operation) -> Result<(), ParserError<'a>> {
+    /// Parse a unary operation.
+    fn parse_unary(&mut self, operator: Operation) -> Result<(), ParserError> {
         let op_line = self.lexer.position.line;
         let token = self.lexer.next()?;
         self.parse_precedence(Precedence::Unary, token, true)?;
@@ -385,7 +315,10 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         Ok(())
     }
 
-    fn parse_braces(&mut self) -> Result<ExpressionType, ParserError<'a>> {
+    /// Parse an table.
+    ///
+    /// The opening `{` token has already been eaten.
+    fn parse_braces(&mut self) -> Result<ExpressionType, ParserError> {
         let mut elem_num: u32 = 0;
         // TODO : error for 'x = { a = 1, a = 2 }' (double assignement)
         loop {
@@ -443,7 +376,10 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         Ok(ExpressionType::Table)
     }
 
-    fn parse_binary(&mut self, operator: Operation, range: Range) -> Result<(), ParserError<'a>> {
+    /// Parse a binary operation.
+    ///
+    /// `range` is the range of the operator in the text.
+    fn parse_binary(&mut self, operator: Operation, range: Range) -> Result<(), ParserError> {
         let line = range.start.line;
 
         self.code().emit_instruction_u8(
@@ -472,12 +408,19 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         Ok(())
     }
 
-    fn parse_call(&mut self, arg_num: u32) -> Result<(), ParserError<'a>> {
+    /// Parse a function call, e.g. `f(a, 1, 3 + 2)`.
+    ///
+    /// Assumes we already parsed all the arguments and the parenthesis : All
+    /// that is left to do is issuing the call itself.
+    fn parse_call(&mut self, arg_num: u32) -> Result<(), ParserError> {
         self.emit_instruction(Instruction::Call(arg_num));
         Ok(())
     }
 
-    fn parse_brackets(&mut self, read_only: bool) -> Result<ExpressionType, ParserError<'a>> {
+    /// Parse an indexing operation, e.g. `table[x]`
+    ///
+    /// The opening `[` token has already been eaten.
+    fn parse_brackets(&mut self, read_only: bool) -> Result<ExpressionType, ParserError> {
         let next_token = self.next()?;
         self.parse_expression(next_token, true)?;
         let range = if let Some(token) = self.next()? {
@@ -523,7 +466,10 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         }
     }
 
-    fn parse_dot(&mut self, read_only: bool) -> Result<ExpressionType, ParserError<'a>> {
+    /// Parse an dot operation, e.g. `table.x`
+    ///
+    /// Assumes we already ate the dot (`.`) token.
+    fn parse_dot(&mut self, read_only: bool) -> Result<ExpressionType, ParserError> {
         let range = if let Some(token) = self.next()? {
             match token.kind {
                 TokenKind::Id(member) => {
@@ -575,33 +521,46 @@ impl<'a> ExpressionParser<'a> for super::Parser<'a> {
         }
     }
 
-    #[inline]
-    fn next(&mut self) -> Result<Option<Token>, ParserError<'a>> {
-        self.lexer.next().map_err(ParserError::from)
-    }
-
-    #[inline]
-    fn peek(&self) -> Result<Option<&Token>, ParserError<'a>> {
-        self.lexer.peek().map_err(ParserError::from)
-    }
-
-    #[inline]
-    fn emit_error(
-        &self,
-        kind: ParserErrorKind,
-        continuable: Continue,
-        range: Range,
-    ) -> ParserError<'a> {
-        ParserError {
-            kind,
-            continuable,
-            range,
-            source: self.lexer.source.clone(),
+    /// Assumes we already ate the opening `(`.
+    fn parse_call_internal(&mut self) -> Result<u32, ParserError> {
+        let mut arg_num = 0;
+        loop {
+            let next_token = self.next()?;
+            if let Some(ref token) = next_token {
+                match token.kind {
+                    TokenKind::RPar => break,
+                    _ => {
+                        self.parse_expression(next_token, true)?;
+                        arg_num += 1;
+                        if let Some(token) = self.next()? {
+                            match token.kind {
+                                TokenKind::Comma => {}
+                                TokenKind::RPar => break,
+                                _ => {
+                                    return Err(self.emit_error(
+                                        ParserErrorKind::Unexpected(token.kind),
+                                        Continue::Stop,
+                                        token.range,
+                                    ))
+                                }
+                            }
+                        } else {
+                            return Err(self.emit_error(
+                                ParserErrorKind::Expected(TokenKind::Comma),
+                                Continue::Stop,
+                                Range::new(self.current_position(), self.current_position()),
+                            ));
+                        }
+                    }
+                }
+            } else {
+                return Err(self.emit_error(
+                    ParserErrorKind::ExpectExpression,
+                    Continue::Continue,
+                    Range::new(self.current_position(), self.current_position()),
+                ));
+            }
         }
-    }
-
-    #[inline]
-    fn current_position(&self) -> Position {
-        self.lexer.position
+        Ok(arg_num)
     }
 }

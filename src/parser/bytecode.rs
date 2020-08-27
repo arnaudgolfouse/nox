@@ -1,11 +1,11 @@
 use super::LocalOrCaptured;
 use crate::lexer::TokenKind;
-use std::{convert::TryFrom, fmt, mem::size_of, sync::Arc};
+use std::{convert::TryFrom, fmt, iter, mem::size_of, slice, sync::Arc};
 
 /// Helper trait : this should not be derived by any actual type other than u8,
 /// u16, usize... (which is already done in this library).
 #[doc(hidden)]
-pub trait Operand: fmt::Display + Sized + Default + Copy + std::convert::Into<u64> {
+pub trait Operand: fmt::Display + Sized + Default + Copy + Into<u64> {
     /// data for the `Extended` instructions. In theory, this is `[Option<u8>; n]`.
     type Extended;
     /// Return the operand and the slice of (eventual) extended operands.
@@ -13,7 +13,7 @@ pub trait Operand: fmt::Display + Sized + Default + Copy + std::convert::Into<u6
     /// Return an iterator over the (eventual) extended operands.
     fn iter_extended(
         extended: &<Self as Operand>::Extended,
-    ) -> std::iter::Copied<std::slice::Iter<Option<Instruction<u8>>>>;
+    ) -> iter::Copied<slice::Iter<Option<Instruction<u8>>>>;
 }
 
 /// implement `Operand` for integer types
