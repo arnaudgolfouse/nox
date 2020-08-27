@@ -33,7 +33,7 @@ impl VM {
     ///
     /// If `rooted` is `true`, the value will NOT be unrooted.
     #[inline]
-    fn pop_stack(&mut self, rooted: bool) -> Result<Value, VMErrorKind> {
+    pub(super) fn pop_stack(&mut self, rooted: bool) -> Result<Value, VMErrorKind> {
         let mut value = self.stack.pop().ok_or(InternalError::EmptyStack)?;
         if !rooted {
             value.unroot();
@@ -190,7 +190,7 @@ impl VM {
         Ok(())
     }
 
-    pub(super) fn run_internal(&mut self) -> Result<Value, VMErrorKind> {
+    pub(super) fn run_internal(&mut self) -> Result<(), VMErrorKind> {
         loop {
             let (opcode, operand) = self.read_ip()?;
             match opcode {
@@ -207,11 +207,8 @@ impl VM {
                             Some(return_value) => return_value.decapture(),
                             None => return Err(InternalError::EmptyStack.into()),
                         }
-                    } else if let Some(value) = self.stack.pop() {
-                        return Ok(value);
-                    } else {
-                        return Err(InternalError::EmptyStack.into());
                     }
+                    return Ok(());
                 }
                 Instruction::Equal => {
                     let value_1 = self.pop_stack(false)?;
@@ -412,70 +409,7 @@ impl VM {
                     self.push_loop_address((expr_address, jump_address));
                 }
                 Instruction::Call(_) => {
-                    let local_start = self
-                        .stack
-                        .len()
-                        .checked_sub(operand as usize)
-                        .ok_or(InternalError::EmptyStack)?;
-                    let mut function = unsafe {
-                        self.stack
-                            .get(local_start - 1)
-                            .ok_or(InternalError::EmptyStack)?
-                            .duplicate()
-                    };
-
-                    let func = match function.as_function_mut() {
-                        Some(function) => function,
-                        None => {
-                            use std::ops::DerefMut;
-                            if let Value::RustFunction(function) = function {
-                                let function = function.clone();
-                                let mut function = function.0.borrow_mut();
-                                match function.deref_mut()(&mut self.stack[local_start..]) {
-                                    Ok(mut value) => {
-                                        value.root();
-                                        for mut value in self.stack.drain(local_start - 1..) {
-                                            value.unroot()
-                                        }
-                                        self.stack.push(value);
-                                    }
-                                    Err(err) => return Err(RuntimeError::RustFunction(err).into()),
-                                }
-                                continue;
-                            } else {
-                                return Err(
-                                    RuntimeError::NotAFunction(format!("{}", function)).into()
-                                );
-                            }
-                        }
-                    };
-
-                    if operand != func.0.arg_number as u64 {
-                        return Err(
-                            RuntimeError::InvalidArgNumber(func.0.arg_number, operand).into()
-                        );
-                    }
-
-                    for _ in 0..(func.0.locals_number - operand as u32) {
-                        self.stack.push(Value::Nil)
-                    }
-
-                    let captured_start = self.stack.len();
-                    for captured in func.1 {
-                        let mut captured = unsafe { captured.duplicate() };
-                        captured.root();
-                        self.stack.push(captured);
-                    }
-
-                    self.call_frames.push(CallFrame {
-                        chunk: func.0.clone(),
-                        previous_ip: self.ip,
-                        local_start,
-                        captured_start,
-                        loop_addresses: Vec::new(),
-                    });
-
-                    self.ip = 0;
+                    self.call_internal(operand)?;
                 }
                 Instruction::MakeTable(_) => {
                     let mut new_table = self.gc.new_table();
@@ -508,92 +442,3 @@ impl VM {
     }
 }
 
-#[derive(Debug)]
-pub(super) enum VMErrorKind {
-    Internal(InternalError),
-    Runtime(RuntimeError),
-}
-
-/// Error internally thrown by the VM.
-///
-/// Such errors *should* not happen in theory. If they do, that means there is a
-/// bug in the VM or parser.
-#[derive(Debug)]
-pub enum InternalError {
-    /// The instruction pointer was out of bounds : the first number is the
-    /// value of the instruction pointer, and the second is the length of the
-    /// instruction vector.
-    InstructionPointerOOB(usize, usize),
-    /// The instruction pointer is sent out of bounds by the contained offset.
-    /// The boolean indicate whether the offset is positive (`true`) or negative
-    /// (`false`)
-    JumpOob(usize, bool),
-    /// An element was requested from the `stack` but it was empty.
-    EmptyStack,
-    /// Various instruction errors. Most of the time this is caused by an
-    /// incorrect `Read-` or `Write-` instruction operand.
-    InvalidOperand(Instruction<u64>),
-    /// A `Break` or `Continue` instruction was encountered outside of a loop.
-    ///
-    /// If `true`, `break`, else `continue`.
-    BreakOrContinueOutsideLoop(bool),
-}
-
-impl fmt::Display for InternalError {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            Self::InstructionPointerOOB(ptr, max_ptr) => write!(
-                formatter,
-                "!!! instruction pointer '{}' is out of bounds for chunk of len {} !!!",
-                ptr, max_ptr
-            ),
-            Self::JumpOob(jump_address, forward) => {
-                if *forward {
-                    write!(
-                        formatter,
-                        "!!! jump offset {} is out of bounds !!!",
-                        jump_address
-                    )
-                } else {
-                    write!(
-                        formatter,
-                        "!!! jump offset -{} is out of bounds !!!",
-                        jump_address
-                    )
-                }
-            }
-            Self::EmptyStack => formatter.write_str("!!! empty stack !!!"),
-            Self::InvalidOperand(instruction) => write!(
-                formatter,
-                "!!! incorrect instruction : '{:?}'  !!!",
-                instruction
-            ),
-            Self::BreakOrContinueOutsideLoop(b) => write!(
-                formatter,
-                "unexpected {} outside or a 'while' or 'for' loop",
-                if *b { "break" } else { "continue" }
-            ),
-        }
-    }
-}
-
-/// Various errors thrown by the Virtual Machine.
-#[derive(Debug)]
-pub enum VMError<'a> {
-    /// Internal error : indicate a bug in the VM
-    Internal { kind: InternalError, line: usize },
-    /// Error encountered at runtime
-    Runtime {
-        kind: RuntimeError,
-        line: usize,
-        unwind_message: String,
-    },
-    /// Error(s) encountered while parsing
-    Parser(Vec<ParserError<'a>>),
-}
-
-impl From<InternalError> for VMErrorKind {
-    fn from(err: InternalError) -> Self {
-        Self::Internal(err)
-    }
-}

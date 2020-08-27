@@ -32,6 +32,7 @@ return (x - 5) * -0.5  # return -2.0
 
 #[test]
 fn tables() {
+    // manipulate fields
     let mut vm = VM::new();
     vm.parse_top_level(
         "
@@ -43,6 +44,37 @@ return t.x * t.y
     .unwrap();
 
     assert_eq!(vm.run().unwrap(), Value::Int(10));
+    vm.reset();
+
+    // allocate / deallocate a lot + cycles
+    vm.import_all(libraries::prelude()).unwrap();
+    vm.parse_top_level(
+        r#"
+t = { x = 5, y = 6 }
+t0 = t
+
+# allocate lots
+for _ in range(0, 10000)
+    t0.t = { x = 1 }
+    t0 = t0.t
+end
+
+t0 = t
+res = 0
+# deallocate lots
+for _ in range(0, 10000)
+    println(t0.t, "  ", t0.x, "  ", res)
+    t1 = t0
+    t0 = t0.t
+    t1.t = nil
+    res += t1.x
+end
+
+return res
+        "#,
+    )
+    .unwrap();
+    assert_eq!(vm.run().unwrap(), Value::Int(10004));
     vm.reset();
 }
 

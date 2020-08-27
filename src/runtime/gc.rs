@@ -307,10 +307,16 @@ impl GC {
         value: Value,
     ) {
         let old_capacity = table.capacity() * size_of::<(Value, Value)>();
-        table.insert(key, value);
-        let additional = table.capacity() * size_of::<(Value, Value)>() - old_capacity;
-        self.check(additional);
-        self.allocated += additional;
+        if let Value::Nil = value.captured_value_ref() {
+            table.remove(&key);
+            let removed = old_capacity - table.capacity() * size_of::<(Value, Value)>();
+            self.allocated -= removed;
+        } else {
+            table.insert(key, value);
+            let additional = table.capacity() * size_of::<(Value, Value)>() - old_capacity;
+            self.check(additional);
+            self.allocated += additional;
+        }
     }
 
     /// Removes an element from the table, and updates the amount of allocated

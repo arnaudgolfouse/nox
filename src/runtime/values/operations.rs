@@ -19,12 +19,14 @@ impl fmt::Display for OperationError {
         match self {
             Self::Binary(opcode, v1, v2) => write!(
                 formatter,
-                "invalid binary operation '{}' between {} and {}",
+                "invalid binary operation '{}' between {:#} and {:#}",
                 opcode, v1, v2
             ),
-            Self::Unary(opcode, v) => {
-                write!(formatter, "invalid unary operation '{}' for {}", opcode, v)
-            }
+            Self::Unary(opcode, v) => write!(
+                formatter,
+                "invalid unary operation '{}' for {:#}",
+                opcode, v
+            ),
         }
     }
 }

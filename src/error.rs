@@ -1,4 +1,4 @@
-use crate::{Range, Source};
+use crate::Range;
 use colored::Colorize;
 use std::{
     cmp::max,
@@ -17,11 +17,7 @@ pub enum Continue {
 
 /// Helper function, return the width (in characters) of a number
 fn int_width(i: u32) -> usize {
-    let mut len = 0;
-    for _ in format!("{}", i).chars() {
-        len += 1
-    }
-    len
+    format!("{}", i).chars().count()
 }
 
 /// Write an error nicely on the given formatter.
@@ -47,11 +43,12 @@ pub fn display_error<T: fmt::Display, U: fmt::Display>(
     message: T,
     note: Option<U>,
     range: Range,
-    source: &Source,
+    source: &str,
+    source_name: &str,
     warning: bool,
     formatter: &mut fmt::Formatter,
 ) -> Result<(), fmt::Error> {
-    display_error_internal(range, source, warning, formatter)?;
+    display_error_internal(range, source, source_name, warning, formatter)?;
     write!(formatter, "{}", message)?;
     if let Some(note) = note {
         writeln!(formatter)?;
@@ -65,7 +62,8 @@ pub fn display_error<T: fmt::Display, U: fmt::Display>(
 /// Avoids code duplication
 fn display_error_internal(
     range: Range,
-    source: &Source,
+    source: &str,
+    source_name: &str,
     warning: bool,
     formatter: &mut fmt::Formatter,
 ) -> Result<(), fmt::Error> {
@@ -196,7 +194,7 @@ fn display_error_internal(
     writeln!(
         formatter,
         "{}: {}:{}",
-        source.name(),
+        source_name,
         range.start.line + 1,
         range.start.column + 1
     )?;
@@ -206,7 +204,7 @@ fn display_error_internal(
         int_width(range.start.line + 1),
         int_width(range.end.line + 1),
     );
-    let reader = BufReader::new(source.content().as_bytes());
+    let reader = BufReader::new(source.as_bytes());
 
     if multiline {
         let mut lines = reader

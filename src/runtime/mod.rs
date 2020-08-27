@@ -27,7 +27,7 @@ use crate::{
     Source,
 };
 use gc::GC;
-use std::{cell::UnsafeCell, collections::HashMap, fmt, marker::PhantomData, sync::Arc};
+use std::{cell::UnsafeCell, collections::HashMap, error, fmt, marker::PhantomData, sync::Arc};
 use values::OperationError;
 pub use values::{RValue, Value};
 
@@ -83,7 +83,7 @@ impl VM {
         assert_eq!(self.gc.allocated, 0);
     }
 
-    /// Similar to `reset`, but keep the global variables, the GC and the curent
+    /// Similar to `reset`, but keep the global variables, the GC and the current
     /// chunk.
     pub fn partial_reset(&mut self) {
         self.ip = 0;
@@ -96,7 +96,7 @@ impl VM {
     }
 
     /// Load and parse a text `source` in the top-level for execution.
-    pub fn parse_top_level<'a>(&mut self, source: &'a str) -> Result<(), VMError<'a>> {
+    pub fn parse_top_level<'a>(&mut self, source: &'a str) -> Result<(), VMError> {
         self.partial_reset();
         let parser = Parser::new(crate::Source::TopLevel(source));
         self.chunk = Arc::new(parser.parse_top_level()?);
@@ -104,7 +104,7 @@ impl VM {
     }
 
     /// Load and parse a `source` file or `str` in the top-level for execution.
-    pub fn parse_source<'a>(&mut self, source: Source<'a>) -> Result<(), VMError<'a>> {
+    pub fn parse_source<'a>(&mut self, source: Source<'a>) -> Result<(), VMError> {
         self.partial_reset();
         let parser = Parser::new(source);
         self.chunk = Arc::new(parser.parse_top_level()?);
@@ -207,31 +207,45 @@ impl VM {
     ///
     /// assert_eq!(vm.run().unwrap(), Value::Float(-54.5));
     /// ```
-    pub fn run<'a, 'b>(&'b mut self) -> Result<RValue<'b>, VMError<'a>> {
+    pub fn run(&mut self) -> Result<RValue, VMError> {
         // for variables
         for _ in 0..self.chunk.locals_number {
             self.stack.push(Value::Nil)
         }
         match self.run_internal() {
-            Ok(ok) => {
+            Ok(()) => {
+                let return_value = self.stack.pop().unwrap_or(Value::Nil);
                 self.partial_reset();
-                Ok(unsafe { self.make_rvalue_noroot(ok) })
+                Ok(unsafe { self.make_rvalue_noroot(return_value) })
             }
-            Err(err) => match err {
-                VMErrorKind::Runtime(err) => {
-                    let err = Err(self.unwind(err));
-                    self.gc.mark_and_sweep();
-                    err
+            Err(err) => Err(self.make_error(err)),
+        }
+    }
+
+    /// Construct a `VMError` from a `VMErrorKind` (e.g. by doing stack
+    /// unwinding).
+    fn make_error(&mut self, error: VMErrorKind) -> VMError {
+        match error {
+            VMErrorKind::Runtime(err) => {
+                let err = self.unwind(err);
+                self.gc.mark_and_sweep();
+                err
+            }
+            VMErrorKind::Interfacing(err) => {
+                self.partial_reset();
+                VMError::Interfacing {
+                    kind: err,
+                    line: self.chunk().get_line(self.ip),
                 }
-                #[cfg(feature = "check")]
-                VMErrorKind::Internal(err) => {
-                    self.partial_reset();
-                    Err(VMError::Internal {
-                        kind: err,
-                        line: self.chunk().get_line(self.ip),
-                    })
+            }
+            #[cfg(feature = "check")]
+            VMErrorKind::Internal(err) => {
+                self.partial_reset();
+                VMError::Internal {
+                    kind: err,
+                    line: self.chunk().get_line(self.ip),
                 }
-            },
+            }
         }
     }
 
@@ -330,25 +344,45 @@ impl VM {
         }
     }
 
-    fn unwind<'a>(&mut self, error: RuntimeError) -> VMError<'a> {
+    /// Create an unwind message for a runtime error.
+    ///
+    /// This will pop every call frame, but keep anything below.
+    fn unwind(&mut self, error: RuntimeError) -> VMError {
         let mut unwind_message = String::new();
+        let line = self.chunk().get_line(self.ip.saturating_sub(1));
         while let Some(frame) = self.call_frames.pop() {
-            unwind_message.push_str(&format!("  -> {}(", frame.chunk.name));
-            // captured
-            for mut value in self.stack.drain(frame.captured_start..) {
-                value.unroot()
-            }
-            // locals
+            self.unwind_frame(frame, &mut unwind_message);
+        }
+        VMError::Runtime {
+            kind: error,
+            line,
+            unwind_message,
+        }
+    }
+
+    /// Log the unwinding of one frame in the given string.
+    fn unwind_frame(&mut self, frame: CallFrame, unwind_message: &mut String) {
+        unwind_message.push_str(&format!(
+            "  line {:<6} -> {}(",
+            self.chunk().get_line(frame.previous_ip.saturating_sub(1)) + 1,
+            frame.chunk.name
+        ));
+        // captured
+        for mut value in self.stack.drain(frame.captured_start..) {
+            value.unroot()
+        }
+        // locals (but not args)
+        for mut value in self
+            .stack
+            .drain(frame.local_start + frame.chunk.arg_number as usize..)
+        {
+            value.unroot()
+        }
+        // arguments
+        if let Some(args) = frame.chunk.arg_number.checked_sub(1) {
             for mut value in self
                 .stack
-                .drain(frame.local_start + frame.chunk.arg_number as usize..)
-            {
-                value.unroot()
-            }
-            // arguments
-            for mut value in self
-                .stack
-                .drain(frame.local_start..frame.local_start + frame.chunk.arg_number as usize - 1)
+                .drain(frame.local_start..frame.local_start + args as usize)
             {
                 unwind_message.push_str(&format!("{:#}, ", value));
                 value.unroot()
@@ -358,17 +392,117 @@ impl VM {
                 unwind_message.push_str(&format!("{:#}", value));
                 value.unroot()
             }
-            // function
-            if let Some(mut value) = self.stack.pop() {
-                value.unroot()
+        }
+        // function
+        if let Some(mut value) = self.stack.pop() {
+            value.unroot()
+        }
+        unwind_message.push_str(")\n");
+    }
+
+    /// If a string is at the `nb_args`-th position in the `stack`, make a
+    /// function out of it and calls it with `nb_args` arguments, pushing the
+    /// result at the top of the stack.
+    ///
+    /// Else, `InterfacingError::NotAString` is returned.
+    pub fn str_call(&mut self, nb_args: usize) -> Result<(), VMError> {
+        let func_index = match self.stack.len().checked_sub(nb_args + 1) {
+            None => return Err(self.make_error(InterfacingError::IncorrectStackIndex(0).into())),
+            Some(index) => index,
+        };
+        match self.stack.get_mut(func_index) {
+            None => Err(self.make_error(InterfacingError::IncorrectStackIndex(func_index).into())),
+            Some(func) => match func {
+                Value::String(s) => {
+                    let parser = Parser::new(Source::TopLevel(s.as_ref()));
+                    let code = parser.parse_top_level()?;
+                    let function = self.gc.new_function(Arc::new(code), Vec::new());
+                    *func = function;
+                    self.call_internal(nb_args as u64)
+                        .map_err(|err| self.make_error(err))
+                }
+                value => {
+                    let value_str = format!("{}", value);
+                    Err(self.make_error(InterfacingError::NotAString(value_str).into()))
+                }
+            },
+        }
+    }
+
+    /// Interpret the stack as `nb_args` arguments with a function below.
+    ///
+    /// This will prepare the VM for the function and call it, and then push the
+    /// result on top of the stack.
+    pub fn call(&mut self, nb_args: u64) -> Result<(), VMError> {
+        self.call_internal(nb_args)
+            .map_err(|err| self.make_error(err))
+    }
+
+    /// Interpret the stack as `nb_args` arguments with a function below.
+    ///
+    /// This will prepare the VM for the function and call it.
+    fn call_internal(&mut self, nb_args: u64) -> Result<(), VMErrorKind> {
+        let local_start = self
+            .stack
+            .len()
+            .checked_sub(nb_args as usize)
+            .ok_or(InternalError::EmptyStack)?;
+        let mut function = unsafe {
+            self.stack
+                .get(local_start - 1)
+                .ok_or(InternalError::EmptyStack)?
+                .duplicate()
+        };
+
+        let func = match function.as_function_mut() {
+            Some(function) => function,
+            None => {
+                use std::ops::DerefMut;
+                if let Value::RustFunction(function) = function {
+                    let mut function = function.0.borrow_mut();
+                    match function.deref_mut()(&mut self.stack[local_start..]) {
+                        Ok(mut value) => {
+                            value.root();
+                            for mut value in self.stack.drain(local_start - 1..) {
+                                value.unroot()
+                            }
+                            self.stack.push(value);
+                        }
+                        Err(err) => return Err(RuntimeError::RustFunction(err).into()),
+                    }
+                    return Ok(());
+                } else {
+                    return Err(RuntimeError::NotAFunction(format!("{}", function)).into());
+                }
             }
-            unwind_message.push_str(")\n");
+        };
+
+        if nb_args != func.0.arg_number as u64 {
+            return Err(RuntimeError::InvalidArgNumber(func.0.arg_number, nb_args).into());
         }
-        VMError::Runtime {
-            kind: error,
-            line: self.chunk().get_line(self.ip),
-            unwind_message,
+
+        for _ in 0..(func.0.locals_number - nb_args as u32) {
+            self.stack.push(Value::Nil)
         }
+
+        let captured_start = self.stack.len();
+        for captured in func.1 {
+            let mut captured = unsafe { captured.duplicate() };
+            captured.root();
+            self.stack.push(captured);
+        }
+
+        self.call_frames.push(CallFrame {
+            chunk: func.0.clone(),
+            previous_ip: self.ip,
+            local_start,
+            captured_start,
+            loop_addresses: Vec::new(),
+        });
+
+        self.ip = 0;
+
+        self.run_internal()
     }
 }
 
@@ -426,10 +560,147 @@ impl fmt::Display for RuntimeError {
     }
 }
 
-impl<'a> VMError<'a> {
+impl error::Error for RuntimeError {}
+
+#[derive(Debug)]
+pub enum InterfacingError {
+    /// The given index does not exists in the stack
+    IncorrectStackIndex(usize),
+    /// The stack does not contains enough elements for the operation
+    NotEnoughStackElements,
+    /// A string operation (usually `str_call`) was attempted on a value that was
+    /// not a string.
+    NotAString(String),
+}
+
+impl fmt::Display for InterfacingError {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::IncorrectStackIndex(index) => {
+                write!(formatter, "index {} is out of bounds", index)
+            }
+            Self::NotEnoughStackElements => {
+                formatter.write_str("the stack does not contains enough elements for the operation")
+            }
+            Self::NotAString(value) => write!(formatter, "{} is not a string", value),
+        }
+    }
+}
+
+impl error::Error for InterfacingError {}
+
+impl From<InterfacingError> for VMErrorKind {
+    fn from(err: InterfacingError) -> Self {
+        Self::Interfacing(err)
+    }
+}
+
+impl From<RuntimeError> for VMErrorKind {
+    fn from(err: RuntimeError) -> Self {
+        Self::Runtime(err)
+    }
+}
+
+#[derive(Debug)]
+pub(super) enum VMErrorKind {
+    Internal(InternalError),
+    Runtime(RuntimeError),
+    Interfacing(InterfacingError),
+}
+
+/// Error internally thrown by the VM.
+///
+/// Such errors *should* not happen in theory. If they do, that means there is a
+/// bug in the VM or parser.
+#[derive(Debug)]
+pub enum InternalError {
+    /// The instruction pointer was out of bounds : the first number is the
+    /// value of the instruction pointer, and the second is the length of the
+    /// instruction vector.
+    InstructionPointerOOB(usize, usize),
+    /// The instruction pointer is sent out of bounds by the contained offset.
+    /// The boolean indicate whether the offset is positive (`true`) or negative
+    /// (`false`)
+    JumpOob(usize, bool),
+    /// An element was requested from the `stack` but it was empty.
+    EmptyStack,
+    /// Various instruction errors. Most of the time this is caused by an
+    /// incorrect `Read-` or `Write-` instruction operand.
+    InvalidOperand(Instruction<u64>),
+    /// A `Break` or `Continue` instruction was encountered outside of a loop.
+    ///
+    /// If `true`, `break`, else `continue`.
+    BreakOrContinueOutsideLoop(bool),
+}
+
+impl fmt::Display for InternalError {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::InstructionPointerOOB(ptr, max_ptr) => write!(
+                formatter,
+                "!!! instruction pointer '{}' is out of bounds for chunk of len {} !!!",
+                ptr, max_ptr
+            ),
+            Self::JumpOob(jump_address, forward) => {
+                if *forward {
+                    write!(
+                        formatter,
+                        "!!! jump offset {} is out of bounds !!!",
+                        jump_address
+                    )
+                } else {
+                    write!(
+                        formatter,
+                        "!!! jump offset -{} is out of bounds !!!",
+                        jump_address
+                    )
+                }
+            }
+            Self::EmptyStack => formatter.write_str("!!! empty stack !!!"),
+            Self::InvalidOperand(instruction) => write!(
+                formatter,
+                "!!! incorrect instruction : '{:?}'  !!!",
+                instruction
+            ),
+            Self::BreakOrContinueOutsideLoop(b) => write!(
+                formatter,
+                "unexpected {} outside or a 'while' or 'for' loop",
+                if *b { "break" } else { "continue" }
+            ),
+        }
+    }
+}
+
+impl From<InternalError> for VMErrorKind {
+    fn from(err: InternalError) -> Self {
+        Self::Internal(err)
+    }
+}
+
+impl error::Error for InternalError {}
+
+/// Various errors thrown by the Virtual Machine.
+#[derive(Debug)]
+pub enum VMError {
+    /// Internal error : indicate a bug in the VM
+    Internal { kind: InternalError, line: usize },
+    /// Error encountered at runtime
+    Runtime {
+        kind: RuntimeError,
+        line: usize,
+        unwind_message: String,
+    },
+    /// Error encountered while interfacing with Rust
+    Interfacing { kind: InterfacingError, line: usize },
+    /// Error(s) encountered while parsing
+    Parser(Vec<ParserError>),
+}
+
+impl<'a> VMError {
     pub fn continuable(&self) -> Continue {
         match self {
             Self::Runtime { .. } => Continue::Stop,
+            Self::Interfacing { .. } => Continue::Stop,
             #[cfg(feature = "check")]
             Self::Internal { .. } => Continue::Stop,
             Self::Parser(err) => {
@@ -446,19 +717,13 @@ impl<'a> VMError<'a> {
     }
 }
 
-impl<'a> From<Vec<ParserError<'a>>> for VMError<'a> {
-    fn from(err: Vec<ParserError<'a>>) -> Self {
+impl<'a> From<Vec<ParserError>> for VMError {
+    fn from(err: Vec<ParserError>) -> Self {
         Self::Parser(err)
     }
 }
 
-impl From<RuntimeError> for VMErrorKind {
-    fn from(err: RuntimeError) -> Self {
-        Self::Runtime(err)
-    }
-}
-
-impl<'a> fmt::Display for VMError<'a> {
+impl<'a> fmt::Display for VMError {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         use colored::Colorize;
         match self {
@@ -478,6 +743,13 @@ impl<'a> fmt::Display for VMError<'a> {
                     kind
                 )
             }
+            Self::Interfacing { kind, line } => writeln!(
+                formatter,
+                "{} line {} :\n{}",
+                "error".red().bold(),
+                line + 1,
+                kind
+            ),
             #[cfg(feature = "check")]
             Self::Internal { kind, line } => {
                 writeln!(
@@ -504,3 +776,5 @@ impl<'a> fmt::Display for VMError<'a> {
         }
     }
 }
+
+impl error::Error for VMError {}
