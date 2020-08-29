@@ -170,12 +170,12 @@ impl VM {
     /// Pop two values from the stack and applies the given operation.
     fn binary_op(
         &mut self,
-        op: impl Fn(Value, Value) -> Result<Value, OperationError>,
+        op: fn(Value, Value) -> Result<Value, OperationError>,
     ) -> Result<(), VMErrorKind> {
         let value_2 = self.pop_stack()?;
         let value_1 = self.pop_stack()?;
         let new_value = op(value_1.captured_value(), value_2.captured_value())?;
-        // todo : is `new_value` rooted here ?
+        // new_value is not collectable, so there is no need to root it
         self.stack.push(new_value);
         Ok(())
     }
@@ -238,14 +238,13 @@ impl VM {
                 Instruction::PushTrue => self.stack.push(Value::Bool(true)),
                 Instruction::PushFalse => self.stack.push(Value::Bool(false)),
                 Instruction::ReadTable => {
-                    let key = self.pop_stack()?.into_nodrop();
+                    let key = self.pop_stack()?;
                     let table = self.pop_stack()?;
                     if let Some(table) = table.as_table() {
                         let value = table
-                            .get(&key)
+                            .get(key.as_nodrop_ref())
                             .map(|value| (value as &Value).clone())
                             .unwrap_or(Value::Nil);
-                        Value::from_nodrop(key); // drop the key here
                         self.stack.push(value)
                     } else {
                         return Err(RuntimeError::NotATable(format!("{}", table)).into());
@@ -257,7 +256,7 @@ impl VM {
                     let mut table = self.pop_stack()?;
                     if let Some(table) = table.as_table_mut() {
                         if value == Value::Nil {
-                            self.gc.remove_table_element(table, key);
+                            self.gc.remove_table_element(table, key.as_nodrop_ref());
                         } else {
                             self.gc.add_table_element(table, key, value);
                         }

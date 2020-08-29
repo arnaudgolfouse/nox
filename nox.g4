@@ -79,7 +79,13 @@ int_number:
 	| ('0o' OCT_DIGIT+)
 	| ('0b' BIN_DIGIT+);
 
-float_number: DEC_DIGIT* '.' DEC_DIGIT+;
+float_number:
+	((DEC_DIGIT+ '.' DEC_DIGIT*) | ('.' DEC_DIGIT+)) (
+		('e' | 'E') DEC_DIGIT+
+	)
+	| ('0x' (HEX_DIGIT+ '.' HEX_DIGIT*) | ('.' HEX_DIGIT+))
+	| ('0o' (HEX_DIGIT+ '.' HEX_DIGIT*) | ('.' OCT_DIGIT+))
+	| ('0b' (OCT_DIGIT+ '.' OCT_DIGIT*) | ('.' BIN_DIGIT+));
 
 // TODO : Escape sequences ?
 string: ('"' (~'"')* '"') | ('\'' (~'\'')* '\'');

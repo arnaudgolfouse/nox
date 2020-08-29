@@ -59,68 +59,12 @@ impl Clone for Value {
             Self::Float(f) => Self::Float(*f),
             Self::String(s) => Self::String(s.clone()),
             Self::Collectable(ptr) => {
-                let mut new = Self::Collectable(*ptr);
-                new.root();
-                new
+                let mut new_ptr = *ptr;
+                unsafe { new_ptr.as_mut() }.root();
+                Self::Collectable(new_ptr)
             }
             Self::RustFunction(func) => Self::RustFunction(func.clone()),
         }
-    }
-}
-
-/// This is the version of `Value` that won't be unrooted on drop.
-///
-/// As such, its use is reserved for the internal of GC objects.
-///
-/// A `NoDropValue` *can* have 0 roots, but then it **must** be referenced by a
-/// rooted object, or be ready to be collected.
-#[derive(Hash, PartialEq, Eq)]
-pub struct NoDropValue(pub ManuallyDrop<Value>);
-
-impl Clone for NoDropValue {
-    fn clone(&self) -> Self {
-        NoDropValue(ManuallyDrop::new(match self.0.deref() {
-            Value::Nil => Value::Nil,
-            Value::Bool(b) => Value::Bool(*b),
-            Value::Int(i) => Value::Int(*i),
-            Value::Float(f) => Value::Float(*f),
-            Value::String(s) => Value::String(s.clone()),
-            Value::Collectable(ptr) => Value::Collectable(*ptr),
-            Value::RustFunction(func) => Value::RustFunction(func.clone()),
-        }))
-    }
-}
-
-impl Deref for NoDropValue {
-    type Target = Value;
-    fn deref(&self) -> &<Self as std::ops::Deref>::Target {
-        self.0.deref()
-    }
-}
-
-impl DerefMut for NoDropValue {
-    fn deref_mut(&mut self) -> &mut <Self as std::ops::Deref>::Target {
-        self.0.deref_mut()
-    }
-}
-
-impl fmt::Debug for NoDropValue {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Debug::fmt(self.deref(), formatter)
-    }
-}
-
-impl NoDropValue {
-    pub const fn new(value: Value) -> Self {
-        Self(ManuallyDrop::new(value))
-    }
-
-    pub const fn into_inner(self) -> Value {
-        ManuallyDrop::into_inner(self.0)
-    }
-
-    pub fn as_ref(&self) -> &Value {
-        self.deref()
     }
 }
 
@@ -179,32 +123,6 @@ impl fmt::Display for Value {
 }
 
 impl Value {
-    /// Clones the value, but does not add a root.
-    ///
-    /// # Safety
-    ///
-    /// If the value is collectable, this function yields a new pointer to the
-    /// same value. It must then be ensured that this pointer remains valid.
-    /*pub(super) unsafe fn duplicate(&self) -> Self {
-        match self {
-            Self::Nil => Self::Nil,
-            Self::Bool(b) => Self::Bool(*b),
-            Self::Int(i) => Self::Int(*i),
-            Self::Float(f) => Self::Float(*f),
-            Self::String(s) => Self::String(s.clone()),
-            Self::Collectable(ptr) => Self::Collectable(*ptr),
-            Self::RustFunction(func) => Self::RustFunction(func.clone()),
-        }
-    }*/
-
-    /// Add a root to this value if it is collectable.
-    #[inline]
-    pub(super) fn root(&mut self) {
-        if let Self::Collectable(obj) = self {
-            unsafe { obj.as_mut() }.root()
-        }
-    }
-
     /// Remove a root to this value if it is collectable.
     ///
     /// # Safety
@@ -325,11 +243,87 @@ impl Value {
     }
 
     /// Transform `self` into its no-drop version.
-    pub(super) const fn into_nodrop(self) -> NoDropValue {
+    /*pub(super) const fn into_nodrop(self) -> NoDropValue {
         NoDropValue::new(self)
+    }*/
+
+    /*pub(super) const fn from_nodrop(value: NoDropValue) -> Self {
+        value.into_inner()
+    }*/
+
+    /// Interpret this as a `NoDropValue` reference.
+    ///
+    /// This should be safe, as `NoDropValue` is just a wrapper.
+    ///
+    /// The only method that could misbehave is `clone`...
+    /// todo : investigate this
+    #[inline]
+    pub(super) fn as_nodrop_ref(&self) -> &NoDropValue {
+        unsafe { &*(self as *const Value as *const NoDropValue) }
+    }
+}
+
+//=================================
+//========== NoDropValue ==========
+//=================================
+
+/// This is the version of `Value` that won't be unrooted on drop.
+///
+/// As such, its use is reserved for the internal of GC objects.
+///
+/// A `NoDropValue` *can* have 0 roots, but then it **must** be referenced by a
+/// rooted object, or be ready to be collected.
+#[derive(Hash, PartialEq, Eq)]
+pub struct NoDropValue(pub ManuallyDrop<Value>);
+
+impl Clone for NoDropValue {
+    fn clone(&self) -> Self {
+        NoDropValue(ManuallyDrop::new(match self.0.deref() {
+            Value::Nil => Value::Nil,
+            Value::Bool(b) => Value::Bool(*b),
+            Value::Int(i) => Value::Int(*i),
+            Value::Float(f) => Value::Float(*f),
+            Value::String(s) => Value::String(s.clone()),
+            Value::Collectable(ptr) => Value::Collectable(*ptr),
+            Value::RustFunction(func) => Value::RustFunction(func.clone()),
+        }))
+    }
+}
+
+impl Deref for NoDropValue {
+    type Target = Value;
+    fn deref(&self) -> &<Self as std::ops::Deref>::Target {
+        self.0.deref()
+    }
+}
+
+impl DerefMut for NoDropValue {
+    fn deref_mut(&mut self) -> &mut <Self as std::ops::Deref>::Target {
+        self.0.deref_mut()
+    }
+}
+
+impl fmt::Debug for NoDropValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(self.deref(), formatter)
+    }
+}
+
+impl NoDropValue {
+    /// # Safety
+    ///
+    /// This will unroot `value` once : as such, this should only be used in the
+    /// internals of (GC)[../gc/struct.GC.html], when we borrow `GC` mutably.
+    pub unsafe fn new(mut value: Value) -> Self {
+        value.unroot();
+        Self(ManuallyDrop::new(value))
     }
 
-    pub(super) const fn from_nodrop(value: NoDropValue) -> Self {
-        value.into_inner()
+    pub const fn into_inner(self) -> Value {
+        ManuallyDrop::into_inner(self.0)
+    }
+
+    pub fn as_ref(&self) -> &Value {
+        self.deref()
     }
 }

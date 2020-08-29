@@ -11,14 +11,7 @@ mod values;
 #[cfg(test)]
 mod tests;
 
-#[cfg(not(feature = "check"))]
-mod unchecked_run;
-#[cfg(not(feature = "check"))]
-pub use unchecked_run::*;
-
-#[cfg(feature = "check")]
 mod run;
-#[cfg(feature = "check")]
 pub use run::*;
 
 use crate::{

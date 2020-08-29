@@ -14,16 +14,8 @@
 //!
 //! # Features
 //!
-//! - The `check` feature, enabled by default, enables checks on various
-//! operations internal to the VM. It is mainly used in case there is a bug in
-//! the VM, or if you fed custom bytecode to the VM. Disabling it may improve
-//! performances.
-//! ### Note
-//! At the moment, it seems that unchecked runs perform **worse** that the
-//! checked ones. They do result in smaller binaries though.
-//!
 //! - Benchmarks can be run by activating the `bench` feature :
-//! `cargo bench --features bench`.
+//! `cargo bench --bench *** --features bench`.
 
 mod error;
 pub mod lexer;

@@ -75,6 +75,11 @@ impl Collectable {
         }
     }
 
+    /// Move the `Collectable` to the heap, and return a `NonNull` pointing to it
+    fn make_nonnull(self) -> NonNull<Self> {
+        unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(self))) }
+    }
+
     #[inline]
     pub fn root(&mut self) {
         self.header.roots += 1
@@ -146,6 +151,9 @@ impl Collectable {
     }
 }
 
+#[cfg(test)]
+const INITIAL_THRESHOLD: usize = 100;
+#[cfg(not(test))]
 const INITIAL_THRESHOLD: usize = 10000;
 
 #[derive(Debug)]
@@ -255,10 +263,7 @@ impl GC {
             chunk,
             captured_variables
                 .into_iter()
-                .map(|mut value| {
-                    unsafe { value.unroot() }
-                    NoDropValue::new(value)
-                })
+                .map(|value| unsafe { NoDropValue::new(value) })
                 .collect(),
         )
     }
@@ -274,7 +279,7 @@ impl GC {
         let additional = collectable.size();
         self.check(additional);
         collectable.header.next = self.first.take();
-        let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(collectable))) };
+        let ptr = collectable.make_nonnull();
         self.first = Some(ptr);
         self.allocated += additional;
         Value::Collectable(ptr)
@@ -285,22 +290,18 @@ impl GC {
     /// If the value was already a captured variable, it is simply returned.
     ///
     /// The new value will be rooted
-    pub fn new_captured(&mut self, mut value: Value) -> Value {
+    pub fn new_captured(&mut self, value: Value) -> Value {
         if value.as_captured().is_some() {
             value
         } else {
             let mut collectable = Collectable {
                 header: GCHeader::new(None),
-                object: CollectableObject::Captured({
-                    // todo : this is not good for thread safety !!!
-                    unsafe { value.unroot() };
-                    NoDropValue::new(value)
-                }),
+                object: CollectableObject::Captured(unsafe { NoDropValue::new(value) }),
             };
             let additional = collectable.size();
             self.check(additional);
             collectable.header.next = self.first.take();
-            let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(collectable))) };
+            let ptr = collectable.make_nonnull();
             self.first = Some(ptr);
             self.allocated += additional;
             Value::Collectable(ptr)
@@ -318,7 +319,7 @@ impl GC {
         let additional = collectable.size();
         self.check(additional);
         collectable.header.next = self.first.take();
-        let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(collectable))) };
+        let ptr = collectable.make_nonnull();
         self.first = Some(ptr);
         self.allocated += additional;
         Value::Collectable(ptr)
@@ -330,14 +331,12 @@ impl GC {
     pub fn add_table_element(
         &mut self,
         table: &mut HashMap<NoDropValue, NoDropValue>,
-        mut key: Value,
-        mut value: Value,
+        key: Value,
+        value: Value,
     ) {
         unsafe {
-            key.unroot();
-            value.unroot()
+            self.add_table_element_nodrop(table, NoDropValue::new(key), NoDropValue::new(value))
         }
-        self.add_table_element_nodrop(table, key.into_nodrop(), value.into_nodrop())
     }
 
     fn add_table_element_nodrop(
@@ -365,12 +364,10 @@ impl GC {
     pub fn remove_table_element(
         &mut self,
         table: &mut HashMap<NoDropValue, NoDropValue>,
-        key: Value,
+        key: &NoDropValue,
     ) {
-        let key = NoDropValue::new(key);
         let old_capacity = table.capacity() * size_of::<(Value, Value)>();
-        table.remove(&key);
-        Value::from_nodrop(key);
+        table.remove(key);
         let new_capacity = table.capacity() * size_of::<(Value, Value)>();
         self.allocated -= old_capacity - new_capacity;
     }
@@ -478,8 +475,7 @@ impl fmt::Display for GC {
 
 impl Drop for GC {
     fn drop(&mut self) {
-        //unsafe { self.force_empty() }
-        self.mark_and_sweep(); // oooh, risky
+        self.mark_and_sweep();
         #[cfg(debug_assertions)]
         if self.allocated != 0 {
             use colored::Colorize;
