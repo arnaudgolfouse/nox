@@ -6,45 +6,31 @@ fn errors() {
     // multiple dots
     assert_eq!(
         Lexer::top_level("3.1.2").next().unwrap_err().kind,
-        LexerErrorKind::NumberError(NumberError::NumberUnexpectedDot(Base::Decimal))
+        LexerErrorKind::NumberError(NumberError::NumberUnexpectedDot)
     );
-    // dot in hexadecimal
-    // TODO : Lua support this, maybe we should too ?*
-    // Ok now !
-    /*assert!(matches!(
-        Lexer::top_level("0x5fa.2").next().unwrap_err().kind,
-        LexerErrorKind::NumberError(NumberError::NumberUnexpectedDot(Base::Hexadecimal))
-    ));*/
     // unrecognised character
-    assert!(matches!(
+    assert_eq!(
         Lexer::top_level("😬").next().unwrap_err().kind,
-        LexerErrorKind::UnknownCharacter(_)
-    ));
+        LexerErrorKind::UnknownCharacter('😬')
+    );
     // incomplete string
-    assert!(matches!(
+    assert_eq!(
         Lexer::top_level("'hello world").next().unwrap_err().kind,
-        LexerErrorKind::IncompleteString(_)
-    ));
-    // i64 error
-    assert!(matches!(
+        LexerErrorKind::IncompleteString('\'')
+    );
+    // overflow error
+    assert_eq!(
         Lexer::top_level("999999999999999999999")
             .next()
             .unwrap_err()
             .kind,
-        LexerErrorKind::NumberError(_)
-    ));
-    // TODO : the Rust parser is not very good with this error, make a custom one.
-    assert!(matches!(
+        LexerErrorKind::NumberError(NumberError::Overflow)
+    );
+    // invalid digit
+    assert_eq!(
         Lexer::top_level("0xg").next().unwrap_err().kind,
-        LexerErrorKind::NumberError(_)
-    ));
-    // f64 error
-    /*assert!(matches!(
-        // yeah 😅
-        // TODO : resolve this, make it 1.0 ?
-        Lexer::top_level("0.999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999").next().unwrap_err().kind,
-        LexerErrorKind::Parsefloat(_)
-    ));*/
+        LexerErrorKind::NumberError(NumberError::Invalid('g', Base::Hexadecimal))
+    );
     assert_eq!(
             Lexer::top_level("0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001").next().unwrap(),
             Some(Token {
@@ -56,23 +42,36 @@ fn errors() {
 
 #[test]
 fn strings() {
+    // normal string
+    assert_eq!(
+        Lexer::top_level(r#""hello world!""#)
+            .next()
+            .unwrap()
+            .unwrap()
+            .kind,
+        TokenKind::Str("hello world!".into())
+    );
+    // escape "
     assert_eq!(
         Lexer::top_level(r#""hello'\" world""#)
             .next()
             .unwrap()
             .unwrap()
             .kind,
-        TokenKind::Str("hello'\" world".into())
+        TokenKind::Str("hello'\" world".into()),
+        "failed to escape \""
     );
+    // escape utf-8
     assert_eq!(
         Lexer::top_level(r#""\u{0052}\u{75}\u{73}\u{74} \u{1f609}""#)
             .next()
             .unwrap()
             .unwrap()
             .kind,
-        TokenKind::Str("Rust 😉".into())
+        TokenKind::Str("Rust 😉".into()),
+        "failed to escape utf-8"
     );
-
+    // standart escapes
     assert_eq!(
         Lexer::top_level(r#""hello#\r\nworld!\\\0""#)
             .next()
