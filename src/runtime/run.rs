@@ -33,12 +33,10 @@ impl VM {
     ///
     /// If `rooted` is `true`, the value will NOT be unrooted.
     #[inline]
-    pub(super) fn pop_stack(&mut self, rooted: bool) -> Result<Value, VMErrorKind> {
-        let mut value = self.stack.pop().ok_or(InternalError::EmptyStack)?;
-        if !rooted {
-            value.unroot();
-        }
-        Ok(value)
+    pub(super) fn pop_stack(&mut self) -> Result<Value, VMErrorKind> {
+        self.stack
+            .pop()
+            .ok_or(VMErrorKind::Internal(InternalError::EmptyStack))
     }
 
     /// Read a value at `index` from the `stack`.
@@ -47,16 +45,12 @@ impl VM {
     #[inline]
     fn read_local(&mut self, index: usize) -> Result<Value, VMErrorKind> {
         Ok({
-            let mut local = unsafe {
-                self.local_vars()
-                    .get(index)
-                    .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(
-                        index as u64,
-                    )))?
-                    .duplicate()
-            };
-            local.root();
-            local
+            self.local_vars()
+                .get(index)
+                .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(
+                    index as u64,
+                )))?
+                .clone()
         })
     }
 
@@ -64,14 +58,12 @@ impl VM {
     ///
     /// The previous value will be unrooted.
     fn write_local(&mut self, index: usize, value: Value) -> Result<(), VMErrorKind> {
-        let old_value =
-            self.local_vars_mut()
-                .get_mut(index)
-                .ok_or(InternalError::InvalidOperand(Instruction::WriteLocal(
-                    index as u64,
-                )))?;
-        old_value.unroot();
-        *old_value = value;
+        *self
+            .local_vars_mut()
+            .get_mut(index)
+            .ok_or(InternalError::InvalidOperand(Instruction::WriteLocal(
+                index as u64,
+            )))? = value;
         Ok(())
     }
 
@@ -79,13 +71,11 @@ impl VM {
     /// value.
     #[inline]
     fn write_global(&mut self, name: Box<str>, global: Value) {
-        if let Some(mut value) = if global == Value::Nil {
+        if global == Value::Nil {
             self.global_variables.remove(&name)
         } else {
             self.global_variables.insert(name, global)
-        } {
-            value.unroot()
-        }
+        };
     }
 
     /// Jump to the specified destination.
@@ -125,16 +115,15 @@ impl VM {
         for captured_index in function.captures.iter() {
             match captured_index {
                 LocalOrCaptured::Local(index) => {
-                    let to_capture = unsafe {
-                        self.local_vars_mut()
-                            .get_mut(*index)
-                            .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(
-                                *index as u64,
-                            )))?
-                            .duplicate()
-                    };
+                    let to_capture = self
+                        .local_vars_mut()
+                        .get_mut(*index)
+                        .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(
+                            *index as u64,
+                        )))?
+                        .clone();
                     let to_capture = self.gc.new_captured(to_capture);
-                    captured.push(unsafe { to_capture.duplicate() });
+                    captured.push(to_capture.clone());
                     *self.local_vars_mut().get_mut(*index).ok_or(
                         InternalError::InvalidOperand(Instruction::ReadLocal(*index as u64)),
                     )? = to_capture;
@@ -143,7 +132,7 @@ impl VM {
                     let to_capture = self.captured_vars_mut().get_mut(*index).ok_or(
                         InternalError::InvalidOperand(Instruction::ReadLocal(*index as u64)),
                     )?;
-                    captured.push(unsafe { to_capture.duplicate() })
+                    captured.push(to_capture.clone())
                 }
             }
         }
@@ -183,9 +172,10 @@ impl VM {
         &mut self,
         op: impl Fn(Value, Value) -> Result<Value, OperationError>,
     ) -> Result<(), VMErrorKind> {
-        let value_2 = self.pop_stack(false)?;
-        let value_1 = self.pop_stack(false)?;
+        let value_2 = self.pop_stack()?;
+        let value_1 = self.pop_stack()?;
         let new_value = op(value_1.captured_value(), value_2.captured_value())?;
+        // todo : is `new_value` rooted here ?
         self.stack.push(new_value);
         Ok(())
     }
@@ -196,11 +186,10 @@ impl VM {
             match opcode {
                 Instruction::Return => {
                     if let Some(frame) = self.call_frames.pop() {
-                        for mut value in self
+                        for _ in self
                             .stack
                             .drain(frame.local_start - 1..self.stack.len() - 1)
                         {
-                            value.unroot()
                         }
                         self.ip = frame.previous_ip;
                         match self.stack.last_mut() {
@@ -211,13 +200,13 @@ impl VM {
                     return Ok(());
                 }
                 Instruction::Equal => {
-                    let value_1 = self.pop_stack(false)?;
-                    let value_2 = self.pop_stack(false)?;
+                    let value_1 = self.pop_stack()?;
+                    let value_2 = self.pop_stack()?;
                     self.stack.push(Value::Bool(value_1 == value_2))
                 }
                 Instruction::NEqual => {
-                    let value_2 = self.pop_stack(false)?;
-                    let value_1 = self.pop_stack(false)?;
+                    let value_2 = self.pop_stack()?;
+                    let value_1 = self.pop_stack()?;
                     self.stack.push(Value::Bool(value_1 != value_2))
                 }
                 Instruction::Less => self.binary_op(Value::less)?,
@@ -236,12 +225,12 @@ impl VM {
                 Instruction::ShiftL => self.binary_op(Value::shift_left)?,
                 Instruction::ShiftR => self.binary_op(Value::shift_right)?,
                 Instruction::Negative => {
-                    let value = self.pop_stack(false)?;
+                    let value = self.pop_stack()?;
                     let new_value = value.negative()?;
                     self.stack.push(new_value)
                 }
                 Instruction::Not => {
-                    let value = self.pop_stack(false)?;
+                    let value = self.pop_stack()?;
                     let new_value = value.not()?;
                     self.stack.push(new_value)
                 }
@@ -249,26 +238,26 @@ impl VM {
                 Instruction::PushTrue => self.stack.push(Value::Bool(true)),
                 Instruction::PushFalse => self.stack.push(Value::Bool(false)),
                 Instruction::ReadTable => {
-                    let key = self.pop_stack(false)?;
-                    let table = self.pop_stack(false)?;
+                    let key = self.pop_stack()?.into_nodrop();
+                    let table = self.pop_stack()?;
                     if let Some(table) = table.as_table() {
-                        let mut value = table
+                        let value = table
                             .get(&key)
-                            .map(|value| unsafe { value.duplicate() })
+                            .map(|value| (value as &Value).clone())
                             .unwrap_or(Value::Nil);
-                        value.root();
+                        Value::from_nodrop(key); // drop the key here
                         self.stack.push(value)
                     } else {
                         return Err(RuntimeError::NotATable(format!("{}", table)).into());
                     }
                 }
                 Instruction::WriteTable => {
-                    let value = self.pop_stack(false)?;
-                    let key = self.pop_stack(false)?;
-                    let mut table = self.pop_stack(false)?;
+                    let value = self.pop_stack()?;
+                    let key = self.pop_stack()?;
+                    let mut table = self.pop_stack()?;
                     if let Some(table) = table.as_table_mut() {
                         if value == Value::Nil {
-                            self.gc.remove_table_element(table, &key);
+                            self.gc.remove_table_element(table, key);
                         } else {
                             self.gc.add_table_element(table, key, value);
                         }
@@ -292,12 +281,11 @@ impl VM {
                     let name = self.chunk().globals.get(operand as usize).ok_or(
                         InternalError::InvalidOperand(Instruction::ReadGlobal(operand)),
                     )?;
-                    let mut value = self
+                    let value = self
                         .global_variables
                         .get(name)
-                        .map(|value| unsafe { value.duplicate() })
+                        .map(|value| (value as &Value).clone())
                         .unwrap_or(Value::Nil);
-                    value.root();
                     self.stack.push(value)
                 }
                 Instruction::WriteGlobal(_) => {
@@ -309,7 +297,7 @@ impl VM {
                             operand,
                         )))?
                         .clone();
-                    let global = self.pop_stack(true)?;
+                    let global = self.pop_stack()?;
                     self.write_global(name, global)
                 }
                 Instruction::ReadLocal(_) => {
@@ -317,23 +305,21 @@ impl VM {
                     self.stack.push(local)
                 }
                 Instruction::WriteLocal(_) => {
-                    let local = self.pop_stack(true)?;
+                    let local = self.pop_stack()?;
                     self.write_local(operand as usize, local)?
                 }
                 Instruction::ReadCaptured(_) => {
-                    let mut captured = unsafe {
-                        self.captured_vars()
-                            .get(operand as usize)
-                            .ok_or(InternalError::InvalidOperand(Instruction::ReadCaptured(
-                                operand,
-                            )))?
-                            .duplicate()
-                    };
-                    captured.root();
+                    let captured = self
+                        .captured_vars()
+                        .get(operand as usize)
+                        .ok_or(InternalError::InvalidOperand(Instruction::ReadCaptured(
+                            operand,
+                        )))?
+                        .clone();
                     self.stack.push(captured)
                 }
                 Instruction::WriteCaptured(_) => {
-                    let var = self.pop_stack(true)?;
+                    let var = self.pop_stack()?;
                     let captured = self.captured_vars_mut().get_mut(operand as usize).ok_or(
                         InternalError::InvalidOperand(Instruction::ReadCaptured(operand)),
                     )?;
@@ -343,18 +329,18 @@ impl VM {
                 }
                 Instruction::Pop(_) => {
                     for _ in 0..operand {
-                        self.pop_stack(false)?;
+                        self.pop_stack()?;
                     }
                 }
                 // NOTE FOR JUMPS : We need to add/subtract 1 because we are on the instruction AFTER the jump.
                 Instruction::Jump(_) => self.jump_to(operand as usize + self.ip - 1)?,
                 Instruction::JumpPopFalse(_) => {
-                    if self.pop_stack(false)? == Value::Bool(false) {
+                    if self.pop_stack()? == Value::Bool(false) {
                         self.jump_to(operand as usize + self.ip - 1)?
                     }
                 }
                 Instruction::JumpEndWhile(_) => {
-                    let value = self.pop_stack(false)?;
+                    let value = self.pop_stack()?;
                     if value == Value::Bool(false) {
                         self.pop_loop_address();
                         self.jump_to(operand as usize + self.ip - 1)?
@@ -362,14 +348,13 @@ impl VM {
                 }
                 Instruction::JumpEndFor(_) => {
                     if self.stack.last() == Some(&Value::Nil) {
-                        self.pop_stack(false)?;
+                        self.pop_stack()?;
                         // address of the loop variable, since this instruction is always followed by `WriteLocal(loop_index)`.
                         {
                             let ip_before = self.ip;
                             let (_, operand) = self.read_ip()?;
                             match self.local_vars_mut().get_mut(operand as usize) {
                                 Some(value) => {
-                                    value.unroot();
                                     *value = Value::Nil;
                                 }
                                 None => {
@@ -383,7 +368,7 @@ impl VM {
                         }
                         self.pop_loop_address();
                         self.jump_to(operand as usize + self.ip - 1)?;
-                        self.pop_stack(false)?;
+                        self.pop_stack()?;
                     }
                 }
                 Instruction::Break(_) => {
@@ -415,8 +400,8 @@ impl VM {
                     let mut new_table = self.gc.new_table();
                     if let Some(table) = new_table.as_table_mut() {
                         for _ in 0..operand {
-                            let value = self.pop_stack(false)?;
-                            let key = self.pop_stack(false)?;
+                            let value = self.pop_stack()?;
+                            let key = self.pop_stack()?;
                             self.gc.add_table_element(table, key, value);
                         }
                     }
@@ -430,8 +415,7 @@ impl VM {
                     };
                     for index in index_start..self.stack.len() {
                         // we already did the bound-check !
-                        let mut duplicate = unsafe { self.stack.get_unchecked(index).duplicate() };
-                        duplicate.root();
+                        let duplicate = unsafe { self.stack.get_unchecked(index) }.clone();
                         self.stack.push(duplicate)
                     }
                 }
@@ -441,4 +425,3 @@ impl VM {
         }
     }
 }
-

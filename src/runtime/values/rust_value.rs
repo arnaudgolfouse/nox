@@ -11,7 +11,7 @@
 //! The following code is definitively NOT safe :
 //! ```no_run
 //! use nox::runtime::VM;
-//! 
+//!
 //! let mut vm = VM::new();
 //! let mut other_vm = VM::new();
 //! let table = {
@@ -67,12 +67,6 @@ impl PartialEq<Value> for RValue<'_> {
 impl PartialEq<RValue<'_>> for Value {
     fn eq(&self, other: &RValue<'_>) -> bool {
         self == other.deref()
-    }
-}
-
-impl<'a> Drop for RValue<'a> {
-    fn drop(&mut self) {
-        unsafe { &mut *self.0.get() }.unroot()
     }
 }
 

@@ -8,9 +8,21 @@ use super::{
 use crate::parser::{Chunk, Constant};
 pub use operations::OperationError;
 pub use rust_value::RValue;
-use std::{collections::HashMap, fmt, ptr::NonNull, sync::Arc};
+use std::{
+    collections::HashMap,
+    fmt,
+    mem::ManuallyDrop,
+    ops::{Deref, DerefMut},
+    ptr::NonNull,
+    sync::Arc,
+};
 
 /// A value that a variable can take in nox.
+///
+/// This value will be unrooted as it is dropped ; as such, all creation of a
+/// `Value` **must** root it if it is collectable.
+///
+/// This means a `Value` will *always* have at least one root.
 pub enum Value {
     /// `nil` value
     Nil,
@@ -28,6 +40,88 @@ pub enum Value {
     Collectable(NonNull<Collectable>),
     /// External Rust function
     RustFunction(RustFunction),
+}
+
+impl Drop for Value {
+    fn drop(&mut self) {
+        if let Self::Collectable(obj) = self {
+            unsafe { obj.as_mut().unroot() }
+        }
+    }
+}
+
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Nil => Self::Nil,
+            Self::Bool(b) => Self::Bool(*b),
+            Self::Int(i) => Self::Int(*i),
+            Self::Float(f) => Self::Float(*f),
+            Self::String(s) => Self::String(s.clone()),
+            Self::Collectable(ptr) => {
+                let mut new = Self::Collectable(*ptr);
+                new.root();
+                new
+            }
+            Self::RustFunction(func) => Self::RustFunction(func.clone()),
+        }
+    }
+}
+
+/// This is the version of `Value` that won't be unrooted on drop.
+///
+/// As such, its use is reserved for the internal of GC objects.
+///
+/// A `NoDropValue` *can* have 0 roots, but then it **must** be referenced by a
+/// rooted object, or be ready to be collected.
+#[derive(Hash, PartialEq, Eq)]
+pub struct NoDropValue(pub ManuallyDrop<Value>);
+
+impl Clone for NoDropValue {
+    fn clone(&self) -> Self {
+        NoDropValue(ManuallyDrop::new(match self.0.deref() {
+            Value::Nil => Value::Nil,
+            Value::Bool(b) => Value::Bool(*b),
+            Value::Int(i) => Value::Int(*i),
+            Value::Float(f) => Value::Float(*f),
+            Value::String(s) => Value::String(s.clone()),
+            Value::Collectable(ptr) => Value::Collectable(*ptr),
+            Value::RustFunction(func) => Value::RustFunction(func.clone()),
+        }))
+    }
+}
+
+impl Deref for NoDropValue {
+    type Target = Value;
+    fn deref(&self) -> &<Self as std::ops::Deref>::Target {
+        self.0.deref()
+    }
+}
+
+impl DerefMut for NoDropValue {
+    fn deref_mut(&mut self) -> &mut <Self as std::ops::Deref>::Target {
+        self.0.deref_mut()
+    }
+}
+
+impl fmt::Debug for NoDropValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(self.deref(), formatter)
+    }
+}
+
+impl NoDropValue {
+    pub const fn new(value: Value) -> Self {
+        Self(ManuallyDrop::new(value))
+    }
+
+    pub const fn into_inner(self) -> Value {
+        ManuallyDrop::into_inner(self.0)
+    }
+
+    pub fn as_ref(&self) -> &Value {
+        self.deref()
+    }
 }
 
 impl fmt::Debug for Value {
@@ -85,17 +179,13 @@ impl fmt::Display for Value {
 }
 
 impl Value {
-    /// Clones the value.
-    ///
-    /// `Value` does not implement `Clone`, as cloning semantics are tied to
-    /// the [garbage collector](../gc/struct.GC.html). This method is provided
-    /// to get a raw copy of a value.
+    /// Clones the value, but does not add a root.
     ///
     /// # Safety
     ///
     /// If the value is collectable, this function yields a new pointer to the
     /// same value. It must then be ensured that this pointer remains valid.
-    pub(super) unsafe fn duplicate(&self) -> Self {
+    /*pub(super) unsafe fn duplicate(&self) -> Self {
         match self {
             Self::Nil => Self::Nil,
             Self::Bool(b) => Self::Bool(*b),
@@ -105,22 +195,7 @@ impl Value {
             Self::Collectable(ptr) => Self::Collectable(*ptr),
             Self::RustFunction(func) => Self::RustFunction(func.clone()),
         }
-    }
-
-    /// Clones a vector of values.
-    ///
-    /// # Safety
-    ///
-    /// If values in the vector are collectable, this function yields new
-    /// pointers to the same values. It must then be ensured that these pointers
-    /// remains valid.
-    pub unsafe fn duplicate_vec(values: &[Self]) -> Vec<Self> {
-        let mut new_vec = Vec::with_capacity(values.len());
-        for value in values {
-            new_vec.push(value.duplicate())
-        }
-        new_vec
-    }
+    }*/
 
     /// Add a root to this value if it is collectable.
     #[inline]
@@ -132,13 +207,18 @@ impl Value {
 
     /// Remove a root to this value if it is collectable.
     ///
+    /// # Safety
+    ///
+    /// If the root count reaches `0` via this function, the value **must** no
+    /// be ready to be collected (aka there is a rooted object referencing this).
+    ///
     /// # Panics
     ///
     /// This function will panic if the number of roots is already `0`.
     #[inline]
-    pub(super) fn unroot(&mut self) {
+    pub(super) unsafe fn unroot(&mut self) {
         if let Self::Collectable(obj) = self {
-            unsafe { obj.as_mut() }.unroot()
+            obj.as_mut().unroot()
         }
     }
 
@@ -178,7 +258,7 @@ impl Value {
             Self::Collectable(ptr) => {
                 let captured = unsafe { &ptr.as_ref().object };
                 match captured {
-                    CollectableObject::Captured(value) => unsafe { value.duplicate() },
+                    CollectableObject::Captured(value) => value.deref().clone(),
                     _ => self,
                 }
             }
@@ -206,16 +286,12 @@ impl Value {
     /// If `self` is not collectable, this will clone the value. Else it will
     /// just clone the pointer.
     pub(super) fn decapture(&mut self) {
-        let mut value = match self.as_captured() {
-            Some(value) => unsafe { value.duplicate() },
-            None => return,
-        };
-        value.root();
-        self.unroot();
-        *self = value;
+        if let Some(value) = self.as_captured() {
+            *self = value.clone();
+        }
     }
 
-    pub(super) fn as_table(&self) -> Option<&HashMap<Value, Value>> {
+    pub(super) fn as_table(&self) -> Option<&HashMap<NoDropValue, NoDropValue>> {
         match self {
             Self::Collectable(ptr) => match unsafe { &ptr.as_ref().object } {
                 CollectableObject::Table(table) => Some(table),
@@ -225,7 +301,7 @@ impl Value {
         }
     }
 
-    pub(super) fn as_table_mut(&mut self) -> Option<&mut HashMap<Value, Value>> {
+    pub(super) fn as_table_mut(&mut self) -> Option<&mut HashMap<NoDropValue, NoDropValue>> {
         match self {
             Self::Collectable(ptr) => match unsafe { &mut ptr.as_mut().object } {
                 CollectableObject::Table(table) => Some(table),
@@ -235,7 +311,7 @@ impl Value {
         }
     }
 
-    pub(super) fn as_function_mut(&mut self) -> Option<(&mut Arc<Chunk>, &mut Vec<Value>)> {
+    pub(super) fn as_function_mut(&mut self) -> Option<(&mut Arc<Chunk>, &mut Vec<NoDropValue>)> {
         match self {
             Self::Collectable(ptr) => match unsafe { &mut ptr.as_mut().object } {
                 CollectableObject::Function {
@@ -246,5 +322,14 @@ impl Value {
             },
             _ => None,
         }
+    }
+
+    /// Transform `self` into its no-drop version.
+    pub(super) const fn into_nodrop(self) -> NoDropValue {
+        NoDropValue::new(self)
+    }
+
+    pub(super) const fn from_nodrop(value: NoDropValue) -> Self {
+        value.into_inner()
     }
 }

@@ -2,9 +2,9 @@
 //!
 //! I don't know why I keep this module public, it probably won't stay that way.
 
-use super::values::Value;
+use super::values::{NoDropValue, Value};
 use crate::parser::Chunk;
-use std::{collections::HashMap, fmt, mem::size_of, ptr::NonNull, sync::Arc};
+use std::{collections::HashMap, fmt, mem::size_of, ops::Deref, ptr::NonNull, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub struct GCHeader {
@@ -28,11 +28,11 @@ impl GCHeader {
 
 #[derive(Debug, PartialEq)]
 pub enum CollectableObject {
-    Table(HashMap<Value, Value>),
-    Captured(Value),
+    Table(HashMap<NoDropValue, NoDropValue>),
+    Captured(NoDropValue),
     Function {
         chunk: Arc<Chunk>,
-        captured_variables: Vec<Value>,
+        captured_variables: Vec<NoDropValue>,
     },
 }
 
@@ -53,7 +53,7 @@ impl PartialEq for Collectable {
 impl fmt::Display for Collectable {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match &self.object {
-            CollectableObject::Captured(value) => fmt::Display::fmt(value, formatter),
+            CollectableObject::Captured(value) => fmt::Display::fmt(value.deref(), formatter),
             CollectableObject::Function { .. } => formatter.write_str("<function>"),
             CollectableObject::Table(_) => formatter.write_str("<table>"),
         }
@@ -64,7 +64,7 @@ impl Collectable {
     fn new_function(
         next: Option<NonNull<Collectable>>,
         chunk: Arc<Chunk>,
-        captured_variables: Vec<Value>,
+        captured_variables: Vec<NoDropValue>,
     ) -> Self {
         Self {
             header: GCHeader::new(next),
@@ -80,8 +80,12 @@ impl Collectable {
         self.header.roots += 1
     }
 
+    /// # Safety
+    ///
+    /// If the root count reaches `0` via this function, the value **must** no
+    /// be ready to be collected (aka there is a rooted object referencing this).
     #[inline]
-    pub fn unroot(&mut self) {
+    pub unsafe fn unroot(&mut self) {
         self.header.roots -= 1
     }
 
@@ -215,19 +219,14 @@ impl GC {
     /// The new value will be rooted.
     ///
     /// If the value is not collectable, simply clones it.
-    ///
-    /// # Safety
-    ///
-    /// The old value **must** be rooted in order to avoid collection during the
-    /// copy !
-    pub unsafe fn clone_value(&mut self, value: &Value) -> Value {
+    pub fn clone_value(&mut self, value: &Value) -> Value {
         match value {
-            Value::Collectable(ptr) => match &ptr.as_ref().object {
+            Value::Collectable(ptr) => match &unsafe { ptr.as_ref() }.object {
                 CollectableObject::Table(table) => {
                     let mut new_table = self.new_table();
                     if let Some(new_table) = new_table.as_table_mut() {
                         for (key, value) in table {
-                            self.add_table_element(new_table, key.duplicate(), value.duplicate());
+                            self.add_table_element_nodrop(new_table, key.clone(), value.clone());
                         }
                     }
                     new_table
@@ -235,17 +234,41 @@ impl GC {
                 CollectableObject::Function {
                     captured_variables,
                     chunk,
-                } => self.new_function(chunk.clone(), Value::duplicate_vec(captured_variables)),
-                CollectableObject::Captured(value) => self.new_captured(value.duplicate()),
+                } => self.new_function_nodrop(chunk.clone(), {
+                    let mut values = Vec::new();
+                    for v in captured_variables {
+                        values.push(v.clone())
+                    }
+                    values
+                }),
+                CollectableObject::Captured(value) => self.new_captured(value.deref().clone()),
             },
-            _ => value.duplicate(),
+            _ => value.clone(),
         }
     }
 
     /// Creates a new garbage collected function.
     ///
     /// This function will be rooted
-    pub fn new_function(&mut self, chunk: Arc<Chunk>, mut captured_variables: Vec<Value>) -> Value {
+    pub fn new_function(&mut self, chunk: Arc<Chunk>, captured_variables: Vec<Value>) -> Value {
+        self.new_function_nodrop(
+            chunk,
+            captured_variables
+                .into_iter()
+                .map(|mut value| {
+                    unsafe { value.unroot() }
+                    NoDropValue::new(value)
+                })
+                .collect(),
+        )
+    }
+
+    /// `new_function` with NoDropValue.
+    fn new_function_nodrop(
+        &mut self,
+        chunk: Arc<Chunk>,
+        mut captured_variables: Vec<NoDropValue>,
+    ) -> Value {
         captured_variables.shrink_to_fit();
         let mut collectable = Collectable::new_function(None, chunk, captured_variables);
         let additional = collectable.size();
@@ -262,13 +285,17 @@ impl GC {
     /// If the value was already a captured variable, it is simply returned.
     ///
     /// The new value will be rooted
-    pub fn new_captured(&mut self, value: Value) -> Value {
+    pub fn new_captured(&mut self, mut value: Value) -> Value {
         if value.as_captured().is_some() {
             value
         } else {
             let mut collectable = Collectable {
                 header: GCHeader::new(None),
-                object: CollectableObject::Captured(value),
+                object: CollectableObject::Captured({
+                    // todo : this is not good for thread safety !!!
+                    unsafe { value.unroot() };
+                    NoDropValue::new(value)
+                }),
             };
             let additional = collectable.size();
             self.check(additional);
@@ -302,13 +329,27 @@ impl GC {
     /// Updates the allocated memory of the GC.
     pub fn add_table_element(
         &mut self,
-        table: &mut HashMap<Value, Value>,
-        key: Value,
-        value: Value,
+        table: &mut HashMap<NoDropValue, NoDropValue>,
+        mut key: Value,
+        mut value: Value,
+    ) {
+        unsafe {
+            key.unroot();
+            value.unroot()
+        }
+        self.add_table_element_nodrop(table, key.into_nodrop(), value.into_nodrop())
+    }
+
+    fn add_table_element_nodrop(
+        &mut self,
+        table: &mut HashMap<NoDropValue, NoDropValue>,
+        key: NoDropValue,
+        value: NoDropValue,
     ) {
         let old_capacity = table.capacity() * size_of::<(Value, Value)>();
         if let Value::Nil = value.captured_value_ref() {
             table.remove(&key);
+            // dropping this
             let removed = old_capacity - table.capacity() * size_of::<(Value, Value)>();
             self.allocated -= removed;
         } else {
@@ -321,9 +362,15 @@ impl GC {
 
     /// Removes an element from the table, and updates the amount of allocated
     /// memory.
-    pub fn remove_table_element(&mut self, table: &mut HashMap<Value, Value>, key: &Value) {
+    pub fn remove_table_element(
+        &mut self,
+        table: &mut HashMap<NoDropValue, NoDropValue>,
+        key: Value,
+    ) {
+        let key = NoDropValue::new(key);
         let old_capacity = table.capacity() * size_of::<(Value, Value)>();
-        table.remove(key);
+        table.remove(&key);
+        Value::from_nodrop(key);
         let new_capacity = table.capacity() * size_of::<(Value, Value)>();
         self.allocated -= old_capacity - new_capacity;
     }

@@ -1,3 +1,5 @@
+//! Module for the binary and unary operations on values.
+
 use super::{
     super::{gc::CollectableObject, RuntimeError, VMErrorKind},
     Value,
@@ -124,9 +126,11 @@ impl Value {
                 Value::Int(i) => Ok(Value::Float(i as f64 + f1)),
                 _ => Err((self, other)),
             },
-            Value::String(s1) => match other {
-                Value::String(s2) => Ok(Value::String(format!("{}{}", s1, s2).into_boxed_str())),
-                _ => Err((Value::String(s1), other)),
+            Value::String(ref s1) => match other {
+                Value::String(ref s2) => {
+                    Ok(Value::String(format!("{}{}", s1, s2).into_boxed_str()))
+                }
+                _ => Err((self, other)),
             },
             _ => Err((self, other)),
         }
@@ -155,7 +159,7 @@ impl Value {
             Value::Int(i1) => match other {
                 Value::Int(i2) => Ok(Value::Int(i1 * i2)),
                 Value::Float(f) => Ok(Value::Float(i1 as f64 * f)),
-                Value::String(s) => Ok(Value::String(s.repeat(i1 as usize).into_boxed_str())),
+                Value::String(ref s) => Ok(Value::String(s.repeat(i1 as usize).into_boxed_str())),
                 _ => Err((self, other)),
             },
             Value::Float(f1) => match other {
@@ -163,9 +167,9 @@ impl Value {
                 Value::Int(i) => Ok(Value::Float(i as f64 * f1)),
                 _ => Err((self, other)),
             },
-            Value::String(s) => match other {
+            Value::String(ref s) => match other {
                 Value::Int(i) => Ok(Value::String(s.repeat(i as usize).into_boxed_str())),
-                _ => Err((Value::String(s), other)),
+                _ => Err((self, other)),
             },
             _ => Err((self, other)),
         }
@@ -229,9 +233,9 @@ impl Value {
                 Value::Int(i) => Ok(Value::Bool(f1 < (i as f64))),
                 _ => Err((self, other)),
             },
-            Value::String(s1) => match other {
-                Value::String(s2) => Ok(Value::Bool(s1 < s2)),
-                _ => Err((Value::String(s1), other)),
+            Value::String(ref s1) => match other {
+                Value::String(ref s2) => Ok(Value::Bool(s1 < s2)),
+                _ => Err((self, other)),
             },
             _ => Err((self, other)),
         }
@@ -257,9 +261,9 @@ impl Value {
                 Value::Int(i) => Ok(Value::Bool(f1 > (i as f64))),
                 _ => Err((self, other)),
             },
-            Value::String(s1) => match other {
-                Value::String(s2) => Ok(Value::Bool(s1 > s2)),
-                _ => Err((Value::String(s1), other)),
+            Value::String(ref s1) => match other {
+                Value::String(ref s2) => Ok(Value::Bool(s1 > s2)),
+                _ => Err((self, other)),
             },
             _ => Err((self, other)),
         }

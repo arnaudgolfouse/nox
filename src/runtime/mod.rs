@@ -75,9 +75,7 @@ impl VM {
     /// of the allocated memory.
     pub fn reset(&mut self) {
         self.partial_reset();
-        for (_, mut value) in self.global_variables.drain() {
-            value.unroot()
-        }
+        self.global_variables.clear();
         self.gc.mark_and_sweep();
         #[cfg(test)]
         assert_eq!(self.gc.allocated, 0);
@@ -87,9 +85,7 @@ impl VM {
     /// chunk.
     pub fn partial_reset(&mut self) {
         self.ip = 0;
-        for mut value in self.stack.drain(..) {
-            value.unroot()
-        }
+        self.stack.clear();
         self.call_frames.clear();
         self.loop_addresses.clear();
         self.gc.mark_and_sweep();
@@ -127,7 +123,6 @@ impl VM {
             });
         }
         let mut library_table = self.gc.new_table();
-        library_table.root();
         if let Some(library_table) = library_table.as_table_mut() {
             for (name, value) in library.variables {
                 self.gc
@@ -279,8 +274,7 @@ impl VM {
         self.stack.get(index)
     }
 
-    fn make_rvalue(&self, mut value: Value) -> RValue {
-        value.root();
+    fn make_rvalue(&self, value: Value) -> RValue {
         RValue(UnsafeCell::new(value), PhantomData::default())
     }
 
@@ -368,35 +362,27 @@ impl VM {
             frame.chunk.name
         ));
         // captured
-        for mut value in self.stack.drain(frame.captured_start..) {
-            value.unroot()
-        }
+        for _ in self.stack.drain(frame.captured_start..) {}
         // locals (but not args)
-        for mut value in self
+        for _ in self
             .stack
             .drain(frame.local_start + frame.chunk.arg_number as usize..)
-        {
-            value.unroot()
-        }
+        {}
         // arguments
         if let Some(args) = frame.chunk.arg_number.checked_sub(1) {
-            for mut value in self
+            for value in self
                 .stack
                 .drain(frame.local_start..frame.local_start + args as usize)
             {
                 unwind_message.push_str(&format!("{:#}, ", value));
-                value.unroot()
             }
             // last argument
-            if let Some(mut value) = self.stack.pop() {
+            if let Some(value) = self.stack.pop() {
                 unwind_message.push_str(&format!("{:#}", value));
-                value.unroot()
             }
         }
         // function
-        if let Some(mut value) = self.stack.pop() {
-            value.unroot()
-        }
+        self.stack.pop();
         unwind_message.push_str(")\n");
     }
 
@@ -447,25 +433,21 @@ impl VM {
             .len()
             .checked_sub(nb_args as usize)
             .ok_or(InternalError::EmptyStack)?;
-        let mut function = unsafe {
-            self.stack
-                .get(local_start - 1)
-                .ok_or(InternalError::EmptyStack)?
-                .duplicate()
-        };
+        let mut function = self
+            .stack
+            .get(local_start - 1)
+            .ok_or(InternalError::EmptyStack)?
+            .clone();
 
         let func = match function.as_function_mut() {
             Some(function) => function,
             None => {
                 use std::ops::DerefMut;
-                if let Value::RustFunction(function) = function {
+                if let Value::RustFunction(ref function) = function {
                     let mut function = function.0.borrow_mut();
                     match function.deref_mut()(&mut self.stack[local_start..]) {
-                        Ok(mut value) => {
-                            value.root();
-                            for mut value in self.stack.drain(local_start - 1..) {
-                                value.unroot()
-                            }
+                        Ok(value) => {
+                            for _ in self.stack.drain(local_start - 1..) {}
                             self.stack.push(value);
                         }
                         Err(err) => return Err(RuntimeError::RustFunction(err).into()),
@@ -487,8 +469,7 @@ impl VM {
 
         let captured_start = self.stack.len();
         for captured in func.1 {
-            let mut captured = unsafe { captured.duplicate() };
-            captured.root();
+            let captured = (&captured as &Value).clone();
             self.stack.push(captured);
         }
 
@@ -508,12 +489,8 @@ impl VM {
 
 impl Drop for VM {
     fn drop(&mut self) {
-        for mut value in self.stack.drain(..) {
-            value.unroot()
-        }
-        for (_, mut value) in self.global_variables.drain() {
-            value.unroot()
-        }
+        self.stack.clear();
+        self.global_variables.clear();
     }
 }
 
