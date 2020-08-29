@@ -82,7 +82,7 @@ where
 
 fn invalid_char(c: u8, base: Base) -> NumberError {
     if c == b'.' {
-        NumberError::NumberUnexpectedDot(base)
+        NumberError::NumberUnexpectedDot
     } else {
         NumberError::Invalid(c as char, base)
     }
@@ -449,6 +449,7 @@ fn make_mantissa(integral: &[u8], fractional: &[u8], base: Base) -> u64 {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NumberError {
+    /// No digits were found in the number
     Empty,
     Invalid(char, Base),
     NoExponent,
@@ -460,7 +461,7 @@ pub enum NumberError {
     ///
     /// For example, floating point numbers are not supported in base 16, so
     /// parsing '0x2.1' will trigger this error.
-    NumberUnexpectedDot(Base),
+    NumberUnexpectedDot,
 }
 
 impl From<ParseFloatError> for NumberError {
@@ -483,20 +484,10 @@ impl fmt::Display for NumberError {
             ),
             Self::NoExponent => formatter.write_str("expected number after 'e'"),
             Self::TooManyDigitsInExponent => formatter.write_str("too many digits in exponent"),
-            Self::Overflow => formatter.write_str("too many digits in exponent"),
-            Self::FloatOverflow => formatter.write_str("Float overflow"),
+            Self::Overflow => formatter.write_str("integer overflow"),
+            Self::FloatOverflow => formatter.write_str("float overflow"),
             Self::InvalidFloat => formatter.write_str("Error while parsing float : invalid"),
-            Self::NumberUnexpectedDot(base) => {
-                if *base == Base::Decimal {
-                    write!(formatter, "unexpected dot")
-                } else {
-                    write!(
-                        formatter,
-                        "floating-point numbers are not supported for base {}",
-                        *base as u64
-                    )
-                }
-            }
+            Self::NumberUnexpectedDot => write!(formatter, "unexpected dot"),
         }
     }
 }

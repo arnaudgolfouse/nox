@@ -605,7 +605,7 @@ impl<'a> Parser<'a> {
                 EnclosingLoop::For => self.emit_instruction_u8(Instruction::Break(1)),
                 EnclosingLoop::None => {
                     return Err(self.emit_error(
-                        ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::Break)),
+                        ParserErrorKind::UnexpectedOutsideLoop(TokenKind::Keyword(Keyword::Break)),
                         Continue::Stop,
                         first_token.range,
                     ))
@@ -618,7 +618,9 @@ impl<'a> Parser<'a> {
                     EnclosingLoop::For => 1,
                     EnclosingLoop::None => {
                         return Err(self.emit_error(
-                            ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::Continue)),
+                            ParserErrorKind::UnexpectedOutsideLoop(TokenKind::Keyword(
+                                Keyword::Continue,
+                            )),
                             Continue::Stop,
                             first_token.range,
                         ))
@@ -752,7 +754,7 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 return Err(self.emit_error(
-                    ParserErrorKind::Unexpected(first_token.kind),
+                    ParserErrorKind::UnexpectedStartStatement(first_token.kind),
                     Continue::Stop,
                     first_token.range,
                 ))
@@ -1034,6 +1036,11 @@ pub(crate) enum ParserErrorKind {
     Expected(TokenKind),
     /// Encountered an unexpected token kind.
     Unexpected(TokenKind),
+    /// Encountered an unexpected token kind instead of the beginning of a
+    /// statement.
+    UnexpectedStartStatement(TokenKind),
+    ///  Encountered 'break' or 'continue' outside of a loop
+    UnexpectedOutsideLoop(TokenKind),
     /// Expected an identifier, found something else or nothing.
     ExpectedId(Option<TokenKind>),
     /// Parsed an expression that we realized later was in an incorrect
@@ -1056,7 +1063,12 @@ impl fmt::Display for ParserErrorKind {
             Self::Lexer(err) => write!(formatter, "{}", err),
             Self::ExpectExpression => formatter.write_str("expected expression"),
             Self::Expected(token) => write!(formatter, "expected '{}'", token),
-            Self::Unexpected(token) => write!(formatter, "unexpected token : '{}'", token),
+            Self::Unexpected(token) | Self::UnexpectedStartStatement(token) => {
+                write!(formatter, "unexpected token : '{}'", token)
+            }
+            Self::UnexpectedOutsideLoop(token) => {
+                write!(formatter, "unexpected '{}' outside of loop", token)
+            }
             Self::UnexpectedExpr => formatter.write_str("unexpected expression"),
             Self::ExpectedId(token) => {
                 formatter.write_str("expected identifier")?;
@@ -1100,6 +1112,7 @@ impl ParserError {
                 "you can evaluate the expression by wrapping it in parenthesis -> ({})",
                 self.range.substr(&self.source)
             )),
+            ParserErrorKind::UnexpectedStartStatement(_) => Some(String::from("authorized in this position are 'return', 'global', 'if', 'while', 'for', 'fn', an assignement, or a function call")),
             _ => None,
         }
     }

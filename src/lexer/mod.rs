@@ -147,10 +147,11 @@ impl<'a> Lexer<'a> {
             '.' => TokenKind::Dot,
             ',' => TokenKind::Comma,
             ';' => TokenKind::SemiColon,
-            c if c.is_numeric() => {
+            c if c.is_ascii_digit() => {
                 use num_parser::{parse_number, IntOrFloat};
 
-                let number = self.eat_while(c, |c| c.is_alphanumeric() || c == '_' || c == '.');
+                let number =
+                    self.eat_while(c, |c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
 
                 parse_number(&number)
                     .map(|int_or_float| match int_or_float {
