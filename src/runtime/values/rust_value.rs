@@ -22,21 +22,20 @@
 //! ```
 
 use super::*;
-use std::{cell::UnsafeCell, convert::TryFrom, marker::PhantomData, ops::Deref};
+use std::{marker::PhantomData, ops::Deref};
 
 /// Value given to a Rust program.
 ///
 /// This is a representation of a [Value](./enum.Value.html) that can be safely
-/// manipulated from a Rust program : It is thread safe (**note** : not yet !)
-/// and will not be garbage collected a long as it is alive.
+/// manipulated from a Rust program : It will not be garbage collected a long as
+/// it is alive.
 ///
 /// It's lifetime is tied to the VM from which it was issued.
 ///
-/// A `RValue<'static>` can be created from any non-collectable `Value` via
-/// `try_from`
+/// A `RValue<'static>` can be obtained if the value is not collectable.
 #[repr(transparent)]
 pub struct RValue<'a>(
-    pub(crate) UnsafeCell<Value>,
+    pub(crate) Value,
     pub(crate) PhantomData<&'a crate::runtime::VM>,
 );
 
@@ -73,30 +72,25 @@ impl PartialEq<RValue<'_>> for Value {
 impl Deref for RValue<'_> {
     type Target = Value;
     fn deref(&self) -> &<Self as Deref>::Target {
-        unsafe { &*self.0.get() }
-    }
-}
-
-impl TryFrom<Value> for RValue<'static> {
-    type Error = ();
-    fn try_from(value: Value) -> Result<Self, <Self as TryFrom<Value>>::Error> {
-        match value {
-            Value::Nil | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_) => {
-                Ok(RValue(UnsafeCell::new(value), PhantomData))
-            }
-            _ => Err(()),
-        }
+        &self.0
     }
 }
 
 impl<'a> RValue<'a> {
     /// Access the inner `Value`
+    pub(crate) fn into_raw(self) -> Value {
+        self.0
+    }
+
+    /// Remove the lifetime dependency if the contained value is not collectable.
     ///
-    /// # Safety
-    ///
-    /// `self` still has the RValue root : it must be ensured that the value is
-    /// appropriately unrooted
-    pub(crate) unsafe fn into_raw(self) -> Value {
-        std::mem::transmute(self) // oof !!!
+    /// Else the value is returned in the `Err` variant.
+    pub fn into_static(self) -> Result<RValue<'static>, Self> {
+        match self.0 {
+            Value::Nil | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_) => {
+                Ok(RValue(self.0, PhantomData))
+            }
+            _ => Err(self),
+        }
     }
 }

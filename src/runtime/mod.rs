@@ -12,7 +12,6 @@ mod values;
 mod tests;
 
 mod run;
-pub use run::*;
 
 use crate::{
     error::Continue,
@@ -20,7 +19,7 @@ use crate::{
     Source,
 };
 use gc::GC;
-use std::{cell::UnsafeCell, collections::HashMap, error, fmt, marker::PhantomData, sync::Arc};
+use std::{collections::HashMap, error, fmt, marker::PhantomData, sync::Arc};
 use values::OperationError;
 pub use values::{RValue, Value};
 
@@ -204,7 +203,7 @@ impl VM {
             Ok(()) => {
                 let return_value = self.stack.pop().unwrap_or(Value::Nil);
                 self.partial_reset();
-                Ok(unsafe { self.make_rvalue_noroot(return_value) })
+                Ok(self.make_rvalue(return_value))
             }
             Err(err) => Err(self.make_error(err)),
         }
@@ -240,7 +239,7 @@ impl VM {
     /// push a value onto the stack
     pub fn push<'a>(&'a mut self, value: RValue<'a>) {
         // no need to root since `value` will never be dropped.
-        self.stack.push(unsafe { value.into_raw() })
+        self.stack.push(value.into_raw())
     }
 
     /// pop a value from the stack
@@ -267,12 +266,9 @@ impl VM {
         self.stack.get(index)
     }
 
+    /// Make a RValue out of a regular value.
     fn make_rvalue(&self, value: Value) -> RValue {
-        RValue(UnsafeCell::new(value), PhantomData::default())
-    }
-
-    unsafe fn make_rvalue_noroot(&self, value: Value) -> RValue {
-        RValue(UnsafeCell::new(value), PhantomData::default())
+        RValue(value, PhantomData::default())
     }
 
     /// Currently executing instructions

@@ -127,7 +127,7 @@ impl Value {
     ///
     /// # Safety
     ///
-    /// If the root count reaches `0` via this function, the value **must** no
+    /// If the root count reaches `0` via this function, the value **must** not
     /// be ready to be collected (aka there is a rooted object referencing this).
     ///
     /// # Panics
@@ -148,7 +148,7 @@ impl Value {
         }
     }
 
-    /// Return `Some` if the value is a captured value.
+    /// Return `Some` with the inner value if `self` is a captured variable.
     pub(super) fn as_captured(&self) -> Option<&Value> {
         match self {
             Self::Collectable(ptr) => match &unsafe { &ptr.as_ref() }.object {
@@ -159,7 +159,7 @@ impl Value {
         }
     }
 
-    /// Return `Some` if the value is a captured value.
+    /// Return `Some` with the inner value if `self` is a captured variable.
     pub(super) fn as_captured_mut(&mut self) -> Option<&mut Value> {
         match self {
             Self::Collectable(ptr) => match unsafe { &mut ptr.as_mut().object } {
@@ -198,13 +198,12 @@ impl Value {
         }
     }
 
-    /// If `self` is a captured variable, change `self` into its captured value
-    /// and unroot the capture, root the internal value.
-    ///
-    /// If `self` is not collectable, this will clone the value. Else it will
-    /// just clone the pointer.
+    /// If `self` is a captured variable, change `self` into its captured value.
     pub(super) fn decapture(&mut self) {
         if let Some(value) = self.as_captured() {
+            // note that the root count takes care of itself : the cloning add a
+            // root to the internal value, and the original is then dropped and
+            // loses a root.
             *self = value.clone();
         }
     }
@@ -242,15 +241,6 @@ impl Value {
         }
     }
 
-    /// Transform `self` into its no-drop version.
-    /*pub(super) const fn into_nodrop(self) -> NoDropValue {
-        NoDropValue::new(self)
-    }*/
-
-    /*pub(super) const fn from_nodrop(value: NoDropValue) -> Self {
-        value.into_inner()
-    }*/
-
     /// Interpret this as a `NoDropValue` reference.
     ///
     /// This should be safe, as `NoDropValue` is just a wrapper.
@@ -274,7 +264,7 @@ impl Value {
 /// A `NoDropValue` *can* have 0 roots, but then it **must** be referenced by a
 /// rooted object, or be ready to be collected.
 #[derive(Hash, PartialEq, Eq)]
-pub struct NoDropValue(pub ManuallyDrop<Value>);
+pub struct NoDropValue(ManuallyDrop<Value>);
 
 impl Clone for NoDropValue {
     fn clone(&self) -> Self {
@@ -313,17 +303,10 @@ impl NoDropValue {
     /// # Safety
     ///
     /// This will unroot `value` once : as such, this should only be used in the
-    /// internals of (GC)[../gc/struct.GC.html], when we borrow `GC` mutably.
+    /// internals of (GC)[../gc/struct.GC.html], when we borrow `GC` mutably, to
+    /// avoid collections.
     pub unsafe fn new(mut value: Value) -> Self {
         value.unroot();
         Self(ManuallyDrop::new(value))
-    }
-
-    pub const fn into_inner(self) -> Value {
-        ManuallyDrop::into_inner(self.0)
-    }
-
-    pub fn as_ref(&self) -> &Value {
-        self.deref()
     }
 }
