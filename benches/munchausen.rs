@@ -8,7 +8,7 @@ use nox::{
 fn munchausen(c: &mut Criterion) {
     let mut vm = VM::new();
     vm.import_all(libraries::prelude()).unwrap();
-    match vm.parse_top_level(
+    if let Err(err) = vm.parse_top_level(
         r#"
 fn isMunchausen(n)
     nStr = to_string(n)
@@ -29,8 +29,7 @@ end
 return total
 "#,
     ) {
-        Err(err) => panic!("{}", err),
-        Ok(()) => {}
+        panic!("{}", err)
     }
     c.bench_function("munchausen", |b| {
         b.iter(|| {

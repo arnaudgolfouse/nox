@@ -15,7 +15,7 @@ mod run;
 
 use crate::{
     error::Continue,
-    parser::{Chunk, Constant, Instruction, Parser, ParserError},
+    parser::{Chunk, Constant, Instruction, Parser, ParserError, ParserWarning},
     Source,
 };
 use gc::GC;
@@ -84,19 +84,21 @@ impl VM {
     }
 
     /// Load and parse a text `source` in the top-level for execution.
-    pub fn parse_top_level<'a>(&mut self, source: &'a str) -> Result<(), VMError> {
+    pub fn parse_top_level<'a>(&mut self, source: &'a str) -> Result<Vec<ParserWarning>, VMError> {
         self.partial_reset();
         let parser = Parser::new(crate::Source::TopLevel(source));
-        self.chunk = Arc::new(parser.parse_top_level()?);
-        Ok(())
+        let (chunk, warnings) = parser.parse_top_level()?;
+        self.chunk = Arc::new(chunk);
+        Ok(warnings)
     }
 
     /// Load and parse a `source` file or `str` in the top-level for execution.
-    pub fn parse_source<'a>(&mut self, source: Source<'a>) -> Result<(), VMError> {
+    pub fn parse_source<'a>(&mut self, source: Source<'a>) -> Result<Vec<ParserWarning>, VMError> {
         self.partial_reset();
         let parser = Parser::new(source);
-        self.chunk = Arc::new(parser.parse_top_level()?);
-        Ok(())
+        let (chunk, warnings) = parser.parse_top_level()?;
+        self.chunk = Arc::new(chunk);
+        Ok(warnings)
     }
 
     /// Load a raw chunk of bytecode in the top-level for execution.
@@ -380,7 +382,7 @@ impl VM {
     /// result at the top of the stack.
     ///
     /// Else, `InterfacingError::NotAString` is returned.
-    pub fn str_call(&mut self, nb_args: usize) -> Result<(), VMError> {
+    pub fn str_call(&mut self, nb_args: usize) -> Result<Vec<ParserWarning>, VMError> {
         let func_index = match self.stack.len().checked_sub(nb_args + 1) {
             None => return Err(self.make_error(InterfacingError::IncorrectStackIndex(0).into())),
             Some(index) => index,
@@ -390,11 +392,12 @@ impl VM {
             Some(func) => match func {
                 Value::String(s) => {
                     let parser = Parser::new(Source::TopLevel(s.as_ref()));
-                    let code = parser.parse_top_level()?;
+                    let (code, warnings) = parser.parse_top_level()?;
                     let function = self.gc.new_function(Arc::new(code), Vec::new());
                     *func = function;
                     self.call_internal(nb_args as u64)
-                        .map_err(|err| self.make_error(err))
+                        .map_err(|err| self.make_error(err))?;
+                    Ok(warnings)
                 }
                 value => {
                     let value_str = format!("{}", value);

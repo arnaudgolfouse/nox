@@ -29,12 +29,12 @@ fn errors() {
 #[test]
 fn simple_statements() {
     let parser = Parser::new(Source::TopLevel("return 1"));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1)]);
     assert_eq!(chunk.code, [ReadConstant(0), Return, PushNil, Return]);
 
     let parser = Parser::new(Source::TopLevel("if 1 + 2 then return 3 end"));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(
         chunk.constants,
         [Constant::Int(1), Constant::Int(2), Constant::Int(3)]
@@ -61,7 +61,7 @@ fn simple_statements() {
             return 5 - (f - g)(6) * 8
         end",
     ));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(
         chunk.constants,
         [
@@ -109,7 +109,7 @@ fn simple_statements() {
 #[test]
 fn binary_ops() {
     let parser = Parser::new(Source::TopLevel("return 1 + 2 * 3 + 4"));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(
         chunk.code,
         [
@@ -129,7 +129,7 @@ fn binary_ops() {
     let parser = Parser::new(Source::TopLevel(
         "return (1 + 2) << 3 - 4 * 5 % 6 == 7 / -8 ^ 9",
     ));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(
         chunk.code,
         [
@@ -160,7 +160,7 @@ fn binary_ops() {
     let parser = Parser::new(Source::TopLevel(
         "return not true and false or false == true xor true or not true",
     ));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(
         chunk.code,
         [
@@ -173,7 +173,7 @@ fn binary_ops() {
 #[test]
 fn while_loop() {
     let parser = Parser::new(Source::TopLevel("while x > y x -= 1 end"));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1)]);
     assert_eq!(chunk.globals, [Box::from("x"), Box::from("y")]);
     assert_eq!(
@@ -207,7 +207,7 @@ fn while_loop() {
                 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
             end",
     ));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1)]);
     assert_eq!(chunk.globals, [Box::from("x"), Box::from("y")]);
     assert_eq!(
@@ -239,7 +239,7 @@ fn for_loop() {
         end
         ",
     ));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1), Constant::Int(2)]);
     assert_eq!(chunk.globals, [Box::from("range"), Box::from("x")]);
     assert_eq!(
@@ -276,7 +276,7 @@ fn for_loop() {
             return x
         ",
     ));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(
         chunk.constants,
         [Constant::Int(0), Constant::Int(1), Constant::Int(3)]
@@ -314,13 +314,13 @@ fn for_loop() {
 #[test]
 fn tables() {
     let parser = Parser::new(Source::TopLevel("t = {}"));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, []);
     assert_eq!(chunk.globals, [Box::from("t")]);
     assert_eq!(chunk.code, [MakeTable(0), WriteGlobal(0), PushNil, Return]);
 
     let parser = Parser::new(Source::TopLevel("t = { x = 1 + 2, y = \"hello\" }"));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(
         chunk.constants,
         [
@@ -349,7 +349,7 @@ fn tables() {
     );
 
     let parser = Parser::new(Source::TopLevel("t1[t1.a + f()] -= t2.b[t3[2]]"));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(
         chunk.constants,
         [
@@ -400,7 +400,7 @@ fn tables() {
         return t.x
         ",
     ));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(
         chunk.constants,
         [
@@ -445,7 +445,7 @@ fn tables() {
 #[test]
 fn functions() {
     let parser = Parser::new(Source::TopLevel("fn f() return 0 end x = f()"));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, []);
     assert_eq!(
         chunk // not very... nice...
@@ -486,7 +486,7 @@ fn functions() {
         end
         ",
     ));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(0)]);
     assert_eq!(
         chunk // not very... nice...
@@ -551,7 +551,7 @@ fn functions() {
                 end
             ",
     ));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, []);
     assert_eq!(chunk.globals[0].as_ref(), "x");
     assert_eq!(
@@ -601,7 +601,7 @@ fn functions() {
         end
         ",
     ));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(0)]);
     assert_eq!(chunk.captures, []);
     assert_eq!(
@@ -700,7 +700,7 @@ fn functions() {
     return x
     ",
     ));
-    let chunk = parser.parse_top_level().unwrap();
+    let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(0)]);
     assert_eq!(
         chunk // not very... nice...

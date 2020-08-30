@@ -277,5 +277,13 @@ fn display_error_internal(
     }
 
     writeln!(formatter)?;
-    write!(formatter, "{} : ", color("error").bold())
+    write!(
+        formatter,
+        "{} : ",
+        if warning {
+            "warning".yellow().bold()
+        } else {
+            "error".red().bold()
+        }
+    )
 }

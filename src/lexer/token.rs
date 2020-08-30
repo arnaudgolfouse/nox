@@ -1,7 +1,7 @@
 use crate::Range;
 use std::{
     convert,
-    fmt::{self, Display, Write},
+    fmt::{self, Write},
 };
 
 /// Binary and unary operators
@@ -63,8 +63,8 @@ impl Operation {
     }
 }
 
-impl Display for Operation {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+impl fmt::Display for Operation {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Equal => formatter.write_str("=="),
             Self::NEqual => formatter.write_str("!="),
@@ -105,13 +105,13 @@ pub enum Assign {
     Modulo,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
 /// Keywords of the language
 ///
 /// # Remark
 ///
 /// `and`, `or`, `xor` and `not`, while technically keywords, are found under the
 /// [Operation](enum.Operation.html) enum.
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Keyword {
     /// `fn`
     ///
@@ -167,8 +167,8 @@ pub enum Keyword {
     Nil,
 }
 
-impl Display for Keyword {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+impl fmt::Display for Keyword {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str(match self {
             Self::Fn => "fn",
             Self::Global => "global",
@@ -241,11 +241,16 @@ pub enum TokenKind {
     /// `?`
     Interrogation,
     Assign(Assign),
+    /// `_`
     Placeholder,
+    /// integer literal
     Int(i64),
+    /// float literal
     Float(f64),
+    /// string literal
     Str(Box<str>),
     Op(Operation),
+    /// identifier
     Id(Box<str>),
 }
 
@@ -263,10 +268,10 @@ impl TokenKind {
     }
 }
 
-impl Display for TokenKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+impl fmt::Display for TokenKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Keyword(keyword) => Display::fmt(keyword, formatter),
+            Self::Keyword(keyword) => fmt::Display::fmt(keyword, formatter),
             Self::LPar => formatter.write_char('('),
             Self::RPar => formatter.write_char(')'),
             Self::LBracket => formatter.write_char('['),

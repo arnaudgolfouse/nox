@@ -71,7 +71,7 @@ pub(crate) enum LocalOrCaptured {
 }
 
 impl fmt::Debug for LocalOrCaptured {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Local(index) => write!(formatter, "Local({})", index),
             Self::Captured(index) => write!(formatter, "Captured({})", index),
@@ -127,6 +127,8 @@ pub struct Parser<'a> {
     lexer: Lexer<'a>,
     /// Errors encoutered while parsing
     errors: Vec<ParserError>,
+    /// Warnings encoutered while parsing
+    warnings: Vec<ParserWarning>,
     /// Root function
     top_level: Function,
     /// Nested functions
@@ -151,6 +153,7 @@ impl<'a> Parser<'a> {
         Self {
             lexer: Lexer::new(source),
             errors: Vec::new(),
+            warnings: Vec::new(),
             top_level: Function::new_top_level(name),
             function_stack: Vec::new(),
         }
@@ -217,6 +220,16 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[inline]
+    fn emit_warning(&mut self, kind: ParserWarningKind, range: Range) {
+        self.warnings.push(ParserWarning {
+            kind,
+            range,
+            source: self.lexer.source.content().into(),
+            source_name: self.lexer.source.name().into(),
+        })
+    }
+
     /// Emit a `Expected [token]` error at the current position, continuable.
     #[inline]
     fn expected_token(&self, kind: TokenKind) -> ParserError {
@@ -263,9 +276,9 @@ impl<'a> Parser<'a> {
     ///
     /// This allow the parser to find multiple errors, although there might be
     /// false positives.
-    pub fn parse_top_level(mut self) -> Result<Chunk, Vec<ParserError>> {
+    pub fn parse_top_level(mut self) -> Result<(Chunk, Vec<ParserWarning>), Vec<ParserError>> {
         loop {
-            match self.parse_statements() {
+            match self.parse_statement() {
                 Err(err) => {
                     self.errors.push(err);
                     if self.panic_mode() {
@@ -287,12 +300,6 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // already handled ???
-        /*if !self.function_stack.is_empty() {
-            /*self.errors
-            .push(self.expected_token(TokenKind::Keyword(Keyword::End)));*/
-            Err(self.errors)
-        } else*/
         if !self.errors.is_empty() {
             Err(self.errors)
         } else {
@@ -303,7 +310,7 @@ impl<'a> Parser<'a> {
             self.top_level
                 .code
                 .emit_instruction_u8(Instruction::Return, self.lexer.position.line);
-            Ok(self.top_level.code)
+            Ok((self.top_level.code, self.warnings))
         }
     }
 
@@ -337,9 +344,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Main parsing function : parse statements until it reaches the end of the
-    /// current function / the top-level, or an error is encountered.
-    fn parse_statements(&mut self) -> Result<ParseReturn, ParserError> {
+    /// Main parsing function : parse a statement, and returns wether the end
+    /// of the current function / the top-level, or an error is encountered.
+    fn parse_statement(&mut self) -> Result<ParseReturn, ParserError> {
         let first_token = match self.next()? {
             Some(token) => token,
             None => {
@@ -550,6 +557,7 @@ impl<'a> Parser<'a> {
             // fn <id>((<id>,)*) <statements> end
             TokenKind::Keyword(Keyword::Fn) => {
                 let function = match self.peek()? {
+                    // named function
                     Some(Token {
                         kind: TokenKind::Id(func_name),
                         ..
@@ -578,12 +586,17 @@ impl<'a> Parser<'a> {
                         self.write_variable(func_name, line);
                         func
                     }
+                    // anonymous function (lambda)
                     Some(Token {
                         kind: TokenKind::LPar,
                         ..
                     }) => {
-                        self.parse_expression(Some(first_token), true)?;
-                        return Ok(ParseReturn::Continue);
+                        let start = first_token.range.start;
+                        let expression_type = self.parse_expression(Some(first_token), false)?;
+                        let expression_range = Range::new(start, self.lexer.previous_end);
+                        return self
+                            .expression_statement(expression_type, expression_range)
+                            .map(|_| ParseReturn::Continue);
                     }
                     token => {
                         return Err(self.emit_error(
@@ -635,7 +648,10 @@ impl<'a> Parser<'a> {
                             if let Some(func) = self.function_stack.last_mut() {
                                 for index in &func.globals {
                                     if variable == func.code.globals[*index] {
-                                        // TODO : emit a warning ?
+                                        self.emit_warning(
+                                            ParserWarningKind::GlobalAlreadyDefined(variable),
+                                            Range::new(first_token.range.start, token.range.end),
+                                        );
                                         return Ok(ParseReturn::Continue);
                                     }
                                 }
@@ -651,7 +667,10 @@ impl<'a> Parser<'a> {
                                 let index = func.code.add_global(variable);
                                 func.globals.push(index as usize)
                             } else {
-                                // TODO : emit warning
+                                self.emit_warning(
+                                    ParserWarningKind::GlobalInTopLevel,
+                                    Range::new(first_token.range.start, token.range.end),
+                                )
                             }
                         }
                         kind => {
@@ -700,53 +719,10 @@ impl<'a> Parser<'a> {
             // x((<expression>,)*)
             // x[<expression>]
             TokenKind::Id(_) => {
-                let range = first_token.range;
+                let start = first_token.range.start;
                 let expression_type = self.parse_expression(Some(first_token), false)?;
-                let expression_range = Range::new(range.start, self.lexer.previous_end);
-                match expression_type {
-                    ExpressionType::Assign {
-                        variable,
-                        assign_type,
-                        ..
-                    } => {
-                        self.next()?;
-                        self.assign_variable(variable, assign_type)?
-                    }
-                    ExpressionType::TableWrite(ass) => {
-                        self.next()?;
-                        self.assign_table(ass)?
-                    }
-                    ExpressionType::Call => {
-                        if matches!(self.peek(), Ok(Some(Token { kind: TokenKind::Assign(_), .. })))
-                        {
-                            return Err(self.emit_error(
-                                ParserErrorKind::NonAssignable,
-                                Continue::Stop,
-                                expression_range,
-                            ));
-                        }
-                        self.emit_instruction_u8(Instruction::Pop(1))
-                    }
-                    _ => {
-                        return if let Some(Token {
-                            kind: TokenKind::Assign(_),
-                            ..
-                        }) = self.peek()?
-                        {
-                            Err(self.emit_error(
-                                ParserErrorKind::NonAssignable,
-                                Continue::Stop,
-                                expression_range,
-                            ))
-                        } else {
-                            Err(self.emit_error(
-                                ParserErrorKind::UnexpectedExpr,
-                                Continue::Stop,
-                                expression_range,
-                            ))
-                        };
-                    }
-                }
+                let expression_range = Range::new(start, self.lexer.previous_end);
+                self.expression_statement(expression_type, expression_range)?
             }
             // (<expression>)
             TokenKind::LPar => {
@@ -1017,6 +993,60 @@ impl<'a> Parser<'a> {
         }
         EnclosingLoop::None
     }
+
+    /// we parsed an expression at the beginning of a statement : now we have
+    /// to determine whether it is actually authorized in this position, and
+    /// what to do if it is.
+    fn expression_statement(
+        &mut self,
+        expression_type: ExpressionType,
+        expression_range: Range,
+    ) -> Result<(), ParserError> {
+        match expression_type {
+            ExpressionType::Assign {
+                variable,
+                assign_type,
+                ..
+            } => {
+                self.next()?;
+                self.assign_variable(variable, assign_type)?
+            }
+            ExpressionType::TableWrite(ass) => {
+                self.next()?;
+                self.assign_table(ass)?
+            }
+            ExpressionType::Call => {
+                if matches!(self.peek(), Ok(Some(Token { kind: TokenKind::Assign(_), .. }))) {
+                    return Err(self.emit_error(
+                        ParserErrorKind::NonAssignable,
+                        Continue::Stop,
+                        expression_range,
+                    ));
+                }
+                self.emit_instruction_u8(Instruction::Pop(1))
+            }
+            _ => {
+                return if let Some(Token {
+                    kind: TokenKind::Assign(_),
+                    ..
+                }) = self.peek()?
+                {
+                    Err(self.emit_error(
+                        ParserErrorKind::NonAssignable,
+                        Continue::Stop,
+                        expression_range,
+                    ))
+                } else {
+                    Err(self.emit_error(
+                        ParserErrorKind::UnexpectedExpr,
+                        Continue::Stop,
+                        expression_range,
+                    ))
+                };
+            }
+        }
+        Ok(())
+    }
 }
 
 /*
@@ -1058,7 +1088,7 @@ pub(crate) enum ParserErrorKind {
 }
 
 impl fmt::Display for ParserErrorKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Lexer(err) => write!(formatter, "{}", err),
             Self::ExpectExpression => formatter.write_str("expected expression"),
@@ -1100,6 +1130,7 @@ pub struct ParserError {
     range: Range,
     /// [Source](../enum.Source.html) of this error
     source: Box<str>,
+    /// Name of the `source`
     source_name: Box<str>,
     /// Indicate wether adding more tokens might remove this error.
     pub continuable: Continue,
@@ -1131,7 +1162,7 @@ impl From<LexerError<'_>> for ParserError {
 }
 
 impl fmt::Display for ParserError {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         writeln!(formatter)?;
         display_error(
             &self.kind,
@@ -1146,3 +1177,56 @@ impl fmt::Display for ParserError {
 }
 
 impl std::error::Error for ParserError {}
+
+/*
+====================================================
+= WARNINGS =========================================
+====================================================
+*/
+
+#[derive(Clone, Debug)]
+enum ParserWarningKind {
+    GlobalInTopLevel,
+    GlobalAlreadyDefined(Box<str>),
+}
+
+impl fmt::Display for ParserWarningKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::GlobalInTopLevel => {
+                formatter.write_str("global statement has no effect at the top level")
+            }
+            Self::GlobalAlreadyDefined(name) => write!(
+                formatter,
+                "variable '{}' is already declared as global",
+                name
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ParserWarning {
+    kind: ParserWarningKind,
+    /// range of this error in the `Source`
+    range: Range,
+    /// [Source](../enum.Source.html) of this error
+    source: Box<str>,
+    /// Name of the `source`
+    source_name: Box<str>,
+}
+
+impl fmt::Display for ParserWarning {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(formatter)?;
+        display_error::<_, &str>(
+            &self.kind,
+            None,
+            self.range,
+            &self.source,
+            &self.source_name,
+            true,
+            formatter,
+        )
+    }
+}

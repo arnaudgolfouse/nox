@@ -24,7 +24,10 @@ impl Repl {
     }
 
     fn evaluate(&mut self) -> Result<(), VMError> {
-        self.vm.parse_top_level(self.current_phrase.as_str())?;
+        let warnings = self.vm.parse_top_level(self.current_phrase.as_str())?;
+        for warning in warnings {
+            println!("{}", warning)
+        }
         let value = self.vm.run()?;
         if value != Value::Nil {
             println!("=> {}", value);

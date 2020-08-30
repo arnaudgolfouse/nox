@@ -82,7 +82,6 @@ impl<'a> super::Parser<'a> {
     fn parse_precedence(
         &mut self,
         precedence: Precedence,
-        // prefix : '-', 'not', '(', ...
         prefix_token: Option<Token>,
         read_only: bool,
     ) -> Result<ExpressionType, ParserError> {
@@ -286,15 +285,21 @@ impl<'a> super::Parser<'a> {
         let function = self.parse_prototype(Box::from("<closure>"), true)?;
         self.function_stack.push(function);
         loop {
-            match self.parse_statements()? {
-                ParseReturn::Continue => {}
-                ParseReturn::StopClosure => break Ok(ExpressionType::Constant),
-                ParseReturn::Stop => {
+            match self.parse_statement() {
+                Ok(ParseReturn::Continue) => {}
+                Ok(ParseReturn::StopClosure) => break Ok(ExpressionType::Constant),
+                Ok(ParseReturn::Stop) => {
                     return Err(self.emit_error(
                         ParserErrorKind::Expected(TokenKind::Keyword(Keyword::End)),
                         Continue::Continue,
                         Range::new(self.current_position(), self.current_position()),
-                    ))
+                    ));
+                }
+                Err(err) => {
+                    self.errors.push(err);
+                    if self.panic_mode() {
+                        break Ok(ExpressionType::Constant);
+                    }
                 }
             }
         }
