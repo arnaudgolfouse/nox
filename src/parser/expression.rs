@@ -211,6 +211,7 @@ impl<'a> super::Parser<'a> {
         if let Some(Token {
             kind: TokenKind::Assign(ass),
             range,
+            ..
         }) = self.lexer.peek()?
         {
             let (ass, range) = (*ass, *range);
@@ -251,9 +252,9 @@ impl<'a> super::Parser<'a> {
     ///
     /// The opening `(` token has already been eaten.
     fn parse_grouping(&mut self) -> Result<ExpressionType, ParserError> {
-        let token = self.lexer.next()?;
+        let token = self.next()?;
         let expression_type = self.parse_expression(token, true)?;
-        match self.lexer.next()? {
+        match self.next()? {
             Some(Token {
                 kind: TokenKind::RPar,
                 ..
@@ -308,7 +309,7 @@ impl<'a> super::Parser<'a> {
     /// Parse a unary operation.
     fn parse_unary(&mut self, operator: Operation) -> Result<(), ParserError> {
         let op_line = self.lexer.position.line;
-        let token = self.lexer.next()?;
+        let token = self.next()?;
         self.parse_precedence(Precedence::Unary, token, true)?;
         match operator {
             Operation::Minus => self
@@ -325,14 +326,24 @@ impl<'a> super::Parser<'a> {
     /// The opening `{` token has already been eaten.
     fn parse_braces(&mut self) -> Result<ExpressionType, ParserError> {
         let mut elem_num: u32 = 0;
-        // TODO : error for 'x = { a = 1, a = 2 }' (double assignement)
+        // easy to check which ones are already used
+        let mut element_names_indices = Vec::new();
         loop {
             if let Some(token) = self.next()? {
                 match token.kind {
                     TokenKind::RBrace => break,
                     TokenKind::Id(member) => {
                         elem_num += 1;
-                        let member_index = self.code().add_constant(Constant::String(member));
+                        let member_index =
+                            self.code().add_constant(Constant::String(member.clone()));
+                        if element_names_indices.contains(&member_index) {
+                            return Err(self.emit_error(
+                                ParserErrorKind::TableDoubleAssignement(member),
+                                Continue::Stop,
+                                token.range,
+                            ));
+                        }
+                        element_names_indices.push(member_index);
                         self.emit_instruction(Instruction::ReadConstant(member_index));
                         let token = self.next()?;
                         match token {

@@ -6,24 +6,74 @@ use Instruction::*;
 fn errors() {
     // no expression after 'return'
     let parser = Parser::new(Source::TopLevel("return"));
-    assert!(parser.parse_top_level().is_err());
+    assert_eq!(
+        parser.parse_top_level().unwrap_err()[0].kind,
+        ParserErrorKind::ExpectExpression
+    );
 
     // no 'end' to close this 'if'
     let parser = Parser::new(Source::TopLevel("if true then return 0 else return 1"));
-    assert!(parser.parse_top_level().is_err());
+    assert_eq!(
+        parser.parse_top_level().unwrap_err()[0].kind,
+        ParserErrorKind::Expected(TokenKind::Keyword(Keyword::End))
+    );
 
     // 'break' in an incorrect position
     let parser = Parser::new(Source::TopLevel("return break"));
-    assert!(parser.parse_top_level().is_err());
+    assert_eq!(
+        parser.parse_top_level().unwrap_err()[0].kind,
+        ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::Break))
+    );
+
+    // incorrect token to start a statement
+    let parser = Parser::new(Source::TopLevel("0 = 5"));
+    assert_eq!(
+        parser.parse_top_level().unwrap_err()[0].kind,
+        ParserErrorKind::UnexpectedStartStatement(TokenKind::Int(0))
+    );
+
+    // 'break' or 'continue' outside of a loop
+    let parser = Parser::new(Source::TopLevel("break"));
+    assert_eq!(
+        parser.parse_top_level().unwrap_err()[0].kind,
+        ParserErrorKind::UnexpectedOutsideLoop(TokenKind::Keyword(Keyword::Break))
+    );
 
     // Expected an identifier, found something else.
     let parser = Parser::new(Source::TopLevel("for 0 in range(1, 2) print(1) end"));
-    assert!(parser.parse_top_level().is_err());
+    assert_eq!(
+        parser.parse_top_level().unwrap_err()[0].kind,
+        ParserErrorKind::ExpectedId(Some(TokenKind::Int(0)))
+    );
 
     // Parsed an expression that we realized later was in an incorrect
     // position.
     let parser = Parser::new(Source::TopLevel("x + 1"));
-    assert!(parser.parse_top_level().is_err());
+    assert_eq!(
+        parser.parse_top_level().unwrap_err()[0].kind,
+        ParserErrorKind::UnexpectedExpr
+    );
+
+    // Tried to assign to a read-only expression
+    let parser = Parser::new(Source::TopLevel("x + 1 = 6"));
+    assert_eq!(
+        parser.parse_top_level().unwrap_err()[0].kind,
+        ParserErrorKind::NonAssignable
+    );
+
+    // Tried to write `global x` where `x` was already used as a local variable.
+    let parser = Parser::new(Source::TopLevel("(fn() x = 1 global x end)"));
+    assert_eq!(
+        parser.parse_top_level().unwrap_err()[0].kind,
+        ParserErrorKind::AlreadyDeclared("x".into())
+    );
+
+    // Tried to declare the same variable twice in a table
+    let parser = Parser::new(Source::TopLevel("t = { a = 1, a = 2 }"));
+    assert_eq!(
+        parser.parse_top_level().unwrap_err()[0].kind,
+        ParserErrorKind::TableDoubleAssignement("a".into())
+    );
 }
 
 #[test]

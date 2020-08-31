@@ -137,6 +137,7 @@ impl<'a> Lexer<'a> {
 
         self.current_start = self.position;
 
+        let mut warning = None;
         let token = match next_char {
             '(' => TokenKind::LPar,
             ')' => TokenKind::RPar,
@@ -154,9 +155,12 @@ impl<'a> Lexer<'a> {
                     self.eat_while(c, |c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
 
                 parse_number(&number)
-                    .map(|int_or_float| match int_or_float {
-                        IntOrFloat::Int(i) => TokenKind::Int(i),
-                        IntOrFloat::Float(f) => TokenKind::Float(f),
+                    .map(|(int_or_float, warn)| {
+                        warning = warn;
+                        match int_or_float {
+                            IntOrFloat::Int(i) => TokenKind::Int(i),
+                            IntOrFloat::Float(f) => TokenKind::Float(f),
+                        }
                     })
                     .map_err(|err| {
                         self.emit_error(LexerErrorKind::NumberError(err), Continue::Stop)
@@ -208,6 +212,7 @@ impl<'a> Lexer<'a> {
                 start: self.current_start,
                 end: self.current_end,
             },
+            warning,
         }))
     }
 
@@ -595,7 +600,7 @@ pub struct LexerError<'a> {
 }
 
 impl<'a> fmt::Display for LexerError<'a> {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         // we need a displayable type, i32 will do
         display_error::<_, i32>(
             &self.kind,
@@ -610,3 +615,20 @@ impl<'a> fmt::Display for LexerError<'a> {
 }
 
 impl std::error::Error for LexerError<'_> {}
+
+/// Kind of warnings returned by the lexer
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum LexerWarning {
+    /// A float had excessive precision, and some digits were ignored.
+    ExcessiveFloatPrecision,
+}
+
+impl fmt::Display for LexerWarning {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::ExcessiveFloatPrecision => {
+                formatter.write_str("float have an excessive precision : some digits are ignored")
+            }
+        }
+    }
+}

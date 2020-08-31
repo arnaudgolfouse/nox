@@ -18,7 +18,7 @@ mod expression;
 
 use crate::{
     error::{display_error, Continue},
-    lexer::{Assign, Keyword, Lexer, LexerError, LexerErrorKind, Token, TokenKind},
+    lexer::{Assign, Keyword, Lexer, LexerError, LexerErrorKind, LexerWarning, Token, TokenKind},
     Range, Source,
 };
 pub use bytecode::Chunk;
@@ -59,6 +59,8 @@ enum Scope {
     /// `for` statement. Contains the address of the jump instruction, and the
     /// index of the loop variable.
     For(usize, usize),
+    /// Dummy scope. Used for continuing parsing even with errors.
+    Dummy,
 }
 
 /// Index of a variable, differentiating between local and captured variables.
@@ -191,7 +193,13 @@ impl<'a> Parser<'a> {
 
     #[inline]
     fn next(&mut self) -> Result<Option<Token>, ParserError> {
-        self.lexer.next().map_err(ParserError::from)
+        let next_token = self.lexer.next()?;
+        if let Some(token) = &next_token {
+            if let Some(warning) = token.warning {
+                self.emit_warning(ParserWarningKind::LexerWarning(warning), token.range)
+            }
+        }
+        Ok(next_token)
     }
 
     #[inline]
@@ -371,6 +379,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::End) => {
                 if let Some(scope) = self.pop_scope() {
                     match scope {
+                        Scope::Dummy => {}
                         Scope::If(if_address) => {
                             let offset = (self.code().code.len() - if_address) as u64;
                             self.code()
@@ -481,6 +490,7 @@ impl<'a> Parser<'a> {
             // for <id> in <expression> <statements> end
             // for _ in <expression> <statements> end
             TokenKind::Keyword(Keyword::For) => {
+                self.push_scope(Scope::Dummy);
                 // parse the `for` loop variable and the following `in`
                 // Returns an empty `Box<str>` if the variable is a placeholder.
                 let for_variable = if let Some(token) = self.next()? {
@@ -552,6 +562,8 @@ impl<'a> Parser<'a> {
                 } else {
                     self.emit_instruction(Instruction::WriteLocal(index as u64))
                 }
+                // pop the dummy scope
+                self.pop_scope();
                 self.push_scope(Scope::For(jump_address, index))
             }
             // fn <id>((<id>,)*) <statements> end
@@ -1056,7 +1068,7 @@ impl<'a> Parser<'a> {
 */
 
 /// Kinds of errors emmited by the parser.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum ParserErrorKind {
     /// Error emitted by the lexer
     Lexer(LexerErrorKind),
@@ -1083,8 +1095,12 @@ pub(crate) enum ParserErrorKind {
     /// In theory this error should never be emmited, it is here to catch bugs
     /// in the parser.
     EndClosure,
-    /// Tried to write `global x` where `x` was already used as a local variable.
+    /// Tried to write `global x` where `x` was already used as a local
+    /// variable.
     AlreadyDeclared(Box<str>),
+    /// Tried to declare the same variable twice in a table, e.g.
+    /// 't = {a = 1, a = 2 }'
+    TableDoubleAssignement(Box<str>),
 }
 
 impl fmt::Display for ParserErrorKind {
@@ -1115,6 +1131,11 @@ impl fmt::Display for ParserErrorKind {
             Self::AlreadyDeclared(name) => write!(
                 formatter,
                 "variable '{}' has already been used as a local variable",
+                name.as_ref()
+            ),
+            Self::TableDoubleAssignement(name) => write!(
+                formatter,
+                "name '{}' is already declared in the table",
                 name.as_ref()
             ),
         }
@@ -1186,6 +1207,7 @@ impl std::error::Error for ParserError {}
 
 #[derive(Clone, Debug)]
 enum ParserWarningKind {
+    LexerWarning(LexerWarning),
     GlobalInTopLevel,
     GlobalAlreadyDefined(Box<str>),
 }
@@ -1193,6 +1215,7 @@ enum ParserWarningKind {
 impl fmt::Display for ParserWarningKind {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::LexerWarning(warning) => write!(formatter, "{}", warning),
             Self::GlobalInTopLevel => {
                 formatter.write_str("global statement has no effect at the top level")
             }

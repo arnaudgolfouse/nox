@@ -1,3 +1,4 @@
+use super::LexerWarning;
 use crate::Range;
 use std::{
     convert,
@@ -308,4 +309,6 @@ pub struct Token {
     pub kind: TokenKind,
     /// start and end of the token in the source text.
     pub range: Range,
+    /// Eventual warning
+    pub warning: Option<LexerWarning>,
 }

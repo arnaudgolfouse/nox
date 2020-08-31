@@ -14,6 +14,7 @@
 
 mod from_rust_std;
 
+use super::LexerWarning;
 use from_rust_std::{DecimalFloat, ParseFloatError};
 use std::{convert::TryFrom, fmt};
 
@@ -88,7 +89,7 @@ fn invalid_char(c: u8, base: Base) -> NumberError {
     }
 }
 
-pub fn parse_number(number: &str) -> Result<IntOrFloat, NumberError> {
+pub fn parse_number(number: &str) -> Result<(IntOrFloat, Option<LexerWarning>), NumberError> {
     // we only reason on u8's
     let mut number = number.as_bytes();
     let sign = match number.get(0).copied() {
@@ -122,29 +123,30 @@ pub fn parse_number(number: &str) -> Result<IntOrFloat, NumberError> {
     parse_number_with_sign_base(number, sign, base)
 }
 
+/// Parse a number with the sign/base already parsed
 pub fn parse_number_with_sign_base(
     number: &[u8],
     sign: Sign,
     base: Base,
-) -> Result<IntOrFloat, NumberError> {
+) -> Result<(IntOrFloat, Option<LexerWarning>), NumberError> {
     match base {
         Base::Decimal => {
             let decimal = decompose_decimal_number(number)?;
             match DecimalFloat::try_from(decimal) {
                 Ok(float_decimal) => from_rust_std::convert(float_decimal)
                     .map(|f| if sign == Sign::Negative { -f } else { f })
-                    .map(IntOrFloat::Float)
+                    .map(|f| (IntOrFloat::Float(f), None))
                     .map_err(|err| err.into()),
-                Err(()) => parse_i64(decimal.integral, sign, Base::Decimal).map(IntOrFloat::Int),
+                Err(()) => parse_i64(decimal.integral, sign, Base::Decimal)
+                    .map(|i| (IntOrFloat::Int(i), None)),
             }
         }
         _ => {
             let num = decompose_number(number, base)?;
             match num.fractional {
-                Some(fractional) => {
-                    parse_f64(num.integral, fractional, sign, base).map(IntOrFloat::Float)
-                }
-                None => parse_i64(num.integral, sign, base).map(IntOrFloat::Int),
+                Some(fractional) => parse_f64(num.integral, fractional, sign, base)
+                    .map(|(f, warn)| (IntOrFloat::Float(f), warn)),
+                None => parse_i64(num.integral, sign, base).map(|i| (IntOrFloat::Int(i), None)),
             }
         }
     }
@@ -326,7 +328,7 @@ fn parse_f64(
     mut fractional: &[u8],
     sign: Sign,
     base: Base,
-) -> Result<f64, NumberError> {
+) -> Result<(f64, Option<LexerWarning>), NumberError> {
     let log2 = match base {
         Base::Binary => 1,
         Base::Octal => 3,
@@ -347,12 +349,14 @@ fn parse_f64(
     Ok(if !integral.is_empty() {
         // exponent will be positive or zero
 
-        // todo : notify the loss of precision ?
-        if integral.len() > max_mantissa_digits {
+        let warning = if integral.len() > max_mantissa_digits {
             return Err(NumberError::FloatOverflow);
         } else if integral.len() + fractional.len() > max_mantissa_digits {
             fractional = &fractional[..max_mantissa_digits - integral.len()];
-        }
+            Some(LexerWarning::ExcessiveFloatPrecision)
+        } else {
+            None
+        };
         // integral is non-empty here
         let pow = log2 * (integral.len() - 1)
             + match integral.first().copied().unwrap_or(0) {
@@ -366,7 +370,10 @@ fn parse_f64(
         let exponent = 1023 + pow as u64;
         let mantissa = make_mantissa(integral, fractional, base);
 
-        f64::from_bits((sign << 63) | (exponent << 52) | mantissa)
+        (
+            f64::from_bits((sign << 63) | (exponent << 52) | mantissa),
+            warning,
+        )
     } else {
         // exponent will be strictly negative
         let mut pow = 0;
@@ -377,7 +384,10 @@ fn parse_f64(
 
         // zero
         if fractional.is_empty() {
-            return Ok(f64::from_bits(((sign == Sign::Negative) as u64) << 63));
+            return Ok((
+                f64::from_bits(((sign == Sign::Negative) as u64) << 63),
+                None,
+            ));
         }
 
         // fractional is non-empty here
@@ -390,15 +400,21 @@ fn parse_f64(
                 _ => 3,
             };
 
-        if fractional.len() > max_mantissa_digits {
-            fractional = &fractional[..max_mantissa_digits]
-        }
+        let warning = if fractional.len() > max_mantissa_digits {
+            fractional = &fractional[..max_mantissa_digits];
+            Some(LexerWarning::ExcessiveFloatPrecision)
+        } else {
+            None
+        };
 
         let sign = (sign == Sign::Negative) as u64;
         let exponent = 1023 - pow as u64;
         let mantissa = make_mantissa(&fractional[0..1], &fractional[1..], base);
 
-        f64::from_bits((sign << 63) | (exponent << 52) | mantissa)
+        (
+            f64::from_bits((sign << 63) | (exponent << 52) | mantissa),
+            warning,
+        )
     })
 }
 
@@ -619,47 +635,65 @@ mod tests {
     #[test]
     fn the_real_thing() {
         // integers
-        assert_eq!(parse_number("65412").unwrap(), IntOrFloat::Int(65412));
-        assert_eq!(parse_number("0x5f2b").unwrap(), IntOrFloat::Int(24363));
-        assert_eq!(parse_number("-0b01101").unwrap(), IntOrFloat::Int(-13));
+        assert_eq!(parse_number("65412").unwrap().0, IntOrFloat::Int(65412));
+        assert_eq!(parse_number("0x5f2b").unwrap().0, IntOrFloat::Int(24363));
+        assert_eq!(parse_number("-0b01101").unwrap().0, IntOrFloat::Int(-13));
         // floats, using rust's parsing functions
-        assert_eq!(parse_number("65.412").unwrap(), IntOrFloat::Float(65.412));
-        assert_eq!(parse_number("-87.254").unwrap(), IntOrFloat::Float(-87.254));
-        // floats, using this crate's functions
-        assert_eq!(parse_number("0x12.2").unwrap(), IntOrFloat::Float(18.125));
-        assert_eq!(parse_number("0x22.2").unwrap(), IntOrFloat::Float(34.125));
-        assert_eq!(parse_number("0x32.2").unwrap(), IntOrFloat::Float(50.125));
-        assert_eq!(parse_number("0x72.2").unwrap(), IntOrFloat::Float(114.125));
+        assert_eq!(parse_number("65.412").unwrap().0, IntOrFloat::Float(65.412));
         assert_eq!(
-            parse_number("-0x67.241").unwrap(),
+            parse_number("-87.254").unwrap().0,
+            IntOrFloat::Float(-87.254)
+        );
+        // floats, using this crate's functions
+        assert_eq!(parse_number("0x12.2").unwrap().0, IntOrFloat::Float(18.125));
+        assert_eq!(parse_number("0x22.2").unwrap().0, IntOrFloat::Float(34.125));
+        assert_eq!(parse_number("0x32.2").unwrap().0, IntOrFloat::Float(50.125));
+        assert_eq!(
+            parse_number("0x72.2").unwrap().0,
+            IntOrFloat::Float(114.125)
+        );
+        assert_eq!(
+            parse_number("-0x67.241").unwrap().0,
             IntOrFloat::Float(-103.140869140625)
         );
 
         assert_eq!(
-            parse_number("0x12.2").unwrap(),
-            parse_number("0o22.1").unwrap()
+            parse_number("0x12.2").unwrap().0,
+            parse_number("0o22.1").unwrap().0
         );
         assert_eq!(
-            parse_number("0x12.2").unwrap(),
-            parse_number("0b10010.001").unwrap()
+            parse_number("0x12.2").unwrap().0,
+            parse_number("0b10010.001").unwrap().0
         );
 
-        assert_eq!(parse_number("0x0.5").unwrap(), IntOrFloat::Float(5. / 16.));
         assert_eq!(
-            parse_number("0x0.05").unwrap(),
+            parse_number("0x0.5").unwrap().0,
+            IntOrFloat::Float(5. / 16.)
+        );
+        assert_eq!(
+            parse_number("0x0.05").unwrap().0,
             IntOrFloat::Float(5. / (16. * 16.))
         );
         assert_eq!(
-            parse_number("0o0.64").unwrap(),
+            parse_number("0o0.64").unwrap().0,
             IntOrFloat::Float(6. / 8. + 4. / (8. * 8.))
         );
         assert_eq!(
-            parse_number("0o0.12").unwrap(),
+            parse_number("0o0.12").unwrap().0,
             IntOrFloat::Float(1. / 8. + 2. / (8. * 8.))
         );
         assert_eq!(
-            parse_number("0b000.001001001001").unwrap(),
+            parse_number("0b000.001001001001").unwrap().0,
             IntOrFloat::Float(1. / 8. + 1. / 64. + 1. / 512. + 1. / 4096.)
+        );
+
+        // excessive precision (this is quick !)
+        assert_eq!(
+            parse_number("0x1.0000000000001").unwrap(),
+            (
+                IntOrFloat::Float(1.),
+                Some(LexerWarning::ExcessiveFloatPrecision)
+            )
         );
     }
 }
