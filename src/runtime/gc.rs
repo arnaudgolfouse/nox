@@ -234,7 +234,11 @@ impl GC {
                     let mut new_table = self.new_table();
                     if let Some(new_table) = new_table.as_table_mut() {
                         for (key, value) in table {
-                            self.add_table_element_nodrop(new_table, key.clone(), value.clone());
+                            self.add_table_element_nodrop(
+                                new_table,
+                                unsafe { key.duplicate() },
+                                unsafe { value.duplicate() },
+                            );
                         }
                     }
                     new_table
@@ -245,7 +249,7 @@ impl GC {
                 } => self.new_function_nodrop(chunk.clone(), {
                     let mut values = Vec::new();
                     for v in captured_variables {
-                        values.push(v.clone())
+                        values.push(unsafe { v.duplicate() })
                     }
                     values
                 }),

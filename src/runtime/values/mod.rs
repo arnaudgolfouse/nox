@@ -243,10 +243,8 @@ impl Value {
 
     /// Interpret this as a `NoDropValue` reference.
     ///
-    /// This should be safe, as `NoDropValue` is just a wrapper.
-    ///
-    /// The only method that could misbehave is `clone`...
-    /// todo : investigate this
+    /// This is safe, as the `NoDropValue`'s lifetime will be tied to `self`,
+    /// and the method for cloning a `NoDropValue` is unsafe.
     #[inline]
     pub(super) fn as_nodrop_ref(&self) -> &NoDropValue {
         unsafe { &*(self as *const Value as *const NoDropValue) }
@@ -265,20 +263,6 @@ impl Value {
 /// rooted object, or be ready to be collected.
 #[derive(Hash, PartialEq, Eq)]
 pub struct NoDropValue(ManuallyDrop<Value>);
-
-impl Clone for NoDropValue {
-    fn clone(&self) -> Self {
-        NoDropValue(ManuallyDrop::new(match self.0.deref() {
-            Value::Nil => Value::Nil,
-            Value::Bool(b) => Value::Bool(*b),
-            Value::Int(i) => Value::Int(*i),
-            Value::Float(f) => Value::Float(*f),
-            Value::String(s) => Value::String(s.clone()),
-            Value::Collectable(ptr) => Value::Collectable(*ptr),
-            Value::RustFunction(func) => Value::RustFunction(func.clone()),
-        }))
-    }
-}
 
 impl Deref for NoDropValue {
     type Target = Value;
@@ -300,13 +284,39 @@ impl fmt::Debug for NoDropValue {
 }
 
 impl NoDropValue {
+    /// Creates a new `NoDropValue` wrapper from a `Value`.
+    ///
     /// # Safety
     ///
     /// This will unroot `value` once : as such, this should only be used in the
     /// internals of (GC)[../gc/struct.GC.html], when we borrow `GC` mutably, to
     /// avoid collections.
-    pub unsafe fn new(mut value: Value) -> Self {
+    pub(super) unsafe fn new(mut value: Value) -> Self {
         value.unroot();
         Self(ManuallyDrop::new(value))
+    }
+
+    /// Acts like an unsafe `clone` method for `NoDropValue`.
+    ///
+    /// # Safety
+    ///
+    /// This will duplicate `value`, which is in itself a kind of lifetime
+    /// extension (if self's lifetime was constrained in any way).
+    ///
+    /// As such, it is reserved for the internals of (GC)[../gc/struct.GC.html],
+    /// when we borrow `GC` mutably, to avoid collections.
+    ///
+    /// Users of this method **must** ensure that the new value will not be
+    /// collected and then used.
+    pub(super) unsafe fn duplicate(&self) -> Self {
+        NoDropValue(ManuallyDrop::new(match self.0.deref() {
+            Value::Nil => Value::Nil,
+            Value::Bool(b) => Value::Bool(*b),
+            Value::Int(i) => Value::Int(*i),
+            Value::Float(f) => Value::Float(*f),
+            Value::String(s) => Value::String(s.clone()),
+            Value::Collectable(ptr) => Value::Collectable(*ptr),
+            Value::RustFunction(func) => Value::RustFunction(func.clone()),
+        }))
     }
 }
