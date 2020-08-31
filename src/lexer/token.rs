@@ -48,7 +48,7 @@ pub enum Operation {
 
 impl Operation {
     /// Returns `true` if this operator can be unary
-    pub fn is_unary(self) -> bool {
+    pub const fn is_unary(self) -> bool {
         match self {
             Self::Minus | Self::Not => true,
             _ => false,
@@ -56,7 +56,7 @@ impl Operation {
     }
 
     /// Returns `true` if this operator can be binary
-    pub fn is_binary(self) -> bool {
+    pub const fn is_binary(self) -> bool {
         match self {
             Self::Not => false,
             _ => true,
@@ -257,7 +257,7 @@ pub enum TokenKind {
 
 impl TokenKind {
     /// Returns `true` is `self` is a number, a string or a boolean
-    pub fn is_constant(&self) -> bool {
+    pub const fn is_constant(&self) -> bool {
         match self {
             Self::Int(_) | Self::Float(_) | Self::Str(_) => true,
             Self::Keyword(keyword) => match keyword {

@@ -105,7 +105,7 @@ pub fn to_int(args: &mut [Value]) -> Result<Value, String> {
         ));
     }
     let int = match unsafe { args.get_unchecked(0) }.captured_value_ref() {
-        Value::String(s) => match i64::from_str_radix(&s, 10) {
+        Value::String(s) => match i64::from_str_radix(s, 10) {
             Ok(i) => i,
             Err(err) => return Err(err.to_string()),
         },

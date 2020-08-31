@@ -149,7 +149,7 @@ impl Value {
     }
 
     /// Return `Some` with the inner value if `self` is a captured variable.
-    pub(super) fn as_captured(&self) -> Option<&Value> {
+    pub(super) fn as_captured(&self) -> Option<&Self> {
         match self {
             Self::Collectable(ptr) => match &unsafe { &ptr.as_ref() }.object {
                 CollectableObject::Captured(value) => Some(value),
@@ -160,7 +160,7 @@ impl Value {
     }
 
     /// Return `Some` with the inner value if `self` is a captured variable.
-    pub(super) fn as_captured_mut(&mut self) -> Option<&mut Value> {
+    pub(super) fn as_captured_mut(&mut self) -> Option<&mut Self> {
         match self {
             Self::Collectable(ptr) => match unsafe { &mut ptr.as_mut().object } {
                 CollectableObject::Captured(value) => Some(value),
@@ -171,7 +171,7 @@ impl Value {
     }
 
     /// Return `self` if it is not captured, or the inner value of `self`
-    pub(super) fn captured_value(self) -> Value {
+    pub(super) fn captured_value(self) -> Self {
         match self {
             Self::Collectable(ptr) => {
                 let captured = unsafe { &ptr.as_ref().object };
@@ -185,7 +185,7 @@ impl Value {
     }
 
     /// Return `self` if it is not captured, or the inner value of `self`
-    pub fn captured_value_ref(&self) -> &Value {
+    pub fn captured_value_ref(&self) -> &Self {
         match self {
             Self::Collectable(ptr) => {
                 let captured = unsafe { &ptr.as_ref().object };
@@ -247,7 +247,7 @@ impl Value {
     /// and the method for cloning a `NoDropValue` is unsafe.
     #[inline]
     pub(super) fn as_nodrop_ref(&self) -> &NoDropValue {
-        unsafe { &*(self as *const Value as *const NoDropValue) }
+        unsafe { &*(self as *const Self as *const NoDropValue) }
     }
 }
 
@@ -309,7 +309,7 @@ impl NoDropValue {
     /// Users of this method **must** ensure that the new value will not be
     /// collected and then used.
     pub(super) unsafe fn duplicate(&self) -> Self {
-        NoDropValue(ManuallyDrop::new(match self as &Value {
+        Self(ManuallyDrop::new(match self as &Value {
             Value::Nil => Value::Nil,
             Value::Bool(b) => Value::Bool(*b),
             Value::Int(i) => Value::Int(*i),

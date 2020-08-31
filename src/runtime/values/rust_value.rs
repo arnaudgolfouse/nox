@@ -65,7 +65,7 @@ impl PartialEq<Value> for RValue<'_> {
 
 impl PartialEq<RValue<'_>> for Value {
     fn eq(&self, other: &RValue<'_>) -> bool {
-        self == other as &Value
+        self == other as &Self
     }
 }
 

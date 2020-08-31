@@ -495,7 +495,7 @@ impl VM {
 
         let captured_start = self.stack.len();
         for captured in func.1 {
-            let captured = (&captured as &Value).clone();
+            let captured = (captured as &Value).clone();
             self.stack.push(captured);
         }
 

@@ -23,7 +23,7 @@ impl GCHeader {
     /// Creates a header for a collectable object.
     ///
     /// This object will be rooted once to avoid collection.
-    pub fn new(next: Option<NonNull<Collectable>>) -> Self {
+    pub const fn new(next: Option<NonNull<Collectable>>) -> Self {
         Self {
             next,
             marked: false,
@@ -56,7 +56,7 @@ pub struct Collectable {
 }
 
 impl PartialEq for Collectable {
-    fn eq(&self, other: &Collectable) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         self.object == other.object
     }
 }
@@ -94,7 +94,7 @@ impl Collectable {
         }
     }
 
-    fn to_mark(&self) -> Vec<&Collectable> {
+    fn to_mark(&self) -> Vec<&Self> {
         match &self.object {
             CollectableObject::Captured(value) => match value.as_collectable() {
                 None => vec![],
@@ -130,15 +130,15 @@ impl Collectable {
     }
 
     fn size(&self) -> usize {
-        let size = size_of::<Collectable>();
+        const SIZE: usize = size_of::<Collectable>();
         match &self.object {
             CollectableObject::Table(table) => {
-                size + size_of::<(Value, Value)>() * table.capacity()
+                SIZE + size_of::<(Value, Value)>() * table.capacity()
             }
             CollectableObject::Function {
                 captured_variables, ..
-            } => size + size_of::<Value>() * captured_variables.capacity(),
-            CollectableObject::Captured(_) => size,
+            } => SIZE + size_of::<Value>() * captured_variables.capacity(),
+            CollectableObject::Captured(_) => SIZE,
         }
     }
 }
@@ -163,7 +163,7 @@ impl Default for GC {
 
 impl GC {
     /// Creates a new empty garbage collector
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             allocated: 0,
             threshold: INITIAL_THRESHOLD,

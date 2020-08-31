@@ -40,7 +40,7 @@ pub enum Base {
 }
 
 impl Base {
-    pub fn as_i64(self) -> i64 {
+    pub const fn as_i64(self) -> i64 {
         self as i64
     }
 }
@@ -81,7 +81,7 @@ where
     Ok((&input[..position], &input[position..]))
 }
 
-fn invalid_char(c: u8, base: Base) -> NumberError {
+const fn invalid_char(c: u8, base: Base) -> NumberError {
     if c == b'.' {
         NumberError::NumberUnexpectedDot
     } else {

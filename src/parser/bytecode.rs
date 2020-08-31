@@ -21,11 +21,11 @@ macro_rules! implement_integer_operand {
     ($($t:ty)*) => {
         $(
         impl Operand for $t {
-            type Extended = [Option<Instruction<u8>>; size_of::<$t>() - 1];
+            type Extended = [Option<Instruction<u8>>; size_of::<Self>() - 1];
             fn extended(mut self) -> (u8, <Self as Operand>::Extended) {
                 let u8_part = (self & 0xff) as u8;
                 self = self.rotate_right(8);
-                let mut extended = [None; size_of::<$t>() - 1];
+                let mut extended = [None; size_of::<Self>() - 1];
                 for i in 0..extended.len() {
                     let byte = (self & 0xff) as u8;
                     if byte > 0 {
@@ -83,10 +83,10 @@ impl<Op: Operand> fmt::Debug for Instruction<Op> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             $(
-                Instruction::$code1 => formatter.write_str(stringify!($code1)),
+                Self::$code1 => formatter.write_str(stringify!($code1)),
             )*
             $(
-                Instruction::$code2(operand) => {
+                Self::$code2(operand) => {
                     write!(formatter, stringify!($code2))?;
                     write!(formatter, "({})", operand)
                 }
@@ -101,10 +101,10 @@ impl<Op: Operand> Instruction<Op> {
     pub fn operand(self) -> Option<Op> {
         match self {
             $(
-                Instruction::$code1 => None,
+                Self::$code1 => None,
             )*
             $(
-                Instruction::$code2(operand) => Some(operand),
+                Self::$code2(operand) => Some(operand),
             )*
         }
     }
@@ -129,10 +129,10 @@ impl<Op: Operand> Instruction<Op> {
         (
             match self {
                 $(
-                    Instruction::$code1 => Instruction::$code1,
+                    Self::$code1 => Instruction::$code1,
                 )*
                 $(
-                    Instruction::$code2(_) => Instruction::$code2(operand),
+                    Self::$code2(_) => Instruction::$code2(operand),
                 )*
             },
             extended,
@@ -359,12 +359,12 @@ impl TryFrom<TokenKind> for Constant {
     fn try_from(token_kind: TokenKind) -> Result<Self, TokenKind> {
         use crate::lexer::Keyword;
         match token_kind {
-            TokenKind::Int(i) => Ok(Constant::Int(i)),
-            TokenKind::Float(f) => Ok(Constant::Float(f)),
-            TokenKind::Str(s) => Ok(Constant::String(s)),
-            TokenKind::Keyword(Keyword::True) => Ok(Constant::Bool(true)),
-            TokenKind::Keyword(Keyword::False) => Ok(Constant::Bool(false)),
-            TokenKind::Keyword(Keyword::Nil) => Ok(Constant::Nil),
+            TokenKind::Int(i) => Ok(Self::Int(i)),
+            TokenKind::Float(f) => Ok(Self::Float(f)),
+            TokenKind::Str(s) => Ok(Self::String(s)),
+            TokenKind::Keyword(Keyword::True) => Ok(Self::Bool(true)),
+            TokenKind::Keyword(Keyword::False) => Ok(Self::Bool(false)),
+            TokenKind::Keyword(Keyword::Nil) => Ok(Self::Nil),
             _ => Err(token_kind),
         }
     }
@@ -426,7 +426,7 @@ impl Chunk {
     }
 
     /// Return the name of this chunk.
-    pub fn name(&self) -> &str {
+    pub const fn name(&self) -> &str {
         &self.name
     }
 

@@ -13,7 +13,7 @@ use std::{cell::RefCell, fmt::Debug, sync::Arc};
 pub struct RustFunction(pub Arc<RefCell<dyn FnMut(&mut [Value]) -> Result<Value, String>>>);
 
 impl PartialEq for RustFunction {
-    fn eq(&self, _: &RustFunction) -> bool {
+    fn eq(&self, _: &Self) -> bool {
         false
     }
 }

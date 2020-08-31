@@ -170,7 +170,7 @@ impl<'a> Parser<'a> {
 
     /// Return a `Range` at the current position
     #[inline]
-    fn current_range(&self) -> Range {
+    const fn current_range(&self) -> Range {
         Range::new(self.current_position(), self.current_position())
     }
 
@@ -221,7 +221,7 @@ impl<'a> Parser<'a> {
 
     /// Returns the current position of the lexer.
     #[inline]
-    fn current_position(&self) -> crate::Position {
+    const fn current_position(&self) -> crate::Position {
         self.lexer.position
     }
 

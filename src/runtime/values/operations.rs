@@ -47,7 +47,7 @@ impl From<OperationError> for VMErrorKind {
 }
 
 impl PartialEq for Value {
-    fn eq(&self, other: &Value) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         // 'de-capture' the variables
         if let Some(x1) = self.as_captured() {
             return if let Some(x2) = other.as_captured() {
@@ -115,22 +115,20 @@ impl Value {
     ///
     /// If the two values can't be added, `OperationError(+, self, other)` is
     /// returned.
-    pub(crate) fn add(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn add(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Int(i1) => match other {
-                Value::Int(i2) => Ok(Value::Int(i1 + i2)),
-                Value::Float(f) => Ok(Value::Float(i1 as f64 + f)),
+            Self::Int(i1) => match other {
+                Self::Int(i2) => Ok(Self::Int(i1 + i2)),
+                Self::Float(f) => Ok(Self::Float(i1 as f64 + f)),
                 _ => Err((self, other)),
             },
-            Value::Float(f1) => match other {
-                Value::Float(f2) => Ok(Value::Float(f1 + f2)),
-                Value::Int(i) => Ok(Value::Float(i as f64 + f1)),
+            Self::Float(f1) => match other {
+                Self::Float(f2) => Ok(Self::Float(f1 + f2)),
+                Self::Int(i) => Ok(Self::Float(i as f64 + f1)),
                 _ => Err((self, other)),
             },
-            Value::String(ref s1) => match other {
-                Value::String(ref s2) => {
-                    Ok(Value::String(format!("{}{}", s1, s2).into_boxed_str()))
-                }
+            Self::String(ref s1) => match other {
+                Self::String(ref s2) => Ok(Self::String(format!("{}{}", s1, s2).into_boxed_str())),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -138,16 +136,16 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Plus, s, o))
     }
 
-    pub(crate) fn subtract(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn subtract(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Int(i1) => match other {
-                Value::Int(i2) => Ok(Value::Int(i1 - i2)),
-                Value::Float(f) => Ok(Value::Float(i1 as f64 - f)),
+            Self::Int(i1) => match other {
+                Self::Int(i2) => Ok(Self::Int(i1 - i2)),
+                Self::Float(f) => Ok(Self::Float(i1 as f64 - f)),
                 _ => Err((self, other)),
             },
-            Value::Float(f1) => match other {
-                Value::Float(f2) => Ok(Value::Float(f1 - f2)),
-                Value::Int(i) => Ok(Value::Float(f1 - i as f64)),
+            Self::Float(f1) => match other {
+                Self::Float(f2) => Ok(Self::Float(f1 - f2)),
+                Self::Int(i) => Ok(Self::Float(f1 - i as f64)),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -155,25 +153,25 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Minus, s, o))
     }
 
-    pub(crate) fn multiply(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn multiply(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Int(i1) => match other {
-                Value::Int(i2) => Ok(Value::Int(i1 * i2)),
-                Value::Float(f) => Ok(Value::Float(i1 as f64 * f)),
-                Value::String(ref s) => match usize::try_from(i1) {
-                    Ok(i1) => Ok(Value::String(s.repeat(i1).into_boxed_str())),
+            Self::Int(i1) => match other {
+                Self::Int(i2) => Ok(Self::Int(i1 * i2)),
+                Self::Float(f) => Ok(Self::Float(i1 as f64 * f)),
+                Self::String(ref s) => match usize::try_from(i1) {
+                    Ok(i1) => Ok(Self::String(s.repeat(i1).into_boxed_str())),
                     Err(_) => Err((self, other)),
                 },
                 _ => Err((self, other)),
             },
-            Value::Float(f1) => match other {
-                Value::Float(f2) => Ok(Value::Float(f1 * f2)),
-                Value::Int(i) => Ok(Value::Float(i as f64 * f1)),
+            Self::Float(f1) => match other {
+                Self::Float(f2) => Ok(Self::Float(f1 * f2)),
+                Self::Int(i) => Ok(Self::Float(i as f64 * f1)),
                 _ => Err((self, other)),
             },
-            Value::String(ref s) => match other {
-                Value::Int(i) => match usize::try_from(i) {
-                    Ok(i) => Ok(Value::String(s.repeat(i).into_boxed_str())),
+            Self::String(ref s) => match other {
+                Self::Int(i) => match usize::try_from(i) {
+                    Ok(i) => Ok(Self::String(s.repeat(i).into_boxed_str())),
                     Err(_) => Err((self, other)),
                 },
                 _ => Err((self, other)),
@@ -183,16 +181,16 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Multiply, s, o))
     }
 
-    pub(crate) fn divide(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn divide(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Int(i1) => match other {
-                Value::Int(i2) => Ok(Value::Int(i1 / i2)),
-                Value::Float(f) => Ok(Value::Float(i1 as f64 / f)),
+            Self::Int(i1) => match other {
+                Self::Int(i2) => Ok(Self::Int(i1 / i2)),
+                Self::Float(f) => Ok(Self::Float(i1 as f64 / f)),
                 _ => Err((self, other)),
             },
-            Value::Float(f1) => match other {
-                Value::Float(f2) => Ok(Value::Float(f1 / f2)),
-                Value::Int(i) => Ok(Value::Float(f1 / i as f64)),
+            Self::Float(f1) => match other {
+                Self::Float(f2) => Ok(Self::Float(f1 / f2)),
+                Self::Int(i) => Ok(Self::Float(f1 / i as f64)),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -200,10 +198,10 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Divide, s, o))
     }
 
-    pub(crate) fn modulo(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn modulo(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Int(i1) => match other {
-                Value::Int(i2) => Ok(Value::Int(i1 % i2)),
+            Self::Int(i1) => match other {
+                Self::Int(i2) => Ok(Self::Int(i1 % i2)),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -211,16 +209,16 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Modulo, s, o))
     }
 
-    pub(crate) fn pow(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn pow(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Int(i1) => match other {
-                Value::Int(i2) => Ok(Value::Int((i1 as f64).powf(i2 as f64) as i64)),
-                Value::Float(f) => Ok(Value::Float((i1 as f64).powf(f))),
+            Self::Int(i1) => match other {
+                Self::Int(i2) => Ok(Self::Int((i1 as f64).powf(i2 as f64) as i64)),
+                Self::Float(f) => Ok(Self::Float((i1 as f64).powf(f))),
                 _ => Err((self, other)),
             },
-            Value::Float(f1) => match other {
-                Value::Int(i) => Ok(Value::Float(f1.powf(i as f64))),
-                Value::Float(f2) => Ok(Value::Float(f1.powf(f2))),
+            Self::Float(f1) => match other {
+                Self::Int(i) => Ok(Self::Float(f1.powf(i as f64))),
+                Self::Float(f2) => Ok(Self::Float(f1.powf(f2))),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -228,20 +226,20 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Pow, s, o))
     }
 
-    pub(crate) fn less(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn less(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Int(i1) => match other {
-                Value::Int(i2) => Ok(Value::Bool(i1 < i2)),
-                Value::Float(f) => Ok(Value::Bool((i1 as f64) < f)),
+            Self::Int(i1) => match other {
+                Self::Int(i2) => Ok(Self::Bool(i1 < i2)),
+                Self::Float(f) => Ok(Self::Bool((i1 as f64) < f)),
                 _ => Err((self, other)),
             },
-            Value::Float(f1) => match other {
-                Value::Float(f2) => Ok(Value::Bool(f1 < f2)),
-                Value::Int(i) => Ok(Value::Bool(f1 < (i as f64))),
+            Self::Float(f1) => match other {
+                Self::Float(f2) => Ok(Self::Bool(f1 < f2)),
+                Self::Int(i) => Ok(Self::Bool(f1 < (i as f64))),
                 _ => Err((self, other)),
             },
-            Value::String(ref s1) => match other {
-                Value::String(ref s2) => Ok(Value::Bool(s1 < s2)),
+            Self::String(ref s1) => match other {
+                Self::String(ref s2) => Ok(Self::Bool(s1 < s2)),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -249,27 +247,27 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Less, s, o))
     }
 
-    pub(crate) fn less_eq(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn less_eq(self, other: Self) -> Result<Self, OperationError> {
         match self.more(other)? {
-            Value::Bool(b) => Ok(Value::Bool(!b)),
+            Self::Bool(b) => Ok(Self::Bool(!b)),
             _ => unreachable!(),
         }
     }
 
-    pub(crate) fn more(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn more(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Int(i1) => match other {
-                Value::Int(i2) => Ok(Value::Bool(i1 > i2)),
-                Value::Float(f) => Ok(Value::Bool((i1 as f64) > f)),
+            Self::Int(i1) => match other {
+                Self::Int(i2) => Ok(Self::Bool(i1 > i2)),
+                Self::Float(f) => Ok(Self::Bool((i1 as f64) > f)),
                 _ => Err((self, other)),
             },
-            Value::Float(f1) => match other {
-                Value::Float(f2) => Ok(Value::Bool(f1 > f2)),
-                Value::Int(i) => Ok(Value::Bool(f1 > (i as f64))),
+            Self::Float(f1) => match other {
+                Self::Float(f2) => Ok(Self::Bool(f1 > f2)),
+                Self::Int(i) => Ok(Self::Bool(f1 > (i as f64))),
                 _ => Err((self, other)),
             },
-            Value::String(ref s1) => match other {
-                Value::String(ref s2) => Ok(Value::Bool(s1 > s2)),
+            Self::String(ref s1) => match other {
+                Self::String(ref s2) => Ok(Self::Bool(s1 > s2)),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -277,17 +275,17 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::More, s, o))
     }
 
-    pub(crate) fn more_eq(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn more_eq(self, other: Self) -> Result<Self, OperationError> {
         match self.less(other)? {
-            Value::Bool(b) => Ok(Value::Bool(!b)),
+            Self::Bool(b) => Ok(Self::Bool(!b)),
             _ => unreachable!(),
         }
     }
 
-    pub(crate) fn and(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn and(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Bool(b1) => match other {
-                Value::Bool(b2) => Ok(Value::Bool(b1 && b2)),
+            Self::Bool(b1) => match other {
+                Self::Bool(b2) => Ok(Self::Bool(b1 && b2)),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -295,10 +293,10 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::And, s, o))
     }
 
-    pub(crate) fn or(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn or(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Bool(b1) => match other {
-                Value::Bool(b2) => Ok(Value::Bool(b1 || b2)),
+            Self::Bool(b1) => match other {
+                Self::Bool(b2) => Ok(Self::Bool(b1 || b2)),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -306,10 +304,10 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Or, s, o))
     }
 
-    pub(crate) fn xor(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn xor(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Bool(b1) => match other {
-                Value::Bool(b2) => Ok(Value::Bool(b1 ^ b2)),
+            Self::Bool(b1) => match other {
+                Self::Bool(b2) => Ok(Self::Bool(b1 ^ b2)),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -317,10 +315,10 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Xor, s, o))
     }
 
-    pub(crate) fn shift_left(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn shift_left(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Int(i1) => match other {
-                Value::Int(i2) => Ok(Value::Int(i1 << i2)),
+            Self::Int(i1) => match other {
+                Self::Int(i2) => Ok(Self::Int(i1 << i2)),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -328,10 +326,10 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::ShiftLeft, s, o))
     }
 
-    pub(crate) fn shift_right(self, other: Value) -> Result<Value, OperationError> {
+    pub(crate) fn shift_right(self, other: Self) -> Result<Self, OperationError> {
         match self {
-            Value::Int(i1) => match other {
-                Value::Int(i2) => Ok(Value::Int(i1 >> i2)),
+            Self::Int(i1) => match other {
+                Self::Int(i2) => Ok(Self::Int(i1 >> i2)),
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),
@@ -339,19 +337,19 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::ShiftRight, s, o))
     }
 
-    pub(crate) fn negative(mut self) -> Result<Value, OperationError> {
+    pub(crate) fn negative(mut self) -> Result<Self, OperationError> {
         self = self.captured_value();
         match self {
-            Value::Int(i) => Ok(Value::Int(-i)),
-            Value::Float(f) => Ok(Value::Float(-f)),
+            Self::Int(i) => Ok(Self::Int(-i)),
+            Self::Float(f) => Ok(Self::Float(-f)),
             _ => Err(OperationError::Unary(Operation::Minus, self)),
         }
     }
 
-    pub(crate) fn not(mut self) -> Result<Value, OperationError> {
+    pub(crate) fn not(mut self) -> Result<Self, OperationError> {
         self = self.captured_value();
         match self {
-            Value::Bool(b) => Ok(Value::Bool(!b)),
+            Self::Bool(b) => Ok(Self::Bool(!b)),
             _ => Err(OperationError::Unary(Operation::Not, self)),
         }
     }

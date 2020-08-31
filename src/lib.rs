@@ -38,7 +38,7 @@ pub enum Source<'a> {
 
 impl<'a> Source<'a> {
     /// Actual source code
-    pub fn content(&self) -> &'a str {
+    pub const fn content(&self) -> &'a str {
         match self {
             Self::File { content, .. } | Self::TopLevel(content) => content,
         }
@@ -49,7 +49,7 @@ impl<'a> Source<'a> {
     /// Will return `"top-level"` if the Source is `TopLevel`.
     pub fn name(&self) -> &str {
         match self {
-            Self::File { name, .. } => &name,
+            Self::File { name, .. } => name,
             Self::TopLevel(_) => "top-level",
         }
     }
@@ -63,7 +63,7 @@ pub struct Position {
 }
 
 impl Position {
-    pub fn new(column: u32, line: u32) -> Self {
+    pub const fn new(column: u32, line: u32) -> Self {
         Self { column, line }
     }
 
@@ -90,7 +90,7 @@ pub struct Range {
 }
 
 impl Range {
-    pub fn new(start: Position, end: Position) -> Self {
+    pub const fn new(start: Position, end: Position) -> Self {
         Self { start, end }
     }
 
