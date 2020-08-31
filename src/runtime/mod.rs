@@ -15,7 +15,7 @@ mod run;
 
 use crate::{
     error::Continue,
-    parser::{Chunk, Constant, Instruction, Parser, ParserError, ParserWarning},
+    parser::{self, Chunk, Constant, Instruction, Parser},
     Source,
 };
 use gc::GC;
@@ -80,11 +80,18 @@ impl VM {
         self.stack.clear();
         self.call_frames.clear();
         self.loop_addresses.clear();
-        self.gc.mark_and_sweep();
     }
 
     /// Load and parse a text `source` in the top-level for execution.
-    pub fn parse_top_level<'a>(&mut self, source: &'a str) -> Result<Vec<ParserWarning>, VMError> {
+    ///
+    /// # Errors
+    ///
+    /// Any parsing error is converted to [`VMError`](struct.VMError.html) and
+    /// returned.
+    pub fn parse_top_level<'a>(
+        &mut self,
+        source: &'a str,
+    ) -> Result<Vec<parser::Warning>, VMError> {
         self.partial_reset();
         let parser = Parser::new(crate::Source::TopLevel(source));
         let (chunk, warnings) = parser.parse_top_level()?;
@@ -93,7 +100,15 @@ impl VM {
     }
 
     /// Load and parse a `source` file or `str` in the top-level for execution.
-    pub fn parse_source<'a>(&mut self, source: Source<'a>) -> Result<Vec<ParserWarning>, VMError> {
+    ///
+    /// # Errors
+    ///
+    /// Any parsing error is converted to [`VMError`](struct.VMError.html) and
+    /// returned.
+    pub fn parse_source<'a>(
+        &mut self,
+        source: Source<'a>,
+    ) -> Result<Vec<parser::Warning>, VMError> {
         self.partial_reset();
         let parser = Parser::new(source);
         let (chunk, warnings) = parser.parse_top_level()?;
@@ -108,6 +123,13 @@ impl VM {
     }
 
     /// Load the library as a table in the global variables.
+    ///
+    /// # Errors
+    ///
+    /// If one of the symbols of the library tries to replace an already defined
+    /// global variable,
+    /// [`RuntimeError::NameAlreadyDefined`](enum.RuntimeError.html#variant.NameAlreadyDefined)
+    /// is emmited.
     pub fn import(&mut self, library: ffi::Library) -> Result<(), VMError> {
         if self.global_variables.contains_key(&library.name) {
             return Err(VMError::Runtime {
@@ -128,6 +150,13 @@ impl VM {
     }
 
     /// Load all objects in the library as global variables.
+    ///
+    /// # Errors
+    ///
+    /// If one of the symbols of the library tries to replace an already defined
+    /// global variable,
+    /// [`RuntimeError::NameAlreadyDefined`](enum.RuntimeError.html#variant.NameAlreadyDefined)
+    /// is emmited.
     pub fn import_all(&mut self, library: ffi::Library) -> Result<(), VMError> {
         for (name, value) in library.variables {
             if self.global_variables.contains_key(&name) {
@@ -196,6 +225,10 @@ impl VM {
     ///
     /// assert_eq!(vm.run().unwrap(), Value::Float(-54.5));
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// See [`VMError`](struct.VMError.html)
     pub fn run(&mut self) -> Result<RValue, VMError> {
         // for variables
         for _ in 0..self.chunk.locals_number {
@@ -227,7 +260,6 @@ impl VM {
                     line: self.chunk().get_line(self.ip),
                 }
             }
-            #[cfg(feature = "check")]
             VMErrorKind::Internal(err) => {
                 self.partial_reset();
                 VMError::Internal {
@@ -268,7 +300,7 @@ impl VM {
         self.stack.get(index)
     }
 
-    /// Make a RValue out of a regular value.
+    /// Make a `RValue` out of a regular value.
     fn make_rvalue(&self, value: Value) -> RValue {
         RValue(value, PhantomData::default())
     }
@@ -336,7 +368,7 @@ impl VM {
         let mut unwind_message = String::new();
         let line = self.chunk().get_line(self.ip.saturating_sub(1));
         while let Some(frame) = self.call_frames.pop() {
-            self.unwind_frame(frame, &mut unwind_message);
+            self.unwind_frame(&frame, &mut unwind_message);
         }
         VMError::Runtime {
             kind: error,
@@ -346,7 +378,7 @@ impl VM {
     }
 
     /// Log the unwinding of one frame in the given string.
-    fn unwind_frame(&mut self, frame: CallFrame, unwind_message: &mut String) {
+    fn unwind_frame(&mut self, frame: &CallFrame, unwind_message: &mut String) {
         unwind_message.push_str(&format!(
             "  line {:<6} -> {}(",
             self.chunk().get_line(frame.previous_ip.saturating_sub(1)) + 1,
@@ -381,8 +413,11 @@ impl VM {
     /// function out of it and calls it with `nb_args` arguments, pushing the
     /// result at the top of the stack.
     ///
-    /// Else, `InterfacingError::NotAString` is returned.
-    pub fn str_call(&mut self, nb_args: usize) -> Result<Vec<ParserWarning>, VMError> {
+    /// # Errors
+    ///
+    /// `InterfacingError::NotAString` is returned if the stack is incorrectly
+    /// setup.
+    pub fn str_call(&mut self, nb_args: usize) -> Result<Vec<parser::Warning>, VMError> {
         let func_index = match self.stack.len().checked_sub(nb_args + 1) {
             None => return Err(self.make_error(InterfacingError::IncorrectStackIndex(0).into())),
             Some(index) => index,
@@ -395,7 +430,7 @@ impl VM {
                     let (code, warnings) = parser.parse_top_level()?;
                     let function = self.gc.new_function(Arc::new(code), Vec::new());
                     *func = function;
-                    self.call_internal(nb_args as u64)
+                    self.call_internal(nb_args)
                         .map_err(|err| self.make_error(err))?;
                     Ok(warnings)
                 }
@@ -411,7 +446,11 @@ impl VM {
     ///
     /// This will prepare the VM for the function and call it, and then push the
     /// result on top of the stack.
-    pub fn call(&mut self, nb_args: u64) -> Result<(), VMError> {
+    ///
+    /// # Errors
+    ///
+    /// See [`VMError`](struct.VMError.html)
+    pub fn call(&mut self, nb_args: usize) -> Result<(), VMError> {
         self.call_internal(nb_args)
             .map_err(|err| self.make_error(err))
     }
@@ -419,11 +458,11 @@ impl VM {
     /// Interpret the stack as `nb_args` arguments with a function below.
     ///
     /// This will prepare the VM for the function and call it.
-    fn call_internal(&mut self, nb_args: u64) -> Result<(), VMErrorKind> {
+    fn call_internal(&mut self, nb_args: usize) -> Result<(), VMErrorKind> {
         let local_start = self
             .stack
             .len()
-            .checked_sub(nb_args as usize)
+            .checked_sub(nb_args)
             .ok_or(InternalError::EmptyStack)?;
         let mut function = self
             .stack
@@ -431,31 +470,26 @@ impl VM {
             .ok_or(InternalError::EmptyStack)?
             .clone();
 
-        let func = match function.as_function_mut() {
-            Some(function) => function,
-            None => {
-                use std::ops::DerefMut;
-                if let Value::RustFunction(ref function) = function {
-                    let mut function = function.0.borrow_mut();
-                    match function.deref_mut()(&mut self.stack[local_start..]) {
-                        Ok(value) => {
-                            for _ in self.stack.drain(local_start - 1..) {}
-                            self.stack.push(value);
-                        }
-                        Err(err) => return Err(RuntimeError::RustFunction(err).into()),
-                    }
-                    return Ok(());
-                } else {
-                    return Err(RuntimeError::NotAFunction(format!("{}", function)).into());
+        let func = if let Some(function) = function.as_function_mut() {
+            function
+        } else if let Value::RustFunction(ref function) = function {
+            match function.0.borrow_mut()(&mut self.stack[local_start..]) {
+                Ok(value) => {
+                    for _ in self.stack.drain(local_start - 1..) {}
+                    self.stack.push(value);
                 }
+                Err(err) => return Err(RuntimeError::RustFunction(err).into()),
             }
+            return Ok(());
+        } else {
+            return Err(RuntimeError::NotAFunction(format!("{}", function)).into());
         };
 
-        if nb_args != func.0.arg_number as u64 {
+        if nb_args != func.0.arg_number {
             return Err(RuntimeError::InvalidArgNumber(func.0.arg_number, nb_args).into());
         }
 
-        for _ in 0..(func.0.locals_number - nb_args as u32) {
+        for _ in 0..(func.0.locals_number - nb_args as usize) {
             self.stack.push(Value::Nil)
         }
 
@@ -503,7 +537,7 @@ pub enum RuntimeError {
     /// A call operation was attempted on a value that is not a function.
     NotAFunction(String),
     /// A function received an incorrect number of arguments
-    InvalidArgNumber(u32, u64),
+    InvalidArgNumber(usize, usize),
     /// Error emitted by a Rust function
     RustFunction(String),
     /// Trying to import an already defined library
@@ -595,7 +629,7 @@ pub enum InternalError {
     EmptyStack,
     /// Various instruction errors. Most of the time this is caused by an
     /// incorrect `Read-` or `Write-` instruction operand.
-    InvalidOperand(Instruction<u64>),
+    InvalidOperand(Instruction<usize>),
     /// A `Break` or `Continue` instruction was encountered outside of a loop.
     ///
     /// If `true`, `break`, else `continue`.
@@ -662,16 +696,15 @@ pub enum VMError {
     /// Error encountered while interfacing with Rust
     Interfacing { kind: InterfacingError, line: usize },
     /// Error(s) encountered while parsing
-    Parser(Vec<ParserError>),
+    Parser(Vec<parser::Error>),
 }
 
 impl<'a> VMError {
     pub fn continuable(&self) -> Continue {
         match self {
-            Self::Runtime { .. } => Continue::Stop,
-            Self::Interfacing { .. } => Continue::Stop,
-            #[cfg(feature = "check")]
-            Self::Internal { .. } => Continue::Stop,
+            Self::Runtime { .. } | Self::Interfacing { .. } | Self::Internal { .. } => {
+                Continue::Stop
+            }
             Self::Parser(err) => {
                 let mut continable = Continue::Continue;
                 for err in err {
@@ -686,8 +719,8 @@ impl<'a> VMError {
     }
 }
 
-impl<'a> From<Vec<ParserError>> for VMError {
-    fn from(err: Vec<ParserError>) -> Self {
+impl<'a> From<Vec<parser::Error>> for VMError {
+    fn from(err: Vec<parser::Error>) -> Self {
         Self::Parser(err)
     }
 }
@@ -719,7 +752,6 @@ impl<'a> fmt::Display for VMError {
                 line + 1,
                 kind
             ),
-            #[cfg(feature = "check")]
             Self::Internal { kind, line } => {
                 writeln!(
                     formatter,

@@ -33,8 +33,8 @@ impl<F: 'static + FnMut(&mut [Value]) -> Result<Value, String>> From<F> for Valu
 /// Library regrouping external objects.
 ///
 /// This can be loaded into the current top-level via the
-/// [import](../struct.VM.html#method.import) and
-/// [import_all](../struct.VM.html#method.import_all) functions of the `VM`.
+/// [`import`](../struct.VM.html#method.import) and
+/// [`import_all`](../struct.VM.html#method.import_all) functions of the `VM`.
 #[derive(Debug)]
 pub struct Library {
     pub(crate) name: Box<str>,

@@ -42,7 +42,7 @@ where
 {
     let mut result = 0;
     for &c in bytes {
-        result = result * 10 + (c - b'0') as u64;
+        result = result * 10 + u64::from(c - b'0');
     }
     result
 }
@@ -53,7 +53,7 @@ where
 pub fn digits_to_big(integral: &[u8], fractional: &[u8]) -> Big {
     let mut f = Big::from_small(0);
     for &c in integral.iter().chain(fractional) {
-        let n = (c - b'0') as u32;
+        let n = u32::from(c - b'0');
         f.mul_small(10);
         f.add_small(n);
     }
@@ -65,9 +65,9 @@ pub fn to_u64(x: &Big) -> u64 {
     assert!(x.bit_length() < 64);
     let d = x.digits();
     if d.len() < 2 {
-        d[0] as u64
+        u64::from(d[0])
     } else {
-        (d[1] as u64) << 32 | d[0] as u64
+        u64::from(d[1]) << 32 | u64::from(d[0])
     }
 }
 
@@ -79,7 +79,7 @@ pub fn get_bits(x: &Big, start: usize, end: usize) -> u64 {
     assert!(end - start <= 64);
     let mut result: u64 = 0;
     for i in (start..end).rev() {
-        result = result << 1 | x.get_bit(i) as u64;
+        result = result << 1 | u64::from(x.get_bit(i));
     }
     result
 }

@@ -1,6 +1,4 @@
-use super::{
-    bytecode::Instruction, Constant, ParseReturn, ParserError, ParserErrorKind, VariableLocation,
-};
+use super::{bytecode::Instruction, Constant, Error, ErrorKind, ParseReturn, VariableLocation};
 use crate::{
     error::Continue,
     lexer::{Assign, Keyword, Operation, Token, TokenKind},
@@ -73,7 +71,7 @@ impl<'a> super::Parser<'a> {
         &mut self,
         token: Option<Token>,
         read_only: bool,
-    ) -> Result<ExpressionType, ParserError> {
+    ) -> Result<ExpressionType, Error> {
         self.parse_precedence(Precedence::None, token, read_only)
     }
 
@@ -84,7 +82,7 @@ impl<'a> super::Parser<'a> {
         precedence: Precedence,
         prefix_token: Option<Token>,
         read_only: bool,
-    ) -> Result<ExpressionType, ParserError> {
+    ) -> Result<ExpressionType, Error> {
         use std::convert::TryFrom;
 
         let mut expression_type = if let Some(token) = prefix_token {
@@ -112,7 +110,7 @@ impl<'a> super::Parser<'a> {
                         Ok(ExpressionType::Constant)
                     }
                     Err(token_kind) => Err(self.emit_error(
-                        ParserErrorKind::Unexpected(token_kind),
+                        ErrorKind::Unexpected(token_kind),
                         Continue::Stop,
                         token.range,
                     )),
@@ -120,7 +118,7 @@ impl<'a> super::Parser<'a> {
             }?
         } else {
             return Err(self.emit_error(
-                ParserErrorKind::ExpectExpression,
+                ErrorKind::ExpectExpression,
                 Continue::Stop,
                 Range::new(self.current_position(), self.current_position()),
             ));
@@ -207,17 +205,17 @@ impl<'a> super::Parser<'a> {
         &mut self,
         variable: Box<str>,
         read_only: bool,
-    ) -> Result<ExpressionType, ParserError> {
+    ) -> Result<ExpressionType, Error> {
         if let Some(Token {
             kind: TokenKind::Assign(ass),
             range,
             ..
-        }) = self.lexer.peek()?
+        }) = self.peek()?
         {
             let (ass, range) = (*ass, *range);
             return if read_only {
                 Err(self.emit_error(
-                    ParserErrorKind::Unexpected(TokenKind::Assign(ass)),
+                    ErrorKind::Unexpected(TokenKind::Assign(ass)),
                     Continue::Stop,
                     range,
                 ))
@@ -231,17 +229,16 @@ impl<'a> super::Parser<'a> {
 
         match self.find_variable(&variable) {
             VariableLocation::Undefined => {
+                // TODO : now that we have 'global ...' statements, change this to read a local (aka nil here), as the current logic is very non-intuitive.
                 let index = self.code().add_global(variable);
                 self.emit_instruction(Instruction::ReadGlobal(index))
             }
-            VariableLocation::Local(index) => {
-                self.emit_instruction(Instruction::ReadLocal(index as u32))
-            }
+            VariableLocation::Local(index) => self.emit_instruction(Instruction::ReadLocal(index)),
             VariableLocation::Global(index) => {
-                self.emit_instruction(Instruction::ReadGlobal(index as u32))
+                self.emit_instruction(Instruction::ReadGlobal(index))
             }
             VariableLocation::Captured(index) => {
-                self.emit_instruction(Instruction::ReadCaptured(index as u32))
+                self.emit_instruction(Instruction::ReadCaptured(index))
             }
         }
 
@@ -251,7 +248,7 @@ impl<'a> super::Parser<'a> {
     /// Parse a parenthesised expression.
     ///
     /// The opening `(` token has already been eaten.
-    fn parse_grouping(&mut self) -> Result<ExpressionType, ParserError> {
+    fn parse_grouping(&mut self) -> Result<ExpressionType, Error> {
         let token = self.next()?;
         let expression_type = self.parse_expression(token, true)?;
         match self.next()? {
@@ -260,9 +257,9 @@ impl<'a> super::Parser<'a> {
                 ..
             }) => Ok(expression_type),
             _ => Err(self.emit_error(
-                ParserErrorKind::Expected(TokenKind::RPar),
+                ErrorKind::Expected(TokenKind::RPar),
                 Continue::Continue,
-                self.lexer.current_range(),
+                self.current_range(),
             )),
         }
     }
@@ -270,7 +267,7 @@ impl<'a> super::Parser<'a> {
     /// Parse a lambda.
     ///
     /// The opening `fn` token has already been eaten.
-    fn parse_lambda(&mut self) -> Result<ExpressionType, ParserError> {
+    fn parse_lambda(&mut self) -> Result<ExpressionType, Error> {
         if let Some(Token {
             kind: TokenKind::LPar,
             ..
@@ -278,7 +275,7 @@ impl<'a> super::Parser<'a> {
         {
         } else {
             return Err(self.emit_error(
-                ParserErrorKind::Expected(TokenKind::LPar),
+                ErrorKind::Expected(TokenKind::LPar),
                 Continue::Stop,
                 Range::new(self.current_position(), self.current_position()),
             ));
@@ -291,7 +288,7 @@ impl<'a> super::Parser<'a> {
                 Ok(ParseReturn::StopClosure) => break Ok(ExpressionType::Constant),
                 Ok(ParseReturn::Stop) => {
                     return Err(self.emit_error(
-                        ParserErrorKind::Expected(TokenKind::Keyword(Keyword::End)),
+                        ErrorKind::Expected(TokenKind::Keyword(Keyword::End)),
                         Continue::Continue,
                         Range::new(self.current_position(), self.current_position()),
                     ));
@@ -307,8 +304,8 @@ impl<'a> super::Parser<'a> {
     }
 
     /// Parse a unary operation.
-    fn parse_unary(&mut self, operator: Operation) -> Result<(), ParserError> {
-        let op_line = self.lexer.position.line;
+    fn parse_unary(&mut self, operator: Operation) -> Result<(), Error> {
+        let op_line = self.current_position().line;
         let token = self.next()?;
         self.parse_precedence(Precedence::Unary, token, true)?;
         match operator {
@@ -324,7 +321,7 @@ impl<'a> super::Parser<'a> {
     /// Parse an table.
     ///
     /// The opening `{` token has already been eaten.
-    fn parse_braces(&mut self) -> Result<ExpressionType, ParserError> {
+    fn parse_braces(&mut self) -> Result<ExpressionType, Error> {
         let mut elem_num: u32 = 0;
         // easy to check which ones are already used
         let mut element_names_indices = Vec::new();
@@ -338,7 +335,7 @@ impl<'a> super::Parser<'a> {
                             self.code().add_constant(Constant::String(member.clone()));
                         if element_names_indices.contains(&member_index) {
                             return Err(self.emit_error(
-                                ParserErrorKind::TableDoubleAssignement(member),
+                                ErrorKind::TableDoubleAssignement(member),
                                 Continue::Stop,
                                 token.range,
                             ));
@@ -368,7 +365,7 @@ impl<'a> super::Parser<'a> {
                             }) => break,
                             Some(token) => {
                                 return Err(self.emit_error(
-                                    ParserErrorKind::Unexpected(token.kind),
+                                    ErrorKind::Unexpected(token.kind),
                                     Continue::Stop,
                                     token.range,
                                 ))
@@ -378,7 +375,7 @@ impl<'a> super::Parser<'a> {
                     }
                     _ => {
                         return Err(self.emit_error(
-                            ParserErrorKind::Unexpected(token.kind),
+                            ErrorKind::Unexpected(token.kind),
                             Continue::Stop,
                             token.range,
                         ))
@@ -395,7 +392,7 @@ impl<'a> super::Parser<'a> {
     /// Parse a binary operation.
     ///
     /// `range` is the range of the operator in the text.
-    fn parse_binary(&mut self, operator: Operation, range: Range) -> Result<(), ParserError> {
+    fn parse_binary(&mut self, operator: Operation, range: Range) -> Result<(), Error> {
         let line = range.start.line;
 
         self.code().emit_instruction_u8(
@@ -417,7 +414,7 @@ impl<'a> super::Parser<'a> {
                 Operation::Xor => Instruction::Xor,
                 Operation::ShiftLeft => Instruction::ShiftL,
                 Operation::ShiftRight => Instruction::ShiftR,
-                _ => unreachable!(),
+                Operation::Not => unreachable!(),
             },
             line,
         );
@@ -428,7 +425,7 @@ impl<'a> super::Parser<'a> {
     ///
     /// Assumes we already parsed all the arguments and the parenthesis : All
     /// that is left to do is issuing the call itself.
-    fn parse_call(&mut self, arg_num: u32) -> Result<(), ParserError> {
+    fn parse_call(&mut self, arg_num: u32) -> Result<(), Error> {
         self.emit_instruction(Instruction::Call(arg_num));
         Ok(())
     }
@@ -436,7 +433,7 @@ impl<'a> super::Parser<'a> {
     /// Parse an indexing operation, e.g. `table[x]`
     ///
     /// The opening `[` token has already been eaten.
-    fn parse_brackets(&mut self, read_only: bool) -> Result<ExpressionType, ParserError> {
+    fn parse_brackets(&mut self, read_only: bool) -> Result<ExpressionType, Error> {
         let next_token = self.next()?;
         self.parse_expression(next_token, true)?;
         let range = if let Some(token) = self.next()? {
@@ -444,7 +441,7 @@ impl<'a> super::Parser<'a> {
                 TokenKind::RBracket => token.range,
                 kind => {
                     return Err(self.emit_error(
-                        ParserErrorKind::Unexpected(kind),
+                        ErrorKind::Unexpected(kind),
                         Continue::Stop,
                         token.range,
                     ))
@@ -452,40 +449,38 @@ impl<'a> super::Parser<'a> {
             }
         } else {
             return Err(self.emit_error(
-                ParserErrorKind::Expected(TokenKind::RBracket),
+                ErrorKind::Expected(TokenKind::RBracket),
                 Continue::Continue,
                 Range::new(self.current_position(), self.current_position()),
             ));
         };
 
-        match self.peek()? {
-            Some(Token {
-                kind: TokenKind::Assign(ass),
-                ..
-            }) => {
-                let ass = *ass;
-                if read_only {
-                    Err(self.emit_error(
-                        ParserErrorKind::Unexpected(TokenKind::Assign(ass)),
-                        Continue::Stop,
-                        range,
-                    ))
-                } else {
-                    Ok(ExpressionType::TableWrite(ass))
-                }
+        if let Some(Token {
+            kind: TokenKind::Assign(ass),
+            ..
+        }) = self.peek()?
+        {
+            let ass = *ass;
+            if read_only {
+                Err(self.emit_error(
+                    ErrorKind::Unexpected(TokenKind::Assign(ass)),
+                    Continue::Stop,
+                    range,
+                ))
+            } else {
+                Ok(ExpressionType::TableWrite(ass))
             }
-            _ => {
-                self.code()
-                    .emit_instruction_u8(Instruction::ReadTable, range.start.line);
-                Ok(ExpressionType::TableRead)
-            }
+        } else {
+            self.code()
+                .emit_instruction_u8(Instruction::ReadTable, range.start.line);
+            Ok(ExpressionType::TableRead)
         }
     }
 
     /// Parse an dot operation, e.g. `table.x`
     ///
     /// Assumes we already ate the dot (`.`) token.
-    fn parse_dot(&mut self, read_only: bool) -> Result<ExpressionType, ParserError> {
+    fn parse_dot(&mut self, read_only: bool) -> Result<ExpressionType, Error> {
         let range = if let Some(token) = self.next()? {
             match token.kind {
                 TokenKind::Id(member) => {
@@ -499,7 +494,7 @@ impl<'a> super::Parser<'a> {
                 }
                 kind => {
                     return Err(self.emit_error(
-                        ParserErrorKind::Unexpected(kind),
+                        ErrorKind::Unexpected(kind),
                         Continue::Continue,
                         token.range,
                     ));
@@ -507,71 +502,68 @@ impl<'a> super::Parser<'a> {
             }
         } else {
             return Err(self.emit_error(
-                ParserErrorKind::ExpectedId(None),
+                ErrorKind::ExpectedId(None),
                 Continue::Continue,
                 Range::new(self.current_position(), self.current_position()),
             ));
         };
 
-        match self.peek()? {
-            Some(Token {
-                kind: TokenKind::Assign(ass),
-                ..
-            }) => {
-                let ass = *ass;
-                if read_only {
-                    Err(self.emit_error(
-                        ParserErrorKind::Unexpected(TokenKind::Assign(ass)),
-                        Continue::Stop,
-                        range,
-                    ))
-                } else {
-                    Ok(ExpressionType::TableWrite(ass))
-                }
+        if let Some(Token {
+            kind: TokenKind::Assign(ass),
+            ..
+        }) = self.peek()?
+        {
+            let ass = *ass;
+            if read_only {
+                Err(self.emit_error(
+                    ErrorKind::Unexpected(TokenKind::Assign(ass)),
+                    Continue::Stop,
+                    range,
+                ))
+            } else {
+                Ok(ExpressionType::TableWrite(ass))
             }
-            _ => {
-                self.code()
-                    .emit_instruction_u8(Instruction::ReadTable, range.start.line);
-                Ok(ExpressionType::TableRead)
-            }
+        } else {
+            self.code()
+                .emit_instruction_u8(Instruction::ReadTable, range.start.line);
+            Ok(ExpressionType::TableRead)
         }
     }
 
     /// Assumes we already ate the opening `(`.
-    fn parse_call_internal(&mut self) -> Result<u32, ParserError> {
+    fn parse_call_internal(&mut self) -> Result<u32, Error> {
         let mut arg_num = 0;
         loop {
             let next_token = self.next()?;
             if let Some(ref token) = next_token {
-                match token.kind {
-                    TokenKind::RPar => break,
-                    _ => {
-                        self.parse_expression(next_token, true)?;
-                        arg_num += 1;
-                        if let Some(token) = self.next()? {
-                            match token.kind {
-                                TokenKind::Comma => {}
-                                TokenKind::RPar => break,
-                                _ => {
-                                    return Err(self.emit_error(
-                                        ParserErrorKind::Unexpected(token.kind),
-                                        Continue::Stop,
-                                        token.range,
-                                    ))
-                                }
+                if token.kind == TokenKind::RPar {
+                    break;
+                } else {
+                    self.parse_expression(next_token, true)?;
+                    arg_num += 1;
+                    if let Some(token) = self.next()? {
+                        match token.kind {
+                            TokenKind::Comma => {}
+                            TokenKind::RPar => break,
+                            _ => {
+                                return Err(self.emit_error(
+                                    ErrorKind::Unexpected(token.kind),
+                                    Continue::Stop,
+                                    token.range,
+                                ))
                             }
-                        } else {
-                            return Err(self.emit_error(
-                                ParserErrorKind::Expected(TokenKind::Comma),
-                                Continue::Stop,
-                                Range::new(self.current_position(), self.current_position()),
-                            ));
                         }
+                    } else {
+                        return Err(self.emit_error(
+                            ErrorKind::Expected(TokenKind::Comma),
+                            Continue::Stop,
+                            Range::new(self.current_position(), self.current_position()),
+                        ));
                     }
                 }
             } else {
                 return Err(self.emit_error(
-                    ParserErrorKind::ExpectExpression,
+                    ErrorKind::ExpectExpression,
                     Continue::Continue,
                     Range::new(self.current_position(), self.current_position()),
                 ));

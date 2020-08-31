@@ -18,7 +18,7 @@ mod expression;
 
 use crate::{
     error::{display_error, Continue},
-    lexer::{Assign, Keyword, Lexer, LexerError, LexerErrorKind, LexerWarning, Token, TokenKind},
+    lexer::{self, Assign, Keyword, Lexer, Token, TokenKind},
     Range, Source,
 };
 pub use bytecode::Chunk;
@@ -84,19 +84,26 @@ impl fmt::Debug for LocalOrCaptured {
 #[derive(Debug, Clone, Copy)]
 enum VariableLocation {
     Undefined,
+    /// index of the variable in the `variables` field of the current function.
     Local(usize),
+    /// index of the variable in the `globals` field of the current function.
     Global(usize),
+    /// index of the variable in the `code.captures` field of the current
+    /// function.
     Captured(usize),
 }
 
 /// Structure temporary used by the parser to parse a function.
 #[derive(Debug)]
 struct Function {
-    /// Local variables of this function
+    /// Local variables of this function.
+    ///
+    /// For the top-level, this store the variables for the `for` loops.
     variables: Vec<Box<str>>,
     /// Variables declared with the `global` keyword.
     ///
-    /// Contains the index of the variables in the `strings` field of the `code`.
+    /// Contains the index of the variables in the `strings` field of the
+    /// `code`.
     globals: Vec<usize>,
     /// Stack of scopes
     scopes: Vec<Scope>,
@@ -128,9 +135,9 @@ pub struct Parser<'a> {
     /// Associated lexer
     lexer: Lexer<'a>,
     /// Errors encoutered while parsing
-    errors: Vec<ParserError>,
+    errors: Vec<Error>,
     /// Warnings encoutered while parsing
-    warnings: Vec<ParserWarning>,
+    warnings: Vec<Warning>,
     /// Root function
     top_level: Function,
     /// Nested functions
@@ -161,9 +168,10 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Return a `Range` at the current position
     #[inline]
     fn current_range(&self) -> Range {
-        Range::new(self.lexer.position, self.lexer.position)
+        Range::new(self.current_position(), self.current_position())
     }
 
     /// Returns the code for the function we are currently parsing.
@@ -177,49 +185,50 @@ impl<'a> Parser<'a> {
     }
 
     /// emit a new instruction at the current line.
-    #[inline(always)]
+    #[inline]
     fn emit_instruction<Op: bytecode::Operand>(&mut self, instruction: Instruction<Op>) {
+        // yes, the previous start... This is because `Lexer` is always one token ahead.
         let line = self.lexer.previous_start.line;
         self.code().emit_instruction(instruction, line)
     }
 
     /// emit a new u8 instruction at the current line. Same as
     /// `emit_instruction::<u8>`.
-    #[inline(always)]
+    #[inline]
     fn emit_instruction_u8(&mut self, instruction: Instruction<u8>) {
+        // yes, the previous start... This is because `Lexer` is always one token ahead.
         let line = self.lexer.previous_start.line;
         self.code().emit_instruction_u8(instruction, line)
     }
 
+    /// Returns the next token (or an error), and log an eventual warning.
     #[inline]
-    fn next(&mut self) -> Result<Option<Token>, ParserError> {
+    fn next(&mut self) -> Result<Option<Token>, Error> {
         let next_token = self.lexer.next()?;
         if let Some(token) = &next_token {
             if let Some(warning) = token.warning {
-                self.emit_warning(ParserWarningKind::LexerWarning(warning), token.range)
+                self.emit_warning(WarningKind::Lexer(warning), token.range)
             }
         }
         Ok(next_token)
     }
 
+    /// Peek at the next token, or returns an error.
     #[inline]
-    fn peek(&self) -> Result<Option<&Token>, ParserError> {
-        self.lexer.peek().map_err(ParserError::from)
+    fn peek(&self) -> Result<Option<&Token>, Error> {
+        self.lexer.peek().map_err(Error::from)
     }
 
+    /// Returns the current position of the lexer.
     #[inline]
     fn current_position(&self) -> crate::Position {
         self.lexer.position
     }
 
+    /// Creates an error.
     #[inline]
-    fn emit_error(
-        &self,
-        kind: ParserErrorKind,
-        continuable: Continue,
-        range: Range,
-    ) -> ParserError {
-        ParserError {
+    fn emit_error(&self, kind: ErrorKind, continuable: Continue, range: Range) -> Error {
+        Error {
             kind,
             continuable,
             range,
@@ -228,9 +237,10 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Add a warning to `warnings`.
     #[inline]
-    fn emit_warning(&mut self, kind: ParserWarningKind, range: Range) {
-        self.warnings.push(ParserWarning {
+    fn emit_warning(&mut self, kind: WarningKind, range: Range) {
+        self.warnings.push(Warning {
             kind,
             range,
             source: self.lexer.source.content().into(),
@@ -240,9 +250,9 @@ impl<'a> Parser<'a> {
 
     /// Emit a `Expected [token]` error at the current position, continuable.
     #[inline]
-    fn expected_token(&self, kind: TokenKind) -> ParserError {
+    fn expected_token(&self, kind: TokenKind) -> Error {
         self.emit_error(
-            ParserErrorKind::Expected(kind),
+            ErrorKind::Expected(kind),
             Continue::Continue,
             self.current_range(),
         )
@@ -284,7 +294,11 @@ impl<'a> Parser<'a> {
     ///
     /// This allow the parser to find multiple errors, although there might be
     /// false positives.
-    pub fn parse_top_level(mut self) -> Result<(Chunk, Vec<ParserWarning>), Vec<ParserError>> {
+    ///
+    /// # Errors
+    ///
+    /// This will return all the `Error` encountered in a vector.
+    pub fn parse_top_level(mut self) -> Result<(Chunk, Vec<Warning>), Vec<Error>> {
         loop {
             match self.parse_statement() {
                 Err(err) => {
@@ -297,7 +311,7 @@ impl<'a> Parser<'a> {
                 Ok(ParseReturn::Stop) => break,
                 Ok(ParseReturn::StopClosure) => {
                     self.errors.push(self.emit_error(
-                        ParserErrorKind::EndClosure,
+                        ErrorKind::EndClosure,
                         Continue::Stop,
                         Range::default(),
                     ));
@@ -308,17 +322,17 @@ impl<'a> Parser<'a> {
             }
         }
 
-        if !self.errors.is_empty() {
-            Err(self.errors)
-        } else {
-            self.top_level.code.locals_number = self.top_level.variables.len() as u32;
+        if self.errors.is_empty() {
+            self.top_level.code.locals_number = self.top_level.variables.len();
             self.top_level
                 .code
-                .emit_instruction_u8(Instruction::PushNil, self.lexer.position.line);
+                .emit_instruction_u8(Instruction::PushNil, self.current_position().line);
             self.top_level
                 .code
-                .emit_instruction_u8(Instruction::Return, self.lexer.position.line);
+                .emit_instruction_u8(Instruction::Return, self.current_position().line);
             Ok((self.top_level.code, self.warnings))
+        } else {
+            Err(self.errors)
         }
     }
 
@@ -354,7 +368,7 @@ impl<'a> Parser<'a> {
 
     /// Main parsing function : parse a statement, and returns wether the end
     /// of the current function / the top-level, or an error is encountered.
-    fn parse_statement(&mut self) -> Result<ParseReturn, ParserError> {
+    fn parse_statement(&mut self) -> Result<ParseReturn, Error> {
         let first_token = match self.next()? {
             Some(token) => token,
             None => {
@@ -417,12 +431,12 @@ impl<'a> Parser<'a> {
                         }
                     }
                 } else if let Some(mut function) = self.function_stack.pop() {
-                    let line = self.lexer.position.line;
+                    let line = self.current_position().line;
                     function
                         .code
                         .emit_instruction_u8(Instruction::PushNil, line);
                     function.code.emit_instruction_u8(Instruction::Return, line);
-                    function.code.locals_number = function.variables.len() as u32;
+                    function.code.locals_number = function.variables.len();
                     self.code()
                         .functions
                         .push(std::sync::Arc::new(function.code));
@@ -431,7 +445,7 @@ impl<'a> Parser<'a> {
                     }
                 } else {
                     return Err(self.emit_error(
-                        ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::End)),
+                        ErrorKind::Unexpected(TokenKind::Keyword(Keyword::End)),
                         Continue::Stop,
                         first_token.range,
                     ));
@@ -446,7 +460,7 @@ impl<'a> Parser<'a> {
                         TokenKind::Keyword(Keyword::Then) => {}
                         _ => {
                             return Err(self.emit_error(
-                                ParserErrorKind::Expected(TokenKind::Keyword(Keyword::Then)),
+                                ErrorKind::Expected(TokenKind::Keyword(Keyword::Then)),
                                 Continue::Stop,
                                 Range::new(token.range.start, token.range.start),
                             ))
@@ -468,7 +482,7 @@ impl<'a> Parser<'a> {
                         .write_jump(if_address, Instruction::JumpPopFalse(offset));
                 } else {
                     return Err(self.emit_error(
-                        ParserErrorKind::Unexpected(TokenKind::Keyword(Keyword::Else)),
+                        ErrorKind::Unexpected(TokenKind::Keyword(Keyword::Else)),
                         Continue::Stop,
                         first_token.range,
                     ));
@@ -501,7 +515,7 @@ impl<'a> Parser<'a> {
                                     TokenKind::Keyword(Keyword::In) => {}
                                     _ => {
                                         return Err(self.emit_error(
-                                            ParserErrorKind::Unexpected(token.kind),
+                                            ErrorKind::Unexpected(token.kind),
                                             Continue::Stop,
                                             token.range,
                                         ))
@@ -509,7 +523,7 @@ impl<'a> Parser<'a> {
                                 }
                             } else {
                                 return Err(self.emit_error(
-                                    ParserErrorKind::Expected(TokenKind::Keyword(Keyword::In)),
+                                    ErrorKind::Expected(TokenKind::Keyword(Keyword::In)),
                                     Continue::Continue,
                                     self.current_range(),
                                 ));
@@ -522,7 +536,7 @@ impl<'a> Parser<'a> {
                         }
                         _ => {
                             return Err(self.emit_error(
-                                ParserErrorKind::ExpectedId(Some(token.kind)),
+                                ErrorKind::ExpectedId(Some(token.kind)),
                                 Continue::Stop,
                                 token.range,
                             ))
@@ -530,7 +544,7 @@ impl<'a> Parser<'a> {
                     }
                 } else {
                     return Err(self.emit_error(
-                        ParserErrorKind::ExpectedId(None),
+                        ErrorKind::ExpectedId(None),
                         Continue::Continue,
                         self.current_range(),
                     ));
@@ -547,15 +561,12 @@ impl<'a> Parser<'a> {
                 let jump_address = self.code().push_jump();
                 // the variable will be moved.
                 let placeholder = for_variable.as_ref().is_empty();
-                let index = match self.function_stack.last_mut() {
-                    Some(function) => {
-                        function.variables.push(for_variable);
-                        function.variables.len() - 1
-                    }
-                    None => {
-                        self.top_level.variables.push(for_variable);
-                        self.top_level.variables.len() - 1
-                    }
+                let index = if let Some(function) = self.function_stack.last_mut() {
+                    function.variables.push(for_variable);
+                    function.variables.len() - 1
+                } else {
+                    self.top_level.variables.push(for_variable);
+                    self.top_level.variables.len() - 1
                 };
                 if placeholder {
                     self.emit_instruction_u8(Instruction::Pop(1))
@@ -583,7 +594,7 @@ impl<'a> Parser<'a> {
                             }) => {}
                             token => {
                                 return Err(self.emit_error(
-                                    ParserErrorKind::Expected(TokenKind::LPar),
+                                    ErrorKind::Expected(TokenKind::LPar),
                                     Continue::Stop,
                                     if let Some(token) = token {
                                         token.range
@@ -593,7 +604,7 @@ impl<'a> Parser<'a> {
                                 ))
                             }
                         };
-                        let line = self.lexer.position.line;
+                        let line = self.current_position().line;
                         let func = self.parse_prototype(func_name.clone(), false)?;
                         self.write_variable(func_name, line);
                         func
@@ -603,16 +614,13 @@ impl<'a> Parser<'a> {
                         kind: TokenKind::LPar,
                         ..
                     }) => {
-                        let start = first_token.range.start;
-                        let expression_type = self.parse_expression(Some(first_token), false)?;
-                        let expression_range = Range::new(start, self.lexer.previous_end);
                         return self
-                            .expression_statement(expression_type, expression_range)
+                            .expression_statement(first_token)
                             .map(|_| ParseReturn::Continue);
                     }
                     token => {
                         return Err(self.emit_error(
-                            ParserErrorKind::ExpectedId(token.map(|t| t.kind.clone())),
+                            ErrorKind::ExpectedId(token.map(|t| t.kind.clone())),
                             Continue::Stop,
                             if let Some(token) = token {
                                 token.range
@@ -630,7 +638,7 @@ impl<'a> Parser<'a> {
                 EnclosingLoop::For => self.emit_instruction_u8(Instruction::Break(1)),
                 EnclosingLoop::None => {
                     return Err(self.emit_error(
-                        ParserErrorKind::UnexpectedOutsideLoop(TokenKind::Keyword(Keyword::Break)),
+                        ErrorKind::UnexpectedOutsideLoop(TokenKind::Keyword(Keyword::Break)),
                         Continue::Stop,
                         first_token.range,
                     ))
@@ -643,9 +651,7 @@ impl<'a> Parser<'a> {
                     EnclosingLoop::For => 1,
                     EnclosingLoop::None => {
                         return Err(self.emit_error(
-                            ParserErrorKind::UnexpectedOutsideLoop(TokenKind::Keyword(
-                                Keyword::Continue,
-                            )),
+                            ErrorKind::UnexpectedOutsideLoop(TokenKind::Keyword(Keyword::Continue)),
                             Continue::Stop,
                             first_token.range,
                         ))
@@ -654,15 +660,23 @@ impl<'a> Parser<'a> {
             }
             // global <id>
             TokenKind::Keyword(Keyword::Global) => {
+                let global_start = first_token.range.start;
                 if let Some(token) = self.next()? {
                     match token.kind {
                         TokenKind::Id(variable) => {
+                            if self.scope().is_some() {
+                                return Err(self.emit_error(
+                                    ErrorKind::GlobalNoAtRoot,
+                                    Continue::Stop,
+                                    Range::new(global_start, token.range.end),
+                                ));
+                            }
                             if let Some(func) = self.function_stack.last_mut() {
                                 for index in &func.globals {
                                     if variable == func.code.globals[*index] {
                                         self.emit_warning(
-                                            ParserWarningKind::GlobalAlreadyDefined(variable),
-                                            Range::new(first_token.range.start, token.range.end),
+                                            WarningKind::GlobalAlreadyDefined(variable),
+                                            Range::new(global_start, token.range.end),
                                         );
                                         return Ok(ParseReturn::Continue);
                                     }
@@ -670,7 +684,7 @@ impl<'a> Parser<'a> {
                                 for var in &func.variables {
                                     if var.as_ref() == variable.as_ref() {
                                         return Err(self.emit_error(
-                                            ParserErrorKind::AlreadyDeclared(variable),
+                                            ErrorKind::AlreadyDeclared(variable),
                                             Continue::Stop,
                                             token.range,
                                         ));
@@ -680,14 +694,14 @@ impl<'a> Parser<'a> {
                                 func.globals.push(index as usize)
                             } else {
                                 self.emit_warning(
-                                    ParserWarningKind::GlobalInTopLevel,
+                                    WarningKind::GlobalInTopLevel,
                                     Range::new(first_token.range.start, token.range.end),
                                 )
                             }
                         }
                         kind => {
                             return Err(self.emit_error(
-                                ParserErrorKind::ExpectedId(Some(kind)),
+                                ErrorKind::ExpectedId(Some(kind)),
                                 Continue::Stop,
                                 token.range,
                             ));
@@ -695,7 +709,7 @@ impl<'a> Parser<'a> {
                     }
                 } else {
                     return Err(self.emit_error(
-                        ParserErrorKind::ExpectedId(None),
+                        ErrorKind::ExpectedId(None),
                         Continue::Continue,
                         self.current_range(),
                     ));
@@ -704,23 +718,20 @@ impl<'a> Parser<'a> {
             // _ = <expression>
             TokenKind::Placeholder => {
                 if let Some(token) = self.next()? {
-                    match token.kind {
-                        TokenKind::Assign(Assign::Equal) => {
-                            let token = self.next()?;
-                            self.parse_expression(token, true)?;
-                            self.emit_instruction_u8(Instruction::Pop(1));
-                        }
-                        _ => {
-                            return Err(self.emit_error(
-                                ParserErrorKind::Expected(TokenKind::Assign(Assign::Equal)),
-                                Continue::Stop,
-                                token.range,
-                            ));
-                        }
+                    if token.kind == TokenKind::Assign(Assign::Equal) {
+                        let token = self.next()?;
+                        self.parse_expression(token, true)?;
+                        self.emit_instruction_u8(Instruction::Pop(1));
+                    } else {
+                        return Err(self.emit_error(
+                            ErrorKind::Expected(TokenKind::Assign(Assign::Equal)),
+                            Continue::Stop,
+                            token.range,
+                        ));
                     }
                 } else {
                     return Err(self.emit_error(
-                        ParserErrorKind::Expected(TokenKind::Assign(Assign::Equal)),
+                        ErrorKind::Expected(TokenKind::Assign(Assign::Equal)),
                         Continue::Stop,
                         first_token.range,
                     ));
@@ -730,19 +741,14 @@ impl<'a> Parser<'a> {
             // x.<id>
             // x((<expression>,)*)
             // x[<expression>]
-            TokenKind::Id(_) => {
-                let start = first_token.range.start;
-                let expression_type = self.parse_expression(Some(first_token), false)?;
-                let expression_range = Range::new(start, self.lexer.previous_end);
-                self.expression_statement(expression_type, expression_range)?
-            }
+            TokenKind::Id(_) => self.expression_statement(first_token)?,
             // (<expression>)
             TokenKind::LPar => {
                 self.parse_expression(Some(first_token), true)?;
             }
             _ => {
                 return Err(self.emit_error(
-                    ParserErrorKind::UnexpectedStartStatement(first_token.kind),
+                    ErrorKind::UnexpectedStartStatement(first_token.kind),
                     Continue::Stop,
                     first_token.range,
                 ))
@@ -860,38 +866,30 @@ impl<'a> Parser<'a> {
     /// else has already been parsed.
     fn write_variable(&mut self, variable: Box<str>, line: u32) {
         let instruction = match self.find_variable(&variable) {
-            VariableLocation::Undefined => match self.function_stack.last_mut() {
-                Some(func) => {
-                    let index = func.variables.len() as u32;
+            VariableLocation::Undefined => {
+                if let Some(func) = self.function_stack.last_mut() {
+                    let index = func.variables.len();
                     func.variables.push(variable);
                     Instruction::WriteLocal(index)
-                }
-                None => {
+                } else {
                     let index = self.code().add_global(variable);
                     Instruction::WriteGlobal(index)
                 }
-            },
-            VariableLocation::Local(index) => Instruction::WriteLocal(index as u32),
-            VariableLocation::Global(index) => Instruction::WriteGlobal(index as u32),
-            VariableLocation::Captured(index) => Instruction::WriteCaptured(index as u32),
+            }
+            VariableLocation::Local(index) => Instruction::WriteLocal(index),
+            VariableLocation::Global(index) => Instruction::WriteGlobal(index),
+            VariableLocation::Captured(index) => Instruction::WriteCaptured(index),
         };
         self.code().emit_instruction(instruction, line)
     }
 
     /// Parse a variable assignement, assuming the variable and the assignement
     /// token have already been parsed.
-    fn assign_variable(
-        &mut self,
-        variable: Box<str>,
-        assignement: Assign,
-    ) -> Result<(), ParserError> {
-        let line = self.lexer.position.line;
-        match assignement {
-            Assign::Equal => {}
-            _ => {
-                self.parse_variable(variable.clone(), true)?;
-            }
-        };
+    fn assign_variable(&mut self, variable: Box<str>, assignement: Assign) -> Result<(), Error> {
+        let line = self.current_position().line;
+        if !matches!(assignement, Assign::Equal) {
+            self.parse_variable(variable.clone(), true)?;
+        }
         let token = self.next()?;
         self.parse_expression(token, true)?;
         match assignement {
@@ -911,13 +909,10 @@ impl<'a> Parser<'a> {
     ///
     /// Assumes that everything up to the assignement token has been parsed, and
     /// that the table field is at the top of the stack.
-    fn assign_table(&mut self, assignement: Assign) -> Result<(), ParserError> {
-        match assignement {
-            Assign::Equal => {}
-            _ => {
-                self.emit_instruction_u8(Instruction::DuplicateTop(1));
-                self.emit_instruction_u8(Instruction::ReadTable);
-            }
+    fn assign_table(&mut self, assignement: Assign) -> Result<(), Error> {
+        if !matches!(assignement, Assign::Equal) {
+            self.emit_instruction_u8(Instruction::DuplicateTop(1));
+            self.emit_instruction_u8(Instruction::ReadTable);
         }
 
         let token = self.next()?;
@@ -940,7 +935,7 @@ impl<'a> Parser<'a> {
     /// Parse a function prototype, e.g. 'fn f(a, b)'
     ///
     /// Assumes the opening `(` has been parsed.
-    fn parse_prototype(&mut self, name: Box<str>, closure: bool) -> Result<Function, ParserError> {
+    fn parse_prototype(&mut self, name: Box<str>, closure: bool) -> Result<Function, Error> {
         let mut args = Vec::new();
         loop {
             if let Some(token) = self.next()? {
@@ -954,7 +949,7 @@ impl<'a> Parser<'a> {
                                 TokenKind::RPar => break,
                                 _ => {
                                     return Err(self.emit_error(
-                                        ParserErrorKind::Unexpected(token.kind),
+                                        ErrorKind::Unexpected(token.kind),
                                         Continue::Stop,
                                         token.range,
                                     ))
@@ -966,7 +961,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => {
                         return Err(self.emit_error(
-                            ParserErrorKind::Unexpected(token.kind),
+                            ErrorKind::Unexpected(token.kind),
                             Continue::Stop,
                             token.range,
                         ))
@@ -976,11 +971,11 @@ impl<'a> Parser<'a> {
                 return Err(self.expected_token(TokenKind::RPar));
             }
         }
-        let index = self.code().functions.len() as u32;
+        let index = self.code().functions.len();
         self.emit_instruction(Instruction::ReadFunction(index));
 
         let mut code = Chunk::new(name);
-        code.arg_number = args.len() as _;
+        code.arg_number = args.len();
         Ok(Function {
             variables: args,
             globals: Vec::new(),
@@ -1006,14 +1001,11 @@ impl<'a> Parser<'a> {
         EnclosingLoop::None
     }
 
-    /// we parsed an expression at the beginning of a statement : now we have
-    /// to determine whether it is actually authorized in this position, and
-    /// what to do if it is.
-    fn expression_statement(
-        &mut self,
-        expression_type: ExpressionType,
-        expression_range: Range,
-    ) -> Result<(), ParserError> {
+    /// Tries to parse an expression in a statement position.
+    fn expression_statement(&mut self, first_token: Token) -> Result<(), Error> {
+        let start = first_token.range.start;
+        let expression_type = self.parse_expression(Some(first_token), false)?;
+        let expression_range = Range::new(start, self.lexer.previous_end);
         match expression_type {
             ExpressionType::Assign {
                 variable,
@@ -1030,7 +1022,7 @@ impl<'a> Parser<'a> {
             ExpressionType::Call => {
                 if matches!(self.peek(), Ok(Some(Token { kind: TokenKind::Assign(_), .. }))) {
                     return Err(self.emit_error(
-                        ParserErrorKind::NonAssignable,
+                        ErrorKind::NonAssignable,
                         Continue::Stop,
                         expression_range,
                     ));
@@ -1043,14 +1035,10 @@ impl<'a> Parser<'a> {
                     ..
                 }) = self.peek()?
                 {
-                    Err(self.emit_error(
-                        ParserErrorKind::NonAssignable,
-                        Continue::Stop,
-                        expression_range,
-                    ))
+                    Err(self.emit_error(ErrorKind::NonAssignable, Continue::Stop, expression_range))
                 } else {
                     Err(self.emit_error(
-                        ParserErrorKind::UnexpectedExpr,
+                        ErrorKind::UnexpectedExpr,
                         Continue::Stop,
                         expression_range,
                     ))
@@ -1069,9 +1057,9 @@ impl<'a> Parser<'a> {
 
 /// Kinds of errors emmited by the parser.
 #[derive(Debug, PartialEq)]
-pub(crate) enum ParserErrorKind {
+pub(crate) enum ErrorKind {
     /// Error emitted by the lexer
-    Lexer(LexerErrorKind),
+    Lexer(lexer::ErrorKind),
     /// Expected an expression, found something else or nothing.
     ExpectExpression,
     /// Expected a particular token kind, found something else or nothing.
@@ -1101,9 +1089,11 @@ pub(crate) enum ParserErrorKind {
     /// Tried to declare the same variable twice in a table, e.g.
     /// 't = {a = 1, a = 2 }'
     TableDoubleAssignement(Box<str>),
+    /// `global ...` is only authorized at the root of a function
+    GlobalNoAtRoot,
 }
 
-impl fmt::Display for ParserErrorKind {
+impl fmt::Display for ErrorKind {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Lexer(err) => write!(formatter, "{}", err),
@@ -1138,15 +1128,17 @@ impl fmt::Display for ParserErrorKind {
                 "name '{}' is already declared in the table",
                 name.as_ref()
             ),
+            Self::GlobalNoAtRoot => formatter
+                .write_str("'global ...' statements are only authorized at the root of a function"),
         }
     }
 }
 
 /// Error emitted during parsing.
 #[derive(Debug)]
-pub struct ParserError {
+pub struct Error {
     /// kind of error
-    kind: ParserErrorKind,
+    kind: ErrorKind,
     /// range of this error in the `Source`
     range: Range,
     /// [Source](../enum.Source.html) of this error
@@ -1157,23 +1149,23 @@ pub struct ParserError {
     pub continuable: Continue,
 }
 
-impl ParserError {
+impl Error {
     fn note(&self) -> Option<String> {
         match self.kind {
-            ParserErrorKind::UnexpectedExpr => Some(format!(
+            ErrorKind::UnexpectedExpr => Some(format!(
                 "you can evaluate the expression by wrapping it in parenthesis -> ({})",
                 self.range.substr(&self.source)
             )),
-            ParserErrorKind::UnexpectedStartStatement(_) => Some(String::from("authorized in this position are 'return', 'global', 'if', 'while', 'for', 'fn', an assignement, or a function call")),
+            ErrorKind::UnexpectedStartStatement(_) => Some(String::from("authorized in this position are 'return', 'global', 'if', 'while', 'for', 'fn', an assignement, or a function call")),
             _ => None,
         }
     }
 }
 
-impl From<LexerError<'_>> for ParserError {
-    fn from(lexer_error: LexerError<'_>) -> Self {
+impl From<lexer::Error<'_>> for Error {
+    fn from(lexer_error: lexer::Error<'_>) -> Self {
         Self {
-            kind: ParserErrorKind::Lexer(lexer_error.kind),
+            kind: ErrorKind::Lexer(lexer_error.kind),
             range: lexer_error.range,
             source: lexer_error.source.content().into(),
             source_name: lexer_error.source.name().into(),
@@ -1182,7 +1174,7 @@ impl From<LexerError<'_>> for ParserError {
     }
 }
 
-impl fmt::Display for ParserError {
+impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         writeln!(formatter)?;
         display_error(
@@ -1197,7 +1189,7 @@ impl fmt::Display for ParserError {
     }
 }
 
-impl std::error::Error for ParserError {}
+impl std::error::Error for Error {}
 
 /*
 ====================================================
@@ -1205,17 +1197,21 @@ impl std::error::Error for ParserError {}
 ====================================================
 */
 
+/// Kind of warning encountered during parsing
 #[derive(Clone, Debug)]
-enum ParserWarningKind {
-    LexerWarning(LexerWarning),
+enum WarningKind {
+    /// Warning from the lexer
+    Lexer(lexer::Warning),
+    /// A `global ...` statement was in the top-level
     GlobalInTopLevel,
+    /// Two similar `global ...` were found in the same function.
     GlobalAlreadyDefined(Box<str>),
 }
 
-impl fmt::Display for ParserWarningKind {
+impl fmt::Display for WarningKind {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::LexerWarning(warning) => write!(formatter, "{}", warning),
+            Self::Lexer(warning) => write!(formatter, "{}", warning),
             Self::GlobalInTopLevel => {
                 formatter.write_str("global statement has no effect at the top level")
             }
@@ -1228,9 +1224,11 @@ impl fmt::Display for ParserWarningKind {
     }
 }
 
+/// Warning emmited during parsing
 #[derive(Clone, Debug)]
-pub struct ParserWarning {
-    kind: ParserWarningKind,
+pub struct Warning {
+    /// kind of warning
+    kind: WarningKind,
     /// range of this error in the `Source`
     range: Range,
     /// [Source](../enum.Source.html) of this error
@@ -1239,7 +1237,7 @@ pub struct ParserWarning {
     source_name: Box<str>,
 }
 
-impl fmt::Display for ParserWarning {
+impl fmt::Display for Warning {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         writeln!(formatter)?;
         display_error::<_, &str>(

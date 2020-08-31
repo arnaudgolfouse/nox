@@ -108,7 +108,7 @@ pub fn fast_path(integral: &[u8], fractional: &[u8], e: i64) -> Option<f64> {
     if num_digits > 16 {
         return None;
     }
-    if e.abs() >= <f64 as RawFloat>::CEIL_LOG5_OF_MAX_SIG as i64 {
+    if e.abs() >= i64::from(<f64 as RawFloat>::CEIL_LOG5_OF_MAX_SIG) {
         return None;
     }
     let f = num::from_str_unchecked(integral.iter().chain(fractional.iter()));
@@ -162,7 +162,7 @@ pub fn bellerophon(f: &Big, e: i16) -> f64 {
         4
     };
     let z = rawfp::big_to_fp(f).mul(&power_of_ten(e)).normalize();
-    let exp_p_n = 1 << (P - <f64 as RawFloat>::SIG_BITS as u32);
+    let exp_p_n = 1 << (P - u32::from(<f64 as RawFloat>::SIG_BITS));
     let lowbits: i64 = (z.f % exp_p_n) as i64;
     // Is the slop large enough to make a difference when
     // rounding to n bits?

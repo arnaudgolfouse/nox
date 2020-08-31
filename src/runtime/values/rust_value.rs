@@ -21,8 +21,8 @@
 //! other_vm.push(table);
 //! ```
 
-use super::*;
-use std::{marker::PhantomData, ops::Deref};
+use super::Value;
+use std::{fmt, marker::PhantomData, ops::Deref};
 
 /// Value given to a Rust program.
 ///
@@ -41,31 +41,31 @@ pub struct RValue<'a>(
 
 impl fmt::Debug for RValue<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        fmt::Debug::fmt(self.deref(), formatter)
+        fmt::Debug::fmt(self as &Value, formatter)
     }
 }
 
 impl fmt::Display for RValue<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        fmt::Display::fmt(self.deref(), formatter)
+        fmt::Display::fmt(self as &Value, formatter)
     }
 }
 
 impl PartialEq<RValue<'_>> for RValue<'_> {
     fn eq(&self, other: &RValue) -> bool {
-        self.deref() == other.deref()
+        self as &Value == other as &Value
     }
 }
 
 impl PartialEq<Value> for RValue<'_> {
     fn eq(&self, other: &Value) -> bool {
-        self.deref() == other
+        self as &Value == other
     }
 }
 
 impl PartialEq<RValue<'_>> for Value {
     fn eq(&self, other: &RValue<'_>) -> bool {
-        self == other.deref()
+        self == other as &Value
     }
 }
 
@@ -84,7 +84,9 @@ impl<'a> RValue<'a> {
 
     /// Remove the lifetime dependency if the contained value is not collectable.
     ///
-    /// Else the value is returned in the `Err` variant.
+    /// # Errors
+    ///
+    /// If the value is collectable, it is returned in the `Err` variant.
     pub fn into_static(self) -> Result<RValue<'static>, Self> {
         match self.0 {
             Value::Nil | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_) => {

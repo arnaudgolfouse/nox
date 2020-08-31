@@ -6,6 +6,7 @@ use super::{
 };
 use crate::lexer::Operation;
 use std::{
+    convert::TryFrom,
     fmt,
     hash::{Hash, Hasher},
 };
@@ -159,7 +160,10 @@ impl Value {
             Value::Int(i1) => match other {
                 Value::Int(i2) => Ok(Value::Int(i1 * i2)),
                 Value::Float(f) => Ok(Value::Float(i1 as f64 * f)),
-                Value::String(ref s) => Ok(Value::String(s.repeat(i1 as usize).into_boxed_str())),
+                Value::String(ref s) => match usize::try_from(i1) {
+                    Ok(i1) => Ok(Value::String(s.repeat(i1).into_boxed_str())),
+                    Err(_) => Err((self, other)),
+                },
                 _ => Err((self, other)),
             },
             Value::Float(f1) => match other {
@@ -168,7 +172,10 @@ impl Value {
                 _ => Err((self, other)),
             },
             Value::String(ref s) => match other {
-                Value::Int(i) => Ok(Value::String(s.repeat(i as usize).into_boxed_str())),
+                Value::Int(i) => match usize::try_from(i) {
+                    Ok(i) => Ok(Value::String(s.repeat(i).into_boxed_str())),
+                    Err(_) => Err((self, other)),
+                },
                 _ => Err((self, other)),
             },
             _ => Err((self, other)),

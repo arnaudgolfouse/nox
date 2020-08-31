@@ -40,8 +40,7 @@ impl<'a> Source<'a> {
     /// Actual source code
     pub fn content(&self) -> &'a str {
         match self {
-            Self::File { content, .. } => content,
-            Self::TopLevel(content) => content,
+            Self::File { content, .. } | Self::TopLevel(content) => content,
         }
     }
 

@@ -5,7 +5,7 @@ use std::{convert::TryFrom, fmt, iter, mem::size_of, slice, sync::Arc};
 /// Helper trait : this should not be derived by any actual type other than u8,
 /// u16, usize... (which is already done in this library).
 #[doc(hidden)]
-pub trait Operand: fmt::Display + Sized + Default + Copy + Into<u64> {
+pub trait Operand: fmt::Display + Sized + Default + Copy {
     /// data for the `Extended` instructions. In theory, this is `[Option<u8>; n]`.
     type Extended;
     /// Return the operand and the slice of (eventual) extended operands.
@@ -44,7 +44,7 @@ macro_rules! implement_integer_operand {
     };
 }
 
-implement_integer_operand!(u8 u16 u32 u64);
+implement_integer_operand!(u8 u16 u32 u64 usize);
 
 /// This macro helps implementing methods on `Instruction` easily.
 macro_rules! instructions {
@@ -396,13 +396,13 @@ pub struct Chunk {
     /// bytecode instructions
     pub(crate) code: Vec<Instruction<u8>>,
     /// Number of arguments for this function (0 is top-level)
-    pub(crate) arg_number: u32,
+    pub(crate) arg_number: usize,
     /// Constants associated with the chunk
     pub(crate) constants: Vec<Constant>,
     /// Global names associated with the chunk
     pub(crate) globals: Vec<Box<str>>,
     /// Number of locals needed when loading the function
-    pub(crate) locals_number: u32,
+    pub(crate) locals_number: usize,
     /// Captured variables from this function's parent.
     pub(crate) captures: Vec<LocalOrCaptured>,
     /// functions inside this chunk
@@ -425,6 +425,7 @@ impl Chunk {
         }
     }
 
+    /// Return the name of this chunk.
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -460,33 +461,33 @@ impl Chunk {
     }
 
     /// Add a constant to the Chunk, and return it's index for future reference.
-    pub(crate) fn add_constant(&mut self, constant: Constant) -> u32 {
+    pub(crate) fn add_constant(&mut self, constant: Constant) -> usize {
         if let Some((index, _)) = self
             .constants
             .iter()
             .enumerate()
             .find(|(_, cst)| **cst == constant)
         {
-            return index as u32;
+            return index;
         }
 
         self.constants.push(constant);
-        self.constants.len() as u32 - 1
+        self.constants.len() - 1
     }
 
     /// Add a global to the Chunk, and return it's index for future reference.
-    pub(crate) fn add_global(&mut self, global: Box<str>) -> u32 {
+    pub(crate) fn add_global(&mut self, global: Box<str>) -> usize {
         if let Some((index, _)) = self
             .globals
             .iter()
             .enumerate()
             .find(|(_, glob)| **glob == global)
         {
-            return index as u32;
+            return index;
         }
 
         self.globals.push(global);
-        self.globals.len() as u32 - 1
+        self.globals.len() - 1
     }
 
     /// push an `Jump(0)` instruction, and returns its index in the bytecode for
@@ -523,7 +524,7 @@ impl Chunk {
     ) -> Result<(), fmt::Error> {
         let operand = instruction
             .operand()
-            .map(|op| op as u32 + extended.unwrap_or(0));
+            .map(|op| u32::from(op) + extended.unwrap_or(0));
         write!(formatter, "{:<14}    ", instruction.name())?;
         let operand_value = match instruction {
             Instruction::ReadConstant(_) => {
@@ -556,7 +557,7 @@ impl Chunk {
             line_index += nb as usize;
         }
 
-        self.lines.last().map(|(line, _)| *line).unwrap_or(0) as usize
+        self.lines.last().map_or(0, |(line, _)| *line) as usize
     }
 }
 
@@ -598,15 +599,12 @@ impl fmt::Display for Chunk {
                 formatter.write_str("|          ")
             }?;
             write!(formatter, "{:<10} ", i)?;
-            match inst {
-                Instruction::Extended(extend) => {
-                    extended = Some((extended.unwrap_or(0) << 8) + *extend as u32);
-                    self.fmt_instruction(*inst, None, formatter)?;
-                }
-                _ => {
-                    self.fmt_instruction(*inst, extended, formatter)?;
-                    extended = None;
-                }
+            if let Instruction::Extended(extend) = inst {
+                extended = Some((extended.unwrap_or(0) << 8) + u32::from(*extend));
+                self.fmt_instruction(*inst, None, formatter)?;
+            } else {
+                self.fmt_instruction(*inst, extended, formatter)?;
+                extended = None;
             }
             writeln!(formatter)?;
             lines_acc += 1;
@@ -636,12 +634,12 @@ mod tests {
         let x: u8 = 5;
         assert_eq!(x.extended(), (x, []));
 
-        let x: u16 = (4 << 8) + 2;
-        assert_eq!(x.extended(), (2, [Some(Instruction::Extended(4))]));
+        let y: u16 = (4 << 8) + 2;
+        assert_eq!(y.extended(), (2, [Some(Instruction::Extended(4))]));
 
-        let x: u32 = (102 << 24) + (6 << 8) + 84;
+        let z: u32 = (102 << 24) + (6 << 8) + 84;
         assert_eq!(
-            x.extended(),
+            z.extended(),
             (
                 84,
                 [

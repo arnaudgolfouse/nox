@@ -6,10 +6,16 @@ use super::values::{NoDropValue, Value};
 use crate::parser::Chunk;
 use std::{collections::HashMap, fmt, mem::size_of, ops::Deref, ptr::NonNull, sync::Arc};
 
+/// Meta-information about a collectable value.
 #[derive(Debug, Clone)]
 pub struct GCHeader {
+    /// Next collectable value.
     next: Option<NonNull<Collectable>>,
+    /// Is the value still reacheable ?
+    ///
+    /// Used during the mark-and-sweep algorithm.
     marked: bool,
+    /// Number of roots for this value.
     roots: u32,
 }
 
@@ -26,10 +32,14 @@ impl GCHeader {
     }
 }
 
+/// The type of the collectable value.
 #[derive(Debug, PartialEq)]
 pub enum CollectableObject {
+    /// Table object
     Table(HashMap<NoDropValue, NoDropValue>),
+    /// Captured value
     Captured(NoDropValue),
+    /// Nox function
     Function {
         chunk: Arc<Chunk>,
         captured_variables: Vec<NoDropValue>,
@@ -38,6 +48,7 @@ pub enum CollectableObject {
 
 impl Eq for CollectableObject {}
 
+/// A collectable value living on the heap.
 #[derive(Debug)]
 pub struct Collectable {
     pub header: GCHeader,
@@ -53,7 +64,7 @@ impl PartialEq for Collectable {
 impl fmt::Display for Collectable {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match &self.object {
-            CollectableObject::Captured(value) => fmt::Display::fmt(value.deref(), formatter),
+            CollectableObject::Captured(value) => fmt::Display::fmt(value as &Value, formatter),
             CollectableObject::Function { .. } => formatter.write_str("<function>"),
             CollectableObject::Table(_) => formatter.write_str("<table>"),
         }
@@ -61,25 +72,6 @@ impl fmt::Display for Collectable {
 }
 
 impl Collectable {
-    fn new_function(
-        next: Option<NonNull<Collectable>>,
-        chunk: Arc<Chunk>,
-        captured_variables: Vec<NoDropValue>,
-    ) -> Self {
-        Self {
-            header: GCHeader::new(next),
-            object: CollectableObject::Function {
-                chunk,
-                captured_variables,
-            },
-        }
-    }
-
-    /// Move the `Collectable` to the heap, and return a `NonNull` pointing to it
-    fn make_nonnull(self) -> NonNull<Self> {
-        unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(self))) }
-    }
-
     #[inline]
     pub fn root(&mut self) {
         self.header.roots += 1
@@ -152,7 +144,7 @@ impl Collectable {
 }
 
 #[cfg(test)]
-const INITIAL_THRESHOLD: usize = 100;
+const INITIAL_THRESHOLD: usize = 10; // we test the behavior of the GC
 #[cfg(not(test))]
 const INITIAL_THRESHOLD: usize = 10000;
 
@@ -182,7 +174,8 @@ impl GC {
     /// Drop a value, and updates the amount of allocated memory.
     fn drop_value(&mut self, value: &mut Collectable) {
         self.allocated -= value.size();
-        unsafe { std::ptr::drop_in_place(value as *mut _) };
+        // we created this value using `into_raw`, so we free it with `from_raw`.
+        drop(unsafe { Box::from_raw(value as *mut Collectable) })
     }
 
     /// Check that `additional` more bytes won't go over the threshold.
@@ -202,10 +195,7 @@ impl GC {
             #[cfg(debug_assertions)]
             println!("freed {} bytes", old_allocated - self.allocated);
             loop {
-                self.threshold = std::cmp::max(
-                    self.threshold,
-                    ((self.allocated + additional) as f64 * 1.7) as usize,
-                );
+                self.threshold = std::cmp::max(self.threshold, (self.allocated + additional) * 2);
                 if self.allocated + additional <= self.threshold {
                     break;
                 }
@@ -259,6 +249,17 @@ impl GC {
         }
     }
 
+    /// Insert the given `Collectable` in the garbage collector.
+    fn make_collectable(&mut self, mut collectable: Collectable) -> Value {
+        let additional = collectable.size();
+        self.check(additional);
+        collectable.header.next = self.first.take();
+        let ptr = NonNull::from(Box::leak(Box::new(collectable)));
+        self.first = Some(ptr);
+        self.allocated += additional;
+        Value::Collectable(ptr)
+    }
+
     /// Creates a new garbage collected function.
     ///
     /// This function will be rooted
@@ -272,21 +273,21 @@ impl GC {
         )
     }
 
-    /// `new_function` with NoDropValue.
+    /// `new_function` with `NoDropValue`s.
     fn new_function_nodrop(
         &mut self,
         chunk: Arc<Chunk>,
         mut captured_variables: Vec<NoDropValue>,
     ) -> Value {
         captured_variables.shrink_to_fit();
-        let mut collectable = Collectable::new_function(None, chunk, captured_variables);
-        let additional = collectable.size();
-        self.check(additional);
-        collectable.header.next = self.first.take();
-        let ptr = collectable.make_nonnull();
-        self.first = Some(ptr);
-        self.allocated += additional;
-        Value::Collectable(ptr)
+        let collectable = Collectable {
+            header: GCHeader::new(None),
+            object: CollectableObject::Function {
+                chunk,
+                captured_variables,
+            },
+        };
+        self.make_collectable(collectable)
     }
 
     /// Creates a new garbage collected value.
@@ -298,17 +299,11 @@ impl GC {
         if value.as_captured().is_some() {
             value
         } else {
-            let mut collectable = Collectable {
+            let collectable = Collectable {
                 header: GCHeader::new(None),
                 object: CollectableObject::Captured(unsafe { NoDropValue::new(value) }),
             };
-            let additional = collectable.size();
-            self.check(additional);
-            collectable.header.next = self.first.take();
-            let ptr = collectable.make_nonnull();
-            self.first = Some(ptr);
-            self.allocated += additional;
-            Value::Collectable(ptr)
+            self.make_collectable(collectable)
         }
     }
 
@@ -316,17 +311,11 @@ impl GC {
     ///
     /// The new table will be rooted.
     pub fn new_table(&mut self) -> Value {
-        let mut collectable = Collectable {
+        let collectable = Collectable {
             header: GCHeader::new(None),
             object: CollectableObject::Table(HashMap::new()),
         };
-        let additional = collectable.size();
-        self.check(additional);
-        collectable.header.next = self.first.take();
-        let ptr = collectable.make_nonnull();
-        self.first = Some(ptr);
-        self.allocated += additional;
-        Value::Collectable(ptr)
+        self.make_collectable(collectable)
     }
 
     /// Add a `(key, value)` pair to the `table`.

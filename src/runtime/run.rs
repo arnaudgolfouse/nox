@@ -1,4 +1,6 @@
-use super::*;
+use super::{
+    Constant, Instruction, InternalError, OperationError, RuntimeError, VMErrorKind, Value, VM,
+};
 
 impl VM {
     /// Read the instruction pointer, resolving any `Instruction::Extended`.
@@ -6,7 +8,7 @@ impl VM {
     /// # Errors
     ///
     /// An error is emitted is the instruction pointer is out of bounds.
-    fn read_ip(&mut self) -> Result<(Instruction<u8>, u64), VMErrorKind> {
+    fn read_ip(&mut self) -> Result<(Instruction<u8>, usize), VMErrorKind> {
         let mut operand = 0;
         let opcode =
             loop {
@@ -15,12 +17,12 @@ impl VM {
                 })? {
                     // extended operand
                     Instruction::Extended(extended) => {
-                        operand += extended as u64;
-                        operand <<= 8;
+                        operand += extended as usize;
+                        operand <<= std::mem::size_of::<usize>();
                         self.ip += 1;
                     }
                     instruction => {
-                        operand += instruction.operand().unwrap_or(0) as u64;
+                        operand += instruction.operand().unwrap_or(0) as usize;
                         self.ip += 1;
                         break instruction;
                     }
@@ -47,9 +49,7 @@ impl VM {
         Ok({
             self.local_vars()
                 .get(index)
-                .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(
-                    index as u64,
-                )))?
+                .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(index)))?
                 .clone()
         })
     }
@@ -62,7 +62,7 @@ impl VM {
             .local_vars_mut()
             .get_mut(index)
             .ok_or(InternalError::InvalidOperand(Instruction::WriteLocal(
-                index as u64,
+                index,
             )))? = value;
         Ok(())
     }
@@ -98,13 +98,13 @@ impl VM {
     ///
     /// This will take care of capturing variables, and the returned function
     /// will be rooted.
-    fn read_function(&mut self, operand: u64) -> Result<Value, VMErrorKind> {
+    fn read_function(&mut self, operand: usize) -> Result<Value, VMErrorKind> {
         use crate::parser::LocalOrCaptured;
 
         let function = self
             .chunk()
             .functions
-            .get(operand as usize)
+            .get(operand)
             .ok_or(InternalError::InvalidOperand(Instruction::ReadFunction(
                 operand,
             )))?
@@ -112,25 +112,25 @@ impl VM {
 
         // Capture variables
         let mut captured = Vec::new();
-        for captured_index in function.captures.iter() {
+        for captured_index in &function.captures {
             match captured_index {
                 LocalOrCaptured::Local(index) => {
                     let to_capture = self
                         .local_vars_mut()
                         .get_mut(*index)
                         .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(
-                            *index as u64,
+                            *index,
                         )))?
                         .clone();
                     let to_capture = self.gc.new_captured(to_capture);
                     captured.push(to_capture.clone());
                     *self.local_vars_mut().get_mut(*index).ok_or(
-                        InternalError::InvalidOperand(Instruction::ReadLocal(*index as u64)),
+                        InternalError::InvalidOperand(Instruction::ReadLocal(*index)),
                     )? = to_capture;
                 }
                 LocalOrCaptured::Captured(index) => {
                     let to_capture = self.captured_vars_mut().get_mut(*index).ok_or(
-                        InternalError::InvalidOperand(Instruction::ReadLocal(*index as u64)),
+                        InternalError::InvalidOperand(Instruction::ReadLocal(*index)),
                     )?;
                     captured.push(to_capture.clone())
                 }
@@ -243,8 +243,7 @@ impl VM {
                     if let Some(table) = table.as_table() {
                         let value = table
                             .get(key.as_nodrop_ref())
-                            .map(|value| (value as &Value).clone())
-                            .unwrap_or(Value::Nil);
+                            .map_or(Value::Nil, |value| (value as &Value).clone());
                         self.stack.push(value)
                     } else {
                         return Err(RuntimeError::NotATable(format!("{}", table)).into());
@@ -271,27 +270,30 @@ impl VM {
                 Instruction::ReadConstant(_) => self.stack.push(
                     self.chunk()
                         .constants
-                        .get(operand as usize)
+                        .get(operand)
                         .cloned()
                         .unwrap_or(Constant::Nil)
                         .into(),
                 ),
                 Instruction::ReadGlobal(_) => {
-                    let name = self.chunk().globals.get(operand as usize).ok_or(
-                        InternalError::InvalidOperand(Instruction::ReadGlobal(operand)),
-                    )?;
+                    let name =
+                        self.chunk()
+                            .globals
+                            .get(operand)
+                            .ok_or(InternalError::InvalidOperand(Instruction::ReadGlobal(
+                                operand,
+                            )))?;
                     let value = self
                         .global_variables
                         .get(name)
-                        .map(|value| (value as &Value).clone())
-                        .unwrap_or(Value::Nil);
+                        .map_or(Value::Nil, |value| (value as &Value).clone());
                     self.stack.push(value)
                 }
                 Instruction::WriteGlobal(_) => {
                     let name = self
                         .chunk
                         .globals
-                        .get(operand as usize)
+                        .get(operand)
                         .ok_or(InternalError::InvalidOperand(Instruction::ReadGlobal(
                             operand,
                         )))?
@@ -300,17 +302,17 @@ impl VM {
                     self.write_global(name, global)
                 }
                 Instruction::ReadLocal(_) => {
-                    let local = self.read_local(operand as usize)?;
+                    let local = self.read_local(operand)?;
                     self.stack.push(local)
                 }
                 Instruction::WriteLocal(_) => {
                     let local = self.pop_stack()?;
-                    self.write_local(operand as usize, local)?
+                    self.write_local(operand, local)?
                 }
                 Instruction::ReadCaptured(_) => {
                     let captured = self
                         .captured_vars()
-                        .get(operand as usize)
+                        .get(operand)
                         .ok_or(InternalError::InvalidOperand(Instruction::ReadCaptured(
                             operand,
                         )))?
@@ -319,7 +321,7 @@ impl VM {
                 }
                 Instruction::WriteCaptured(_) => {
                     let var = self.pop_stack()?;
-                    let captured = self.captured_vars_mut().get_mut(operand as usize).ok_or(
+                    let captured = self.captured_vars_mut().get_mut(operand).ok_or(
                         InternalError::InvalidOperand(Instruction::ReadCaptured(operand)),
                     )?;
                     if let Some(value) = captured.as_captured_mut() {
@@ -332,17 +334,17 @@ impl VM {
                     }
                 }
                 // NOTE FOR JUMPS : We need to add/subtract 1 because we are on the instruction AFTER the jump.
-                Instruction::Jump(_) => self.jump_to(operand as usize + self.ip - 1)?,
+                Instruction::Jump(_) => self.jump_to(operand + self.ip - 1)?,
                 Instruction::JumpPopFalse(_) => {
                     if self.pop_stack()? == Value::Bool(false) {
-                        self.jump_to(operand as usize + self.ip - 1)?
+                        self.jump_to(operand + self.ip - 1)?
                     }
                 }
                 Instruction::JumpEndWhile(_) => {
                     let value = self.pop_stack()?;
                     if value == Value::Bool(false) {
                         self.pop_loop_address();
-                        self.jump_to(operand as usize + self.ip - 1)?
+                        self.jump_to(operand + self.ip - 1)?
                     }
                 }
                 Instruction::JumpEndFor(_) => {
@@ -351,14 +353,14 @@ impl VM {
                         // address of the loop variable, since this instruction is always followed by `WriteLocal(loop_index)`.
                         {
                             let ip_before = self.ip;
-                            let (_, operand) = self.read_ip()?;
-                            match self.local_vars_mut().get_mut(operand as usize) {
+                            let (_, local_index) = self.read_ip()?;
+                            match self.local_vars_mut().get_mut(local_index) {
                                 Some(value) => {
                                     *value = Value::Nil;
                                 }
                                 None => {
                                     return Err(InternalError::InvalidOperand(
-                                        Instruction::WriteLocal(operand),
+                                        Instruction::WriteLocal(local_index),
                                     )
                                     .into())
                                 }
@@ -366,7 +368,7 @@ impl VM {
                             self.ip = ip_before;
                         }
                         self.pop_loop_address();
-                        self.jump_to(operand as usize + self.ip - 1)?;
+                        self.jump_to(operand + self.ip - 1)?;
                         self.pop_stack()?;
                     }
                 }
@@ -389,7 +391,7 @@ impl VM {
                 }
                 Instruction::PrepareLoop(_) => {
                     let expr_address = self.ip;
-                    let jump_address = expr_address + operand as usize;
+                    let jump_address = expr_address + operand;
                     self.push_loop_address((expr_address, jump_address));
                 }
                 Instruction::Call(_) => {
@@ -408,7 +410,7 @@ impl VM {
                 }
                 Instruction::DuplicateTop(_) => {
                     // bound-checking ahead
-                    let index_start = match self.stack.len().checked_sub(operand as usize + 1) {
+                    let index_start = match self.stack.len().checked_sub(operand + 1) {
                         Some(index_start) => index_start,
                         None => return Err(InternalError::EmptyStack.into()),
                     };

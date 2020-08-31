@@ -14,7 +14,7 @@
 
 mod from_rust_std;
 
-use super::LexerWarning;
+use super::Warning;
 use from_rust_std::{DecimalFloat, ParseFloatError};
 use std::{convert::TryFrom, fmt};
 
@@ -41,7 +41,7 @@ pub enum Base {
 
 impl Base {
     pub fn as_i64(self) -> i64 {
-        self as u64 as i64
+        self as i64
     }
 }
 
@@ -89,7 +89,7 @@ fn invalid_char(c: u8, base: Base) -> NumberError {
     }
 }
 
-pub fn parse_number(number: &str) -> Result<(IntOrFloat, Option<LexerWarning>), NumberError> {
+pub fn parse_number(number: &str) -> Result<(IntOrFloat, Option<Warning>), NumberError> {
     // we only reason on u8's
     let mut number = number.as_bytes();
     let sign = match number.get(0).copied() {
@@ -128,26 +128,50 @@ pub fn parse_number_with_sign_base(
     number: &[u8],
     sign: Sign,
     base: Base,
-) -> Result<(IntOrFloat, Option<LexerWarning>), NumberError> {
-    match base {
-        Base::Decimal => {
-            let decimal = decompose_decimal_number(number)?;
-            match DecimalFloat::try_from(decimal) {
-                Ok(float_decimal) => from_rust_std::convert(float_decimal)
-                    .map(|f| if sign == Sign::Negative { -f } else { f })
-                    .map(|f| (IntOrFloat::Float(f), None))
-                    .map_err(|err| err.into()),
-                Err(()) => parse_i64(decimal.integral, sign, Base::Decimal)
-                    .map(|i| (IntOrFloat::Int(i), None)),
+) -> Result<(IntOrFloat, Option<Warning>), NumberError> {
+    if let Base::Decimal = base {
+        let decimal = decompose_decimal_number(number)?;
+        // sigh... we must remove '_'
+        let integral_vec = {
+            let mut integral = Vec::new();
+            for x in decimal.integral {
+                if *x != b'_' {
+                    integral.push(*x)
+                }
+            }
+            integral
+        };
+        let mut fractional_vec = Vec::new();
+        if let Some(dec_fractional) = decimal.fractional {
+            for x in dec_fractional {
+                if *x != b'_' {
+                    fractional_vec.push(*x)
+                }
             }
         }
-        _ => {
-            let num = decompose_number(number, base)?;
-            match num.fractional {
-                Some(fractional) => parse_f64(num.integral, fractional, sign, base)
-                    .map(|(f, warn)| (IntOrFloat::Float(f), warn)),
-                None => parse_i64(num.integral, sign, base).map(|i| (IntOrFloat::Int(i), None)),
+        match DecimalFloat::try_from(Decimal {
+            integral: &integral_vec,
+            fractional: if decimal.fractional.is_some() {
+                Some(&fractional_vec)
+            } else {
+                None
+            },
+            exp: decimal.exp,
+        }) {
+            Ok(float_decimal) => from_rust_std::convert(float_decimal)
+                .map(|f| if sign == Sign::Negative { -f } else { f })
+                .map(|f| (IntOrFloat::Float(f), None))
+                .map_err(|err| err.into()),
+            Err(()) => {
+                parse_i64(decimal.integral, sign, Base::Decimal).map(|i| (IntOrFloat::Int(i), None))
             }
+        }
+    } else {
+        let num = decompose_number(number, base)?;
+        match num.fractional {
+            Some(fractional) => parse_f64(num.integral, fractional, sign, base)
+                .map(|(f, warn)| (IntOrFloat::Float(f), warn)),
+            None => parse_i64(num.integral, sign, base).map(|i| (IntOrFloat::Int(i), None)),
         }
     }
 }
@@ -275,7 +299,7 @@ fn decompose_decimal_number(mut input: &[u8]) -> Result<Decimal, NumberError> {
                         b'_' => Some(true),
                         b'0'..=b'9' => {
                             digit_number += 1;
-                            exp = exp * 10 + (c - b'0') as i64;
+                            exp = exp * 10 + i64::from(c - b'0');
                             Some(true)
                         }
                         _ => None,
@@ -294,12 +318,12 @@ fn decompose_decimal_number(mut input: &[u8]) -> Result<Decimal, NumberError> {
                 exp: if sign == Sign::Positive { exp } else { -exp },
             })
         }
+        Some(_) => unreachable!(),
         None => Ok(Decimal {
             integral,
             fractional,
             exp: 0,
         }),
-        _ => unreachable!(),
     }
 }
 
@@ -310,8 +334,9 @@ fn parse_i64(input: &[u8], sign: Sign, base: Base) -> Result<i64, NumberError> {
         if c == b'_' {
             continue;
         }
-        let digit = valid_for_base(c, base).ok_or(NumberError::Invalid(c as char, base))? as i64
-            * if sign == Sign::Negative { -1 } else { 1 };
+        let digit =
+            i64::from(valid_for_base(c, base).ok_or(NumberError::Invalid(c as char, base))?)
+                * if sign == Sign::Negative { -1 } else { 1 };
         result = result
             .checked_mul(base.as_i64())
             .ok_or(NumberError::Overflow)?
@@ -328,13 +353,12 @@ fn parse_f64(
     mut fractional: &[u8],
     sign: Sign,
     base: Base,
-) -> Result<(f64, Option<LexerWarning>), NumberError> {
+) -> Result<(f64, Option<Warning>), NumberError> {
     let log2 = match base {
         Base::Binary => 1,
         Base::Octal => 3,
         Base::Hexadecimal => 4,
-        // unused, technically unreacheable ?
-        _ => 0,
+        _ => unreachable!(),
     };
     let max_mantissa_digits = 52 / log2;
 
@@ -353,7 +377,7 @@ fn parse_f64(
             return Err(NumberError::FloatOverflow);
         } else if integral.len() + fractional.len() > max_mantissa_digits {
             fractional = &fractional[..max_mantissa_digits - integral.len()];
-            Some(LexerWarning::ExcessiveFloatPrecision)
+            Some(Warning::ExcessiveFloatPrecision)
         } else {
             None
         };
@@ -402,7 +426,7 @@ fn parse_f64(
 
         let warning = if fractional.len() > max_mantissa_digits {
             fractional = &fractional[..max_mantissa_digits];
-            Some(LexerWarning::ExcessiveFloatPrecision)
+            Some(Warning::ExcessiveFloatPrecision)
         } else {
             None
         };
@@ -434,7 +458,7 @@ fn make_mantissa(integral: &[u8], fractional: &[u8], base: Base) -> u64 {
         Base::Binary => 1,
         Base::Octal => 3,
         Base::Hexadecimal => 4,
-        _ => 0,
+        _ => unreachable!(),
     };
     // where we start to write the digits.
     // this depends on the first digit, because the first bit is implicit and
@@ -449,13 +473,12 @@ fn make_mantissa(integral: &[u8], fractional: &[u8], base: Base) -> u64 {
     let mut result = 0;
 
     for x in integral.iter().copied().chain(fractional.iter().copied()) {
-        result |= (match x {
+        result |= u64::from(match x {
             b'0'..=b'9' => x - b'0',
             b'a'..=b'f' => x - b'a' + 10,
             b'A'..=b'F' => x - b'A' + 10,
             _ => 0,
-        } as u64)
-            << current_bit;
+        }) << current_bit;
         current_bit -= byte_length;
     }
 
@@ -654,7 +677,7 @@ mod tests {
         );
         assert_eq!(
             parse_number("-0x67.241").unwrap().0,
-            IntOrFloat::Float(-103.140869140625)
+            IntOrFloat::Float(-103.140_869_140_625)
         );
 
         assert_eq!(
@@ -692,7 +715,7 @@ mod tests {
             parse_number("0x1.0000000000001").unwrap(),
             (
                 IntOrFloat::Float(1.),
-                Some(LexerWarning::ExcessiveFloatPrecision)
+                Some(Warning::ExcessiveFloatPrecision)
             )
         );
     }

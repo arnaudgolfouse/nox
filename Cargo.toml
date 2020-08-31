@@ -14,8 +14,7 @@ lto = true
 panic = "abort"
 
 [features]
-default = ["check"]
-check = []
+default = []
 bench = ["criterion"]
 
 [[bench]]

@@ -193,8 +193,8 @@ return x2",
 #[test]
 fn for_loop() {
     let mut vm = VM::new();
-    /*vm.parse_top_level(
-            "
+    vm.parse_top_level(
+        "
     fn range(a, b)
         it = a
         fn iter()
@@ -216,10 +216,10 @@ fn for_loop() {
     end
     return x
                 ",
-        )
-        .unwrap();
-        assert_eq!(vm.run().unwrap(), Value::Int(6));
-        vm.reset();*/
+    )
+    .unwrap();
+    assert_eq!(vm.run().unwrap(), Value::Int(6));
+    vm.reset();
 
     // a somewhat complex example
     vm.import_all(libraries::prelude()).unwrap();

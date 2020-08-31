@@ -26,7 +26,7 @@ pub struct Lexer<'a> {
     /// Iterator over the `source`'s chars
     iterator: Peekable<Chars<'a>>,
     /// Next token, pre-parsed
-    next_token: Result<Option<Token>, LexerError<'a>>,
+    next_token: Result<Option<Token>, Error<'a>>,
     /// Start position of the current token
     current_start: Position,
     /// End position of the current token
@@ -76,15 +76,11 @@ impl<'a> Lexer<'a> {
         lexer
     }
 
-    pub(crate) fn current_range(&self) -> Range {
-        Range::new(self.current_start, self.position)
-    }
-
     /// emit an error at the currently parsed token
-    fn emit_error(&self, kind: LexerErrorKind, continuable: Continue) -> LexerError<'a> {
-        LexerError {
+    fn emit_error(&self, kind: ErrorKind, continuable: Continue) -> Error<'a> {
+        Error {
             kind,
-            range: self.current_range(),
+            range: Range::new(self.current_start, self.position),
             source: self.source.clone(),
             continuable,
         }
@@ -94,7 +90,7 @@ impl<'a> Lexer<'a> {
     ///
     /// # Errors
     ///
-    /// See [LexerErrorKind](enum.LexerErrorKind.html)
+    /// See [`ErrorKind`](enum.ErrorKind.html)
     ///
     /// # Examples
     ///
@@ -106,7 +102,7 @@ impl<'a> Lexer<'a> {
     /// assert_eq!(TokenKind::Op(Operation::Multiply), tokens.pop().unwrap().kind);
     /// assert_eq!(TokenKind::Id("b".into()), tokens.pop().unwrap().kind);
     /// ```
-    pub fn tokens(&mut self) -> Result<Vec<Token>, LexerError<'a>> {
+    pub fn tokens(&mut self) -> Result<Vec<Token>, Error<'a>> {
         let mut result = Vec::new();
         while let Some(token) = self.next()? {
             result.push(token)
@@ -116,7 +112,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Advance to the next token
-    fn advance(&mut self) -> Result<Option<Token>, LexerError<'a>> {
+    fn advance(&mut self) -> Result<Option<Token>, Error<'a>> {
         self.previous_start = self.current_start;
         self.previous_end = self.current_end;
         // skip whitespace
@@ -162,9 +158,7 @@ impl<'a> Lexer<'a> {
                             IntOrFloat::Float(f) => TokenKind::Float(f),
                         }
                     })
-                    .map_err(|err| {
-                        self.emit_error(LexerErrorKind::NumberError(err), Continue::Stop)
-                    })?
+                    .map_err(|err| self.emit_error(ErrorKind::NumberError(err), Continue::Stop))?
             }
             c if c.is_alphabetic() || c == '_' => {
                 let word = self.eat_while(c, |c| c.is_alphanumeric() || c == '_');
@@ -202,7 +196,7 @@ impl<'a> Lexer<'a> {
                 _ => TokenKind::Exclamation,
             },
             '^' => TokenKind::Op(Operation::Pow),
-            c => return Err(self.emit_error(LexerErrorKind::UnknownCharacter(c), Continue::Stop)),
+            c => return Err(self.emit_error(ErrorKind::UnknownCharacter(c), Continue::Stop)),
         };
 
         self.current_end = self.position;
@@ -220,7 +214,7 @@ impl<'a> Lexer<'a> {
     ///
     /// # Errors
     ///
-    /// See [LexerErrorKind](enum.LexerErrorKind.html)
+    /// See [`ErrorKind`](enum.ErrorKind.html)
     ///
     /// # Examples
     ///
@@ -241,7 +235,7 @@ impl<'a> Lexer<'a> {
     /// }
     /// ```
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<Option<Token>, LexerError<'a>> {
+    pub fn next(&mut self) -> Result<Option<Token>, Error<'a>> {
         let mut token = Ok(None);
         std::mem::swap(&mut token, &mut self.next_token);
         // the real meat of the function is in `advance`
@@ -255,7 +249,7 @@ impl<'a> Lexer<'a> {
     ///
     /// # Errors
     ///
-    /// See [LexerErrorKind](enum.LexerErrorKind.html)
+    /// See [`ErrorKind`](enum.ErrorKind.html)
     ///
     /// # Examples
     ///
@@ -275,7 +269,7 @@ impl<'a> Lexer<'a> {
     /// assert_eq!(tokens[2], lexer.next().unwrap().unwrap().kind);
     /// assert_eq!(tokens[3], lexer.next().unwrap().unwrap().kind);
     /// ```
-    pub fn peek(&self) -> Result<Option<&Token>, LexerError<'a>> {
+    pub fn peek(&self) -> Result<Option<&Token>, Error<'a>> {
         match &self.next_token {
             Ok(next_token) => Ok(next_token.as_ref()),
             Err(err) => Err(err.clone()),
@@ -284,13 +278,13 @@ impl<'a> Lexer<'a> {
 
     /// Will make a string out of all the next characters, until
     /// `matching_character`.
-    fn string(&mut self, matching_character: char) -> Result<Box<str>, LexerError<'a>> {
+    fn string(&mut self, matching_character: char) -> Result<Box<str>, Error<'a>> {
         let mut result = String::new();
         loop {
             let next_char = match self.next_char() {
                 None => {
                     return Err(self.emit_error(
-                        LexerErrorKind::IncompleteString(matching_character),
+                        ErrorKind::IncompleteString(matching_character),
                         Continue::Continue,
                     ))
                 }
@@ -299,7 +293,7 @@ impl<'a> Lexer<'a> {
                         Some(c) => c,
                         None => {
                             return Err(self.emit_error(
-                                LexerErrorKind::IncompleteString(matching_character),
+                                ErrorKind::IncompleteString(matching_character),
                                 Continue::Stop,
                             ))
                         }
@@ -320,8 +314,8 @@ impl<'a> Lexer<'a> {
                             match self.next_char() {
                                 Some('{') => {}
                                 c => {
-                                    return Err(LexerError {
-                                        kind: LexerErrorKind::ExpectedFound('{', c),
+                                    return Err(Error {
+                                        kind: ErrorKind::ExpectedFound('{', c),
                                         continuable: Continue::Stop,
                                         source: self.source.clone(),
                                         range: Range::new(start_pos, self.position),
@@ -334,8 +328,8 @@ impl<'a> Lexer<'a> {
                                     match c {
                                         '}' => break,
                                         c if c == matching_character => {
-                                            return Err(LexerError {
-                                                kind: LexerErrorKind::ExpectedFound(
+                                            return Err(Error {
+                                                kind: ErrorKind::ExpectedFound(
                                                     '}',
                                                     Some(matching_character),
                                                 ),
@@ -348,7 +342,7 @@ impl<'a> Lexer<'a> {
                                     }
                                 } else {
                                     return Err(self.emit_error(
-                                        LexerErrorKind::IncompleteString(matching_character),
+                                        ErrorKind::IncompleteString(matching_character),
                                         Continue::Stop,
                                     ));
                                 }
@@ -357,19 +351,19 @@ impl<'a> Lexer<'a> {
                                 Ok(code) => match std::char::from_u32(code) {
                                     Some(c) => c,
                                     None => {
-                                        return Err(LexerError {
+                                        return Err(Error {
                                             source: self.source.clone(),
                                             continuable: Continue::Stop,
-                                            kind: LexerErrorKind::InvalidCodePoint(code),
+                                            kind: ErrorKind::InvalidCodePoint(code),
                                             range: Range::new(start_pos, self.position),
                                         })
                                     }
                                 },
                                 Err(err) => {
-                                    return Err(LexerError {
+                                    return Err(Error {
                                         source: self.source.clone(),
                                         continuable: Continue::Stop,
-                                        kind: LexerErrorKind::Parseint(err),
+                                        kind: ErrorKind::Parseint(err),
                                         range: Range::new(start_pos, self.position),
                                     })
                                 }
@@ -377,8 +371,8 @@ impl<'a> Lexer<'a> {
                         }
                         c if c == matching_character => c,
                         _ => {
-                            return Err(LexerError {
-                                kind: LexerErrorKind::UnknownEscape(c),
+                            return Err(Error {
+                                kind: ErrorKind::UnknownEscape(c),
                                 continuable: Continue::Stop,
                                 source: self.source.clone(),
                                 range: Range::new(start_pos, self.position),
@@ -402,12 +396,12 @@ impl<'a> Lexer<'a> {
 
     /// If an error is encountered in a string, we go to the end of said string
     /// before reporting it.
-    fn string_error(&mut self, matching_character: char, error: LexerError<'a>) -> LexerError<'a> {
+    fn string_error(&mut self, matching_character: char, error: Error<'a>) -> Error<'a> {
         loop {
             match self.next_char() {
                 Some(c) if c == matching_character => break,
+                Some(_) => {}
                 None => break,
-                _ => {}
             }
         }
         error
@@ -533,7 +527,7 @@ impl<'a> Lexer<'a> {
 
 /// Kind of errors returned by the lexer
 #[derive(Debug, PartialEq, Clone)]
-pub enum LexerErrorKind {
+pub enum ErrorKind {
     /// Unknown character.
     ///
     /// This include emoji and some unrecognised non-alphanumeric character (`$`
@@ -559,7 +553,7 @@ pub enum LexerErrorKind {
     NumberError(num_parser::NumberError),
 }
 
-impl Display for LexerErrorKind {
+impl Display for ErrorKind {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             Self::UnknownCharacter(c) => write!(formatter, "unknown character : '{}'", c),
@@ -592,14 +586,14 @@ impl Display for LexerErrorKind {
 /// Contains its kind, as well as other information such as the position of the
 /// error in the input text.
 #[derive(Debug, Clone)]
-pub struct LexerError<'a> {
-    pub(crate) kind: LexerErrorKind,
+pub struct Error<'a> {
+    pub(crate) kind: ErrorKind,
     pub(crate) range: Range,
     pub(crate) source: Source<'a>,
     pub(crate) continuable: Continue,
 }
 
-impl<'a> fmt::Display for LexerError<'a> {
+impl<'a> fmt::Display for Error<'a> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         // we need a displayable type, i32 will do
         display_error::<_, i32>(
@@ -614,16 +608,16 @@ impl<'a> fmt::Display for LexerError<'a> {
     }
 }
 
-impl std::error::Error for LexerError<'_> {}
+impl std::error::Error for Error<'_> {}
 
 /// Kind of warnings returned by the lexer
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub enum LexerWarning {
+pub enum Warning {
     /// A float had excessive precision, and some digits were ignored.
     ExcessiveFloatPrecision,
 }
 
-impl fmt::Display for LexerWarning {
+impl fmt::Display for Warning {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::ExcessiveFloatPrecision => {

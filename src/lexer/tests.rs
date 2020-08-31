@@ -6,17 +6,17 @@ fn errors() {
     // multiple dots
     assert_eq!(
         Lexer::top_level("3.1.2").next().unwrap_err().kind,
-        LexerErrorKind::NumberError(NumberError::NumberUnexpectedDot)
+        ErrorKind::NumberError(NumberError::NumberUnexpectedDot)
     );
     // unrecognised character
     assert_eq!(
         Lexer::top_level("😬").next().unwrap_err().kind,
-        LexerErrorKind::UnknownCharacter('😬')
+        ErrorKind::UnknownCharacter('😬')
     );
     // incomplete string
     assert_eq!(
         Lexer::top_level("'hello world").next().unwrap_err().kind,
-        LexerErrorKind::IncompleteString('\'')
+        ErrorKind::IncompleteString('\'')
     );
     // overflow error
     assert_eq!(
@@ -24,16 +24,16 @@ fn errors() {
             .next()
             .unwrap_err()
             .kind,
-        LexerErrorKind::NumberError(NumberError::Overflow)
+        ErrorKind::NumberError(NumberError::Overflow)
     );
     // invalid digit
     assert_eq!(
         Lexer::top_level("0xg").next().unwrap_err().kind,
-        LexerErrorKind::NumberError(NumberError::Invalid('g', Base::Hexadecimal))
+        ErrorKind::NumberError(NumberError::Invalid('g', Base::Hexadecimal))
     );
     assert_eq!(
-            Lexer::top_level("0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001").next().unwrap().unwrap().kind,
-             TokenKind::Float(0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001));
+             Lexer::top_level("0.000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_001").next().unwrap().unwrap().kind,
+             TokenKind::Float(0.000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_000_001));
 }
 
 #[test]

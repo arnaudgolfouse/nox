@@ -176,7 +176,7 @@ impl Value {
             Self::Collectable(ptr) => {
                 let captured = unsafe { &ptr.as_ref().object };
                 match captured {
-                    CollectableObject::Captured(value) => value.deref().clone(),
+                    CollectableObject::Captured(value) => (value as &Value).clone(),
                     _ => self,
                 }
             }
@@ -267,19 +267,19 @@ pub struct NoDropValue(ManuallyDrop<Value>);
 impl Deref for NoDropValue {
     type Target = Value;
     fn deref(&self) -> &<Self as std::ops::Deref>::Target {
-        self.0.deref()
+        &self.0
     }
 }
 
 impl DerefMut for NoDropValue {
     fn deref_mut(&mut self) -> &mut <Self as std::ops::Deref>::Target {
-        self.0.deref_mut()
+        &mut self.0
     }
 }
 
 impl fmt::Debug for NoDropValue {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Debug::fmt(self.deref(), formatter)
+        fmt::Debug::fmt(self as &Value, formatter)
     }
 }
 
@@ -309,7 +309,7 @@ impl NoDropValue {
     /// Users of this method **must** ensure that the new value will not be
     /// collected and then used.
     pub(super) unsafe fn duplicate(&self) -> Self {
-        NoDropValue(ManuallyDrop::new(match self.0.deref() {
+        NoDropValue(ManuallyDrop::new(match self as &Value {
             Value::Nil => Value::Nil,
             Value::Bool(b) => Value::Bool(*b),
             Value::Int(i) => Value::Int(*i),
