@@ -49,18 +49,12 @@ pub enum Operation {
 impl Operation {
     /// Returns `true` if this operator can be unary
     pub const fn is_unary(self) -> bool {
-        match self {
-            Self::Minus | Self::Not => true,
-            _ => false,
-        }
+        matches!(self, Self::Minus | Self::Not)
     }
 
     /// Returns `true` if this operator can be binary
     pub const fn is_binary(self) -> bool {
-        match self {
-            Self::Not => false,
-            _ => true,
-        }
+        !(matches!(self, Self::Not))
     }
 }
 
@@ -260,10 +254,9 @@ impl TokenKind {
     pub const fn is_constant(&self) -> bool {
         match self {
             Self::Int(_) | Self::Float(_) | Self::Str(_) => true,
-            Self::Keyword(keyword) => match keyword {
-                Keyword::Nil | Keyword::True | Keyword::False => true,
-                _ => false,
-            },
+            Self::Keyword(keyword) => {
+                matches!(keyword, Keyword::Nil | Keyword::True | Keyword::False)
+            }
             _ => false,
         }
     }
