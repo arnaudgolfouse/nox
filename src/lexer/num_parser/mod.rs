@@ -3,15 +3,6 @@
 //! sign - exponent - mantissa
 //! 1    - 11       - 52
 
-// number ::= "0x" ~ hexadigit+ ~ ( . ~ hexadigit* )?
-//
-//     | "0o" ~ octadigit+ ~ ( . ~ octadigit* )?
-//
-//     | "0o" ~ binarydigit+ ~ ( . ~ binarydigit* )?
-//
-//     | digit* ~ ( . ~ digit* )? ~ ( ("e" | "E") ~ ("+" | "-")? ~ digit* )?
-//
-
 mod from_rust_std;
 
 use super::Warning;
@@ -19,17 +10,18 @@ use from_rust_std::{DecimalFloat, ParseFloatError};
 use std::{convert::TryFrom, fmt};
 
 #[derive(Clone, Debug, Copy, PartialEq)]
-pub enum IntOrFloat {
+pub(super) enum IntOrFloat {
     Int(i64),
     Float(f64),
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
-pub enum Sign {
+enum Sign {
     Positive,
     Negative,
 }
 
+/// Base in which a number is parsed.
 #[derive(Clone, Debug, Copy, PartialEq, Eq, PartialOrd)]
 #[repr(u64)]
 pub enum Base {
@@ -40,25 +32,25 @@ pub enum Base {
 }
 
 impl Base {
-    pub const fn as_i64(self) -> i64 {
+    const fn as_i64(self) -> i64 {
         self as i64
     }
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
-pub struct Number<'a> {
-    pub integral: &'a [u8],
+struct Number<'a> {
+    integral: &'a [u8],
     /// `None` if this is an integer (no '.')
-    pub fractional: Option<&'a [u8]>,
+    fractional: Option<&'a [u8]>,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
-pub struct Decimal<'a> {
-    pub integral: &'a [u8],
+struct Decimal<'a> {
+    integral: &'a [u8],
     /// `None` if this is an integer (no '.' or 'e')
-    pub fractional: Option<&'a [u8]>,
+    fractional: Option<&'a [u8]>,
     /// The decimal exponent, guaranteed to have fewer than 18 decimal digits.
-    pub exp: i64,
+    exp: i64,
 }
 
 /// Extract the longest prefix from input where all elements match `predicate`.
@@ -89,7 +81,7 @@ const fn invalid_char(c: u8, base: Base) -> NumberError {
     }
 }
 
-pub fn parse_number(number: &str) -> Result<(IntOrFloat, Option<Warning>), NumberError> {
+pub(super) fn parse_number(number: &str) -> Result<(IntOrFloat, Option<Warning>), NumberError> {
     // we only reason on u8's
     let mut number = number.as_bytes();
     let sign = match number.get(0).copied() {
@@ -124,7 +116,7 @@ pub fn parse_number(number: &str) -> Result<(IntOrFloat, Option<Warning>), Numbe
 }
 
 /// Parse a number with the sign/base already parsed
-pub fn parse_number_with_sign_base(
+fn parse_number_with_sign_base(
     number: &[u8],
     sign: Sign,
     base: Base,

@@ -60,9 +60,11 @@ pub fn digits_to_big(integral: &[u8], fractional: &[u8]) -> Big {
     f
 }
 
-/// Unwraps a bignum into a 64 bit integer. Panics if the number is too large.
+/// Unwraps a bignum into a 64 bit integer, capping at `u64::MAX`.
 pub fn to_u64(x: &Big) -> u64 {
-    assert!(x.bit_length() < 64);
+    if x.bit_length() >= 64 {
+        return u64::MAX;
+    }
     let d = x.digits();
     if d.len() < 2 {
         u64::from(d[0])
@@ -76,7 +78,7 @@ pub fn to_u64(x: &Big) -> u64 {
 /// Index 0 is the least significant bit and the range is half-open as usual.
 /// Panics if asked to extract more bits than fit into the return type.
 pub fn get_bits(x: &Big, start: usize, end: usize) -> u64 {
-    assert!(end - start <= 64);
+    debug_assert!(end - start <= 64);
     let mut result: u64 = 0;
     for i in (start..end).rev() {
         result = result << 1 | u64::from(x.get_bit(i));

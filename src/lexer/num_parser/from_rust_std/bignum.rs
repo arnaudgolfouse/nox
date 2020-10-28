@@ -187,7 +187,7 @@ impl Big32x40 {
             *a = v;
             noborrow = c;
         }
-        assert!(noborrow);
+        debug_assert!(noborrow);
         self.size = sz;
         self
     }
@@ -216,7 +216,7 @@ impl Big32x40 {
         let digits = bits / digitbits;
         let bits = bits % digitbits;
 
-        assert!(digits < 40);
+        debug_assert!(digits < 40);
         debug_assert!(self.base[40 - digits..].iter().all(|&v| v == 0));
         debug_assert!(bits == 0 || (self.base[40 - digits - 1] >> (digitbits - bits)) == 0);
 
@@ -318,7 +318,7 @@ impl Big32x40 {
         // Stupid slow base-2 long division taken from
         // https://en.wikipedia.org/wiki/Division_algorithm
         // FIXME use a greater base (Digit32) for the long division.
-        assert!(!d.is_zero());
+        debug_assert!(!d.is_zero());
         let digitbits = mem::size_of::<Digit32>() * 8;
         for digit in &mut q.base[..] {
             *digit = 0;

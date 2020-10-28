@@ -169,18 +169,22 @@ impl RawFloat for f64 {
 }
 
 /// Converts an `Fp` to the closest machine float type.
-/// Does not handle subnormal results.
 pub fn fp_to_float(x: Fp) -> f64 {
     let x = x.normalize();
     // x.f is 64 bit, so x.e has a mantissa shift of 63
     let e = x.e + 63;
-    if e > <f64 as RawFloat>::MAX_EXP {
-        panic!("fp_to_float: exponent {} too large", e)
-    } else if e > <f64 as RawFloat>::MIN_EXP {
-        encode_normal(round_normal(x))
-    } else {
-        panic!("fp_to_float: exponent {} too small", e)
-    }
+    debug_assert!(
+        e <= <f64 as RawFloat>::MAX_EXP,
+        "fp_to_float: exponent {} too large",
+        e
+    );
+    debug_assert!(
+        e >= <f64 as RawFloat>::MIN_EXP,
+        "fp_to_float: exponent {} too small",
+        e
+    );
+
+    encode_normal(round_normal(x))
 }
 
 /// Round the 64-bit significand to T::SIG_BITS bits with half-to-even.
@@ -189,7 +193,7 @@ pub fn round_normal(x: Fp) -> Unpacked {
     let excess = 64 - <f64 as RawFloat>::SIG_BITS as i16;
     let half: u64 = 1 << (excess - 1);
     let (q, rem) = (x.f >> excess, x.f & ((1 << excess) - 1));
-    assert_eq!(q << excess | rem, x.f);
+    debug_assert_eq!(q << excess | rem, x.f);
     // Adjust mantissa shift
     let k = x.e + excess;
     if rem < half || (rem == half && (q % 2) == 0) {
@@ -221,20 +225,10 @@ pub fn encode_normal(x: Unpacked) -> f64 {
     f64::from_bits(bits)
 }
 
-/// Construct a subnormal. A mantissa of 0 is allowed and constructs zero.
-pub fn encode_subnormal(significand: u64) -> f64 {
-    assert!(
-        significand < <f64 as RawFloat>::MIN_SIG,
-        "encode_subnormal: not actually subnormal"
-    );
-    // Encoded exponent is 0, the sign bit is 0, so we just have to reinterpret the bits.
-    f64::from_bits(significand)
-}
-
 /// Approximate a bignum with an Fp. Rounds within 0.5 ULP with half-to-even.
 pub fn big_to_fp(f: &Big) -> Fp {
     let end = f.bit_length();
-    assert!(end != 0, "big_to_fp: unexpectedly, input is zero");
+    debug_assert!(end != 0, "big_to_fp: unexpectedly, input is zero");
     let start = end.saturating_sub(64);
     let leading = super::num::get_bits(f, start, end);
     // We cut off all bits prior to the index `start`, i.e., we effectively right-shift by
@@ -256,13 +250,10 @@ pub fn big_to_fp(f: &Big) -> Fp {
 }
 
 /// Finds the largest floating point number strictly smaller than the argument.
-/// Does not handle subnormals, zero, or exponent underflow.
+/// subnormals, zero, or exponent underflow are just returned.
 pub fn prev_float(x: f64) -> f64 {
     match x.classify() {
-        Infinite => panic!("prev_float: argument is infinite"),
-        Nan => panic!("prev_float: argument is NaN"),
-        Subnormal => panic!("prev_float: argument is subnormal"),
-        Zero => panic!("prev_float: argument is zero"),
+        Infinite | Nan | Subnormal | Zero => x,
         Normal => {
             let Unpacked { sig, k } = x.unpack();
             if sig == <f64 as RawFloat>::MIN_SIG {
@@ -277,10 +268,10 @@ pub fn prev_float(x: f64) -> f64 {
 // Find the smallest floating point number strictly larger than the argument.
 // This operation is saturating, i.e., next_float(inf) == inf.
 // Unlike most code in this module, this function does handle zero, subnormals, and infinities.
-// However, like all other code here, it does not deal with NaN and negative numbers.
+// Nan is just returned however.
 pub fn next_float(x: f64) -> f64 {
     match x.classify() {
-        Nan => panic!("next_float: argument is NaN"),
+        Nan => x,
         Infinite => f64::INFINITY,
         // This seems too good to be true, but it works.
         // 0.0 is encoded as the all-zero word. Subnormals are 0x000m...m where m is the mantissa.

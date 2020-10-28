@@ -16,7 +16,7 @@ const P: u32 = 64;
 // associated conditions can be omitted. This trades performance for a couple kilobytes of space.
 
 fn power_of_ten(e: i16) -> Fp {
-    assert!(e >= table::MIN_E);
+    debug_assert!(e >= table::MIN_E);
     let i = e - table::MIN_E;
     let sig = table::POWERS.0[i as usize];
     let exp = table::POWERS.1[i as usize];
@@ -349,7 +349,7 @@ fn quick_start(u: &mut Big, v: &mut Big, k: &mut i16) {
     let log2_v = v.bit_length() as i16;
     let mut u_shift: i16 = 0;
     let mut v_shift: i16 = 0;
-    assert!(*k == 0);
+    *k = 0;
     loop {
         if *k == <f64 as RawFloat>::MIN_EXP_INT {
             // Underflow or subnormal. Leave it to the main function.
@@ -377,7 +377,7 @@ fn quick_start(u: &mut Big, v: &mut Big, k: &mut i16) {
 fn underflow(x: Big, v: Big, rem: Big) -> f64 {
     if x < Big::from_u64(<f64 as RawFloat>::MIN_SIG) {
         let q = num::to_u64(&x);
-        let z = rawfp::encode_subnormal(q);
+        let z = f64::from_bits(q);
         return round_by_remainder(v, rem, q, z);
     }
     // Ratio isn't an in-range significand with the minimum exponent, so we need to round off

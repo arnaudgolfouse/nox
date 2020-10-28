@@ -1,11 +1,10 @@
 //! Decimal floats parsing.
 //!
 //! Directly taken from rust's std source code, with some simplification :
-//! macros have been replaced by their result, and f32 code was removed.
-//!
-//! Only allow parsing of decimal floats...
+//! macros have been replaced by their result, f32 code was removed...
 
 #![allow(clippy::many_single_char_names)]
+#![allow(clippy::panic)] // clippy does not recognize that `debug_assert` is ok :/
 
 mod algorithm;
 mod bignum;
