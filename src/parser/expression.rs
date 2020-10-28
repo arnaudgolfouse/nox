@@ -503,8 +503,8 @@ impl<'a> super::Parser<'a> {
                 }
                 kind => {
                     return Err(self.emit_error(
-                        ErrorKind::Unexpected(kind),
-                        Continue::Continue,
+                        ErrorKind::ExpectedId(Some(kind)),
+                        Continue::Stop,
                         token.range,
                     ));
                 }

@@ -486,7 +486,7 @@ impl<'a> Parser<'a> {
                             return Err(self.emit_error(
                                 ErrorKind::Expected(TokenKind::Keyword(Keyword::Then)),
                                 Continue::Stop,
-                                Range::new(token.range.start, token.range.start),
+                                token.range,
                             ))
                         }
                     }
@@ -976,10 +976,10 @@ impl<'a> Parser<'a> {
                     }
                     _ => {
                         return Err(self.emit_error(
-                            ErrorKind::Unexpected(token.kind),
+                            ErrorKind::ExpectedId(Some(token.kind)),
                             Continue::Stop,
                             token.range,
-                        ))
+                        ));
                     }
                 }
             } else {
