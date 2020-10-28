@@ -28,6 +28,15 @@ return (x - 5) * -0.5  # return -2.0
     .unwrap();
     assert_eq!(vm.run().unwrap(), Value::Float(-2.0));
     vm.reset();
+
+    vm.parse_top_level(
+        "
+return 4 + 7 + 8 - 5 - 9 # 5
+        ",
+    )
+    .unwrap();
+    assert_eq!(vm.run().unwrap(), Value::Int(5));
+    vm.reset();
 }
 
 #[test]

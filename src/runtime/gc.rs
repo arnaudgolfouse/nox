@@ -1,10 +1,14 @@
 //! Garbage collector
 //!
 //! I don't know why I keep this module public, it probably won't stay that way.
+//!
+//! TODO : Still very unsafe : in particular, the `GC` has a mutable access to
+//! every value it references... Ah ! But they should ONLY be mutated during
+//! destruction, aka when 'no one' can access them... hum
 
 use super::values::{NoDropValue, Value};
 use crate::parser::Chunk;
-use std::{collections::HashMap, fmt, mem::size_of, ops::Deref, ptr::NonNull, sync::Arc};
+use std::{collections::HashMap, fmt, mem::size_of, ptr::NonNull, sync::Arc};
 
 /// Meta-information about a collectable value.
 #[derive(Debug, Clone)]
@@ -23,9 +27,9 @@ impl GCHeader {
     /// Creates a header for a collectable object.
     ///
     /// This object will be rooted once to avoid collection.
-    pub const fn new(next: Option<NonNull<Collectable>>) -> Self {
+    pub const fn new() -> Self {
         Self {
-            next,
+            next: None,
             marked: false,
             roots: 1,
         }
@@ -72,6 +76,7 @@ impl fmt::Display for Collectable {
 }
 
 impl Collectable {
+    /// Add a root to the `Collectable`.
     #[inline]
     pub fn root(&mut self) {
         self.header.roots += 1
@@ -86,6 +91,9 @@ impl Collectable {
         self.header.roots -= 1
     }
 
+    /// If `self` is a captured value, return it.
+    ///
+    /// Else, return `None`.
     #[inline]
     pub fn as_captured(&self) -> Option<&Value> {
         match &self.object {
@@ -94,6 +102,7 @@ impl Collectable {
         }
     }
 
+    /// Returns The list of values rattached to this one.
     fn to_mark(&self) -> Vec<&Self> {
         match &self.object {
             CollectableObject::Captured(value) => match value.as_collectable() {
@@ -129,17 +138,18 @@ impl Collectable {
         }
     }
 
+    /// Returns the entire on-heap size of this object.
     fn size(&self) -> usize {
-        const SIZE: usize = size_of::<Collectable>();
-        match &self.object {
-            CollectableObject::Table(table) => {
-                SIZE + size_of::<(Value, Value)>() * table.capacity()
+        size_of::<Collectable>()
+            + match &self.object {
+                CollectableObject::Table(table) => {
+                    size_of::<(NoDropValue, NoDropValue)>() * table.capacity()
+                }
+                CollectableObject::Function {
+                    captured_variables, ..
+                } => size_of::<NoDropValue>() * captured_variables.capacity(),
+                CollectableObject::Captured(_) => 0,
             }
-            CollectableObject::Function {
-                captured_variables, ..
-            } => SIZE + size_of::<Value>() * captured_variables.capacity(),
-            CollectableObject::Captured(_) => SIZE,
-        }
     }
 }
 
@@ -172,10 +182,15 @@ impl GC {
     }
 
     /// Drop a value, and updates the amount of allocated memory.
-    fn drop_value(&mut self, value: &mut Collectable) {
+    ///
+    /// # Safety
+    ///
+    /// The `value` reference immediately becomes invalid.
+    unsafe fn drop_value(&mut self, mut value: NonNull<Collectable>) {
+        let value = value.as_mut();
         self.allocated -= value.size();
-        // we created this value using `into_raw`, so we free it with `from_raw`.
-        drop(unsafe { Box::from_raw(value as *mut Collectable) })
+        // we created this value using `leak`, so we free it with `from_raw`.
+        drop(Box::from_raw(value as *mut Collectable))
     }
 
     /// Check that `additional` more bytes won't go over the threshold.
@@ -243,7 +258,7 @@ impl GC {
                     }
                     values
                 }),
-                CollectableObject::Captured(value) => self.new_captured(value.deref().clone()),
+                CollectableObject::Captured(value) => self.new_captured((value as &Value).clone()),
             },
             _ => value.clone(),
         }
@@ -281,7 +296,7 @@ impl GC {
     ) -> Value {
         captured_variables.shrink_to_fit();
         let collectable = Collectable {
-            header: GCHeader::new(None),
+            header: GCHeader::new(),
             object: CollectableObject::Function {
                 chunk,
                 captured_variables,
@@ -300,7 +315,7 @@ impl GC {
             value
         } else {
             let collectable = Collectable {
-                header: GCHeader::new(None),
+                header: GCHeader::new(),
                 object: CollectableObject::Captured(unsafe { NoDropValue::new(value) }),
             };
             self.make_collectable(collectable)
@@ -312,7 +327,7 @@ impl GC {
     /// The new table will be rooted.
     pub fn new_table(&mut self) -> Value {
         let collectable = Collectable {
-            header: GCHeader::new(None),
+            header: GCHeader::new(),
             object: CollectableObject::Table(HashMap::new()),
         };
         self.make_collectable(collectable)
@@ -405,22 +420,22 @@ impl GC {
 
     /// Delete all unmarked values.
     fn sweep(&mut self) {
-        while let Some(mut value) = self.first {
-            let value = unsafe { value.as_mut() };
+        while let Some(mut ptr) = self.first {
+            let value = unsafe { ptr.as_mut() };
             if value.header.marked {
                 break;
             }
             self.first = value.header.next;
-            self.drop_value(value);
+            unsafe { self.drop_value(ptr) }
         }
         let mut current = self.first;
         while let Some(mut value) = current {
             let value = unsafe { value.as_mut() };
-            if let Some(mut next) = value.header.next {
-                let next = unsafe { next.as_mut() };
+            if let Some(mut next_ptr) = value.header.next {
+                let next = unsafe { next_ptr.as_mut() };
                 if !next.header.marked {
                     value.header.next = next.header.next;
-                    self.drop_value(next);
+                    unsafe { self.drop_value(next_ptr) }
                 } else {
                     current = value.header.next;
                 }
@@ -447,7 +462,7 @@ impl GC {
         while let Some(mut ptr) = self.first {
             let value = ptr.as_mut();
             self.first = value.header.next.take();
-            self.drop_value(value);
+            self.drop_value(ptr);
         }
     }
 }

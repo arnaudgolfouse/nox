@@ -86,12 +86,9 @@ impl VM {
     ///
     /// # Errors
     ///
-    /// Any parsing error is converted to [`VMError`](struct.VMError.html) and
+    /// Any parsing error is converted to [`VMError`](enum.VMError.html) and
     /// returned.
-    pub fn parse_top_level<'a>(
-        &mut self,
-        source: &'a str,
-    ) -> Result<Vec<parser::Warning>, VMError> {
+    pub fn parse_top_level(&mut self, source: &str) -> Result<Vec<parser::Warning>, VMError> {
         self.partial_reset();
         let parser = Parser::new(crate::Source::TopLevel(source));
         let (chunk, warnings) = parser.parse_top_level()?;
@@ -103,12 +100,9 @@ impl VM {
     ///
     /// # Errors
     ///
-    /// Any parsing error is converted to [`VMError`](struct.VMError.html) and
+    /// Any parsing error is converted to [`VMError`](enum.VMError.html) and
     /// returned.
-    pub fn parse_source<'a>(
-        &mut self,
-        source: Source<'a>,
-    ) -> Result<Vec<parser::Warning>, VMError> {
+    pub fn parse_source(&mut self, source: Source) -> Result<Vec<parser::Warning>, VMError> {
         self.partial_reset();
         let parser = Parser::new(source);
         let (chunk, warnings) = parser.parse_top_level()?;
@@ -126,7 +120,7 @@ impl VM {
     ///
     /// # Errors
     ///
-    /// If one of the symbols of the library tries to replace an already defined
+    /// If the name of the library tries to replace an already defined
     /// global variable,
     /// [`RuntimeError::NameAlreadyDefined`](enum.RuntimeError.html#variant.NameAlreadyDefined)
     /// is emmited.
@@ -228,7 +222,7 @@ impl VM {
     ///
     /// # Errors
     ///
-    /// See [`VMError`](struct.VMError.html)
+    /// See [`VMError`](enum.VMError.html)
     pub fn run(&mut self) -> Result<RValue, VMError> {
         // for variables
         for _ in 0..self.chunk.locals_number {
@@ -270,8 +264,12 @@ impl VM {
         }
     }
 
-    /// push a value onto the stack
-    pub fn push<'a>(&'a mut self, value: RValue<'a>) {
+    /// push a value onto the stack.
+    ///
+    /// # Safety
+    ///
+    /// The value **must** originate from this `VM`.
+    pub unsafe fn push<'a>(&'a mut self, value: RValue<'a>) {
         // no need to root since `value` will never be dropped.
         self.stack.push(value.into_raw())
     }
@@ -449,7 +447,7 @@ impl VM {
     ///
     /// # Errors
     ///
-    /// See [`VMError`](struct.VMError.html)
+    /// See [`VMError`](enum.VMError.html)
     pub fn call(&mut self, nb_args: usize) -> Result<(), VMError> {
         self.call_internal(nb_args)
             .map_err(|err| self.make_error(err))

@@ -360,18 +360,51 @@ mod tests {
     use super::*;
     #[test]
     fn hash_and_eq() {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        use std::collections::hash_map::DefaultHasher;
         let v1 = Value::String("x".into());
         let v2 = Value::String("x".into());
         assert_eq!(v1, v2);
-        assert_eq!(v1.hash(&mut hasher), v2.hash(&mut hasher));
+        assert_eq!(
+            {
+                let mut hasher = DefaultHasher::new();
+                v1.hash(&mut hasher);
+                hasher.finish()
+            },
+            {
+                let mut hasher = DefaultHasher::new();
+                v2.hash(&mut hasher);
+                hasher.finish()
+            }
+        );
         let v1 = Value::Int(8);
         let v2 = Value::Int(8);
         assert_eq!(v1, v2);
-        assert_eq!(v1.hash(&mut hasher), v2.hash(&mut hasher));
+        assert_eq!(
+            {
+                let mut hasher = DefaultHasher::new();
+                v1.hash(&mut hasher);
+                hasher.finish()
+            },
+            {
+                let mut hasher = DefaultHasher::new();
+                v2.hash(&mut hasher);
+                hasher.finish()
+            }
+        );
         let v1 = Value::Float(1.25);
         let v2 = Value::Float(1.25);
         assert_eq!(v1, v2);
-        assert_eq!(v1.hash(&mut hasher), v2.hash(&mut hasher));
+        assert_eq!(
+            {
+                let mut hasher = DefaultHasher::new();
+                v1.hash(&mut hasher);
+                hasher.finish()
+            },
+            {
+                let mut hasher = DefaultHasher::new();
+                v2.hash(&mut hasher);
+                hasher.finish()
+            }
+        );
     }
 }

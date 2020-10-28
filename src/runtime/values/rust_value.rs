@@ -18,7 +18,7 @@
 //!     vm.parse_top_level("return { x = 0 }").unwrap();
 //!     vm.run().unwrap()
 //! };
-//! other_vm.push(table);
+//! unsafe { other_vm.push(table) }
 //! ```
 
 use super::Value;

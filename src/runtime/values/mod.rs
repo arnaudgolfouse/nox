@@ -11,7 +11,7 @@ pub use rust_value::RValue;
 use std::{
     collections::HashMap,
     fmt,
-    mem::ManuallyDrop,
+    //mem::ManuallyDrop,
     ops::{Deref, DerefMut},
     ptr::NonNull,
     sync::Arc,
@@ -262,7 +262,16 @@ impl Value {
 /// A `NoDropValue` *can* have 0 roots, but then it **must** be referenced by a
 /// rooted object, or be ready to be collected.
 #[derive(Hash, PartialEq, Eq)]
-pub struct NoDropValue(ManuallyDrop<Value>);
+pub struct NoDropValue(Value);
+
+impl Drop for NoDropValue {
+    fn drop(&mut self) {
+        // exactly the opposite of Value::drop
+        if let Value::Collectable(obj) = &mut self.0 {
+            unsafe { obj.as_mut().root() }
+        }
+    }
+}
 
 impl Deref for NoDropValue {
     type Target = Value;
@@ -293,7 +302,7 @@ impl NoDropValue {
     /// avoid collections.
     pub(super) unsafe fn new(mut value: Value) -> Self {
         value.unroot();
-        Self(ManuallyDrop::new(value))
+        Self(value)
     }
 
     /// Acts like an unsafe `clone` method for `NoDropValue`.
@@ -309,7 +318,7 @@ impl NoDropValue {
     /// Users of this method **must** ensure that the new value will not be
     /// collected and then used.
     pub(super) unsafe fn duplicate(&self) -> Self {
-        Self(ManuallyDrop::new(match self as &Value {
+        Self(match &self.0 {
             Value::Nil => Value::Nil,
             Value::Bool(b) => Value::Bool(*b),
             Value::Int(i) => Value::Int(*i),
@@ -317,6 +326,6 @@ impl NoDropValue {
             Value::String(s) => Value::String(s.clone()),
             Value::Collectable(ptr) => Value::Collectable(*ptr),
             Value::RustFunction(func) => Value::RustFunction(func.clone()),
-        }))
+        })
     }
 }
