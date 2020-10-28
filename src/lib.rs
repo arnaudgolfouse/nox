@@ -16,6 +16,7 @@
 //!
 //! - Benchmarks can be run by activating the `bench` feature :
 //! `cargo bench --bench *** --features bench`.
+#![cfg_attr(not(test), warn(clippy::panic))]
 
 mod error;
 pub mod lexer;

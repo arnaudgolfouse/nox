@@ -167,8 +167,8 @@ fn binary_ops() {
             ReadConstant(1),
             ReadConstant(2),
             Multiply,
-            ReadConstant(3),
             Add,
+            ReadConstant(3),
             Add,
             Return,
             PushNil,
@@ -214,8 +214,28 @@ fn binary_ops() {
     assert_eq!(
         chunk.code,
         [
-            PushTrue, Not, PushFalse, And, PushFalse, PushTrue, Equal, PushTrue, PushTrue, Not, Or,
-            Xor, Or, Return, PushNil, Return
+            PushTrue, Not, PushFalse, And, PushFalse, PushTrue, Equal, Or, PushTrue, Xor, PushTrue,
+            Not, Or, Return, PushNil, Return
+        ]
+    );
+
+    let parser = Parser::new(Source::TopLevel("return  5 + 9 + 2 - 3 - 1"));
+    let (chunk, _) = parser.parse_top_level().unwrap();
+    assert_eq!(
+        chunk.code,
+        [
+            ReadConstant(0),
+            ReadConstant(1),
+            Add,
+            ReadConstant(2),
+            Add,
+            ReadConstant(3),
+            Subtract,
+            ReadConstant(4),
+            Subtract,
+            Return,
+            PushNil,
+            Return
         ]
     );
 }
@@ -604,10 +624,12 @@ fn functions() {
     let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, []);
     assert_eq!(chunk.globals[0].as_ref(), "x");
+    // top-level
     assert_eq!(
         chunk.code,
         [ReadFunction(0), WriteGlobal(0), PushNil, Return]
     );
+    // fn() ...
     assert_eq!(
         chunk.functions[0].code,
         [
@@ -622,13 +644,14 @@ fn functions() {
             Return
         ]
     );
+    // fn(a, b) ...
     assert_eq!(
         chunk.functions[0].functions[0].code,
         [
             ReadCaptured(0),
             ReadLocal(0),
-            ReadLocal(1),
             Add,
+            ReadLocal(1),
             Add,
             Return,
             PushNil,

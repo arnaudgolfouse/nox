@@ -26,7 +26,7 @@ pub(super) enum Precedence {
     Factor = 8,
     /// `%`
     Modulo = 9,
-    /// '^'
+    /// `^`
     Pow = 10,
     /// `not` `-`
     Unary = 11,
@@ -158,7 +158,7 @@ impl<'a> super::Parser<'a> {
                                 break;
                             }
                         };
-                        if precedence > op_precedence {
+                        if precedence >= op_precedence {
                             break;
                         }
                         let range = token.range;
