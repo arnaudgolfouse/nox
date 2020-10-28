@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 colored = "2.0"
-rustyline = "6.2"
+rustyline = "6.3"
 criterion = { version = "0.3", optional = true }
 
 [profile.release]
