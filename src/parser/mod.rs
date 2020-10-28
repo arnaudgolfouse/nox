@@ -24,7 +24,7 @@ use crate::{
 pub use bytecode::Chunk;
 pub(crate) use bytecode::{Constant, Instruction};
 use expression::ExpressionType;
-use std::fmt;
+use std::{fmt, iter::Peekable};
 
 /// Indicate what to do after successfully parsing a statement.
 #[derive(Debug, Clone, Copy)]
@@ -132,8 +132,9 @@ impl Function {
 
 /// Parser for the nox language.
 pub struct Parser<'a> {
+    source: Source<'a>,
     /// Associated lexer
-    lexer: Lexer<'a>,
+    lexer: Peekable<Lexer<'a>>,
     /// Errors encoutered while parsing
     errors: Vec<Error>,
     /// Warnings encoutered while parsing
@@ -142,6 +143,10 @@ pub struct Parser<'a> {
     top_level: Function,
     /// Nested functions
     function_stack: Vec<Function>,
+    /// Range of the currently parsed Token
+    current_range: Range,
+    /// Range of the next token
+    next_range: Range,
 }
 
 // fn f()          // -
@@ -160,19 +165,22 @@ impl<'a> Parser<'a> {
     pub fn new(source: Source<'a>) -> Self {
         let name = Box::from(source.name());
         Self {
-            lexer: Lexer::new(source),
+            source: source.clone(),
+            lexer: Lexer::new(source).peekable(),
             errors: Vec::new(),
             warnings: Vec::new(),
             top_level: Function::new_top_level(name),
             function_stack: Vec::new(),
+            current_range: Range::default(),
+            next_range: Range::default(),
         }
     }
 
-    /// Return a `Range` at the current position
+    /*/// Return a `Range` at the current position
     #[inline]
     const fn current_range(&self) -> Range {
         Range::new(self.current_position(), self.current_position())
-    }
+    }*/
 
     /// Returns the code for the function we are currently parsing.
     #[inline]
@@ -187,8 +195,7 @@ impl<'a> Parser<'a> {
     /// emit a new instruction at the current line.
     #[inline]
     fn emit_instruction<Op: bytecode::Operand>(&mut self, instruction: Instruction<Op>) {
-        // yes, the previous start... This is because `Lexer` is always one token ahead.
-        let line = self.lexer.previous_start.line;
+        let line = self.current_range.start.line;
         self.code().emit_instruction(instruction, line)
     }
 
@@ -196,33 +203,54 @@ impl<'a> Parser<'a> {
     /// `emit_instruction::<u8>`.
     #[inline]
     fn emit_instruction_u8(&mut self, instruction: Instruction<u8>) {
-        // yes, the previous start... This is because `Lexer` is always one token ahead.
-        let line = self.lexer.previous_start.line;
+        let line = self.current_range.start.line;
         self.code().emit_instruction_u8(instruction, line)
     }
 
     /// Returns the next token (or an error), and log an eventual warning.
+    ///
+    /// Also update `current_range`, `next_range` with the eventual token/error range.
     #[inline]
-    fn next(&mut self) -> Result<Option<Token>, Error> {
-        let next_token = self.lexer.next()?;
-        if let Some(token) = &next_token {
-            if let Some(warning) = token.warning {
-                self.emit_warning(WarningKind::Lexer(warning), token.range)
+    fn next(&mut self) -> Option<Result<Token, Error>> {
+        self.current_range = self.next_range;
+        let result = match self.lexer.next() {
+            Some(Ok(token)) => {
+                if let Some(warning) = token.warning {
+                    self.emit_warning(WarningKind::Lexer(warning), token.range)
+                }
+                Some(Ok(token))
             }
+            Some(Err(err)) => Some(Err(err.into())),
+            None => None,
+        };
+        self.next_range = if let Some(t) = self.lexer.peek() {
+            match t {
+                Ok(token) => token.range,
+                Err(err) => err.range,
+            }
+        } else {
+            Range::new(self.next_range.end, self.next_range.end)
+        };
+
+        result
+    }
+
+    /// Peek and transpose the lexer, cloning the error if necessary
+    #[inline]
+    fn peek_transpose(&mut self) -> Result<Option<&Token>, Error> {
+        match self.lexer.peek() {
+            None => Ok(None),
+            Some(Ok(token)) => Ok(Some(token)),
+            Some(Err(err)) => Err(err.clone().into()),
         }
-        Ok(next_token)
     }
 
-    /// Peek at the next token, or returns an error.
+    /// Return a range at the end of the current token.
+    ///
+    /// Intended for use when there are no more tokens.
     #[inline]
-    fn peek(&self) -> Result<Option<&Token>, Error> {
-        self.lexer.peek().map_err(Error::from)
-    }
-
-    /// Returns the current position of the lexer.
-    #[inline]
-    const fn current_position(&self) -> crate::Position {
-        self.lexer.position
+    const fn end_current_range(&self) -> Range {
+        Range::new(self.current_range.end, self.current_range.end)
     }
 
     /// Creates an error.
@@ -232,8 +260,8 @@ impl<'a> Parser<'a> {
             kind,
             continuable,
             range,
-            source: self.lexer.source.content().into(),
-            source_name: self.lexer.source.name().into(),
+            source: self.source.content().into(),
+            source_name: self.source.name().into(),
         }
     }
 
@@ -243,19 +271,15 @@ impl<'a> Parser<'a> {
         self.warnings.push(Warning {
             kind,
             range,
-            source: self.lexer.source.content().into(),
-            source_name: self.lexer.source.name().into(),
+            source: self.source.content().into(),
+            source_name: self.source.name().into(),
         })
     }
 
     /// Emit a `Expected [token]` error at the current position, continuable.
     #[inline]
-    fn expected_token(&self, kind: TokenKind) -> Error {
-        self.emit_error(
-            ErrorKind::Expected(kind),
-            Continue::Continue,
-            self.current_range(),
-        )
+    fn expected_token(&self, kind: TokenKind, range: Range) -> Error {
+        self.emit_error(ErrorKind::Expected(kind), Continue::Continue, range)
     }
 
     /// Returns the current scope.
@@ -326,10 +350,10 @@ impl<'a> Parser<'a> {
             self.top_level.code.locals_number = self.top_level.variables.len();
             self.top_level
                 .code
-                .emit_instruction_u8(Instruction::PushNil, self.current_position().line);
+                .emit_instruction_u8(Instruction::PushNil, self.current_range.end.line);
             self.top_level
                 .code
-                .emit_instruction_u8(Instruction::Return, self.current_position().line);
+                .emit_instruction_u8(Instruction::Return, self.current_range.end.line);
             Ok((self.top_level.code, self.warnings))
         } else {
             Err(self.errors)
@@ -342,8 +366,8 @@ impl<'a> Parser<'a> {
     fn panic_mode(&mut self) -> bool {
         #[allow(unused_must_use)]
         loop {
-            match self.peek() {
-                Ok(Some(token)) => match token.kind {
+            match self.lexer.peek() {
+                Some(Ok(token)) => match token.kind {
                     TokenKind::Keyword(Keyword::Return)
                     | TokenKind::Keyword(Keyword::If)
                     | TokenKind::Keyword(Keyword::Else)
@@ -357,10 +381,10 @@ impl<'a> Parser<'a> {
                     | TokenKind::Id(_) => return false,
                     _ => {}
                 },
-                Ok(None) => return true,
-                Err(err) => {
-                    self.errors.push(err);
+                Some(Err(err)) => {
+                    self.errors.push(err.clone().into());
                 }
+                None => return true,
             }
             self.next();
         }
@@ -369,22 +393,22 @@ impl<'a> Parser<'a> {
     /// Main parsing function : parse a statement, and returns wether the end
     /// of the current function / the top-level, or an error is encountered.
     fn parse_statement(&mut self) -> Result<ParseReturn, Error> {
-        let first_token = match self.next()? {
-            Some(token) => token,
+        let first_token = match self.next() {
             None => {
                 return if self.scope().is_some() || !self.function_stack.is_empty() {
-                    Err(self.expected_token(TokenKind::Keyword(Keyword::End)))
+                    Err(self.expected_token(TokenKind::Keyword(Keyword::End), self.next_range))
                 } else {
                     Ok(ParseReturn::Stop)
                 }
             }
+            Some(token) => token?,
         };
 
         match &first_token.kind {
             // return <expression>
             TokenKind::Keyword(Keyword::Return) => {
                 let line = first_token.range.start.line;
-                let token = self.next()?;
+                let token = self.next().transpose()?;
                 self.parse_expression(token, true)?;
                 self.code()
                     .emit_instruction::<u8>(Instruction::Return, line)
@@ -431,7 +455,7 @@ impl<'a> Parser<'a> {
                         }
                     }
                 } else if let Some(mut function) = self.function_stack.pop() {
-                    let line = self.current_position().line;
+                    let line = self.next_range.start.line;
                     function
                         .code
                         .emit_instruction_u8(Instruction::PushNil, line);
@@ -453,9 +477,9 @@ impl<'a> Parser<'a> {
             }
             // if <expression> then <statements> (<else_stm>)? end
             TokenKind::Keyword(Keyword::If) => {
-                let token = self.next()?;
+                let token = self.next().transpose()?;
                 self.parse_expression(token, true)?;
-                if let Some(token) = self.next()? {
+                if let Some(token) = self.next().transpose()? {
                     match token.kind {
                         TokenKind::Keyword(Keyword::Then) => {}
                         _ => {
@@ -467,7 +491,9 @@ impl<'a> Parser<'a> {
                         }
                     }
                 } else {
-                    return Err(self.expected_token(TokenKind::Keyword(Keyword::Then)));
+                    return Err(
+                        self.expected_token(TokenKind::Keyword(Keyword::Then), self.next_range)
+                    );
                 }
                 let if_address = self.code().push_jump();
                 self.push_scope(Scope::If(if_address));
@@ -491,7 +517,7 @@ impl<'a> Parser<'a> {
             // while <expression> <statements> end
             TokenKind::Keyword(Keyword::While) => {
                 let prepare_loop = self.code().push_jump();
-                let token = self.next()?;
+                let token = self.next().transpose()?;
                 self.parse_expression(token, true)?;
                 // We **can** subtract 1 because parsing an expression always produces instructions.
                 // We **need** to because the offset is from the instruction right AFTER the `PrepareWhile`
@@ -507,10 +533,10 @@ impl<'a> Parser<'a> {
                 self.push_scope(Scope::Dummy);
                 // parse the `for` loop variable and the following `in`
                 // Returns an empty `Box<str>` if the variable is a placeholder.
-                let for_variable = if let Some(token) = self.next()? {
+                let for_variable = if let Some(token) = self.next().transpose()? {
                     match token.kind {
                         TokenKind::Id(_) | TokenKind::Placeholder => {
-                            if let Some(token) = self.next()? {
+                            if let Some(token) = self.next().transpose()? {
                                 match token.kind {
                                     TokenKind::Keyword(Keyword::In) => {}
                                     _ => {
@@ -525,7 +551,7 @@ impl<'a> Parser<'a> {
                                 return Err(self.emit_error(
                                     ErrorKind::Expected(TokenKind::Keyword(Keyword::In)),
                                     Continue::Continue,
-                                    self.current_range(),
+                                    self.next_range,
                                 ));
                             }
                             if let TokenKind::Id(variable) = token.kind {
@@ -546,11 +572,11 @@ impl<'a> Parser<'a> {
                     return Err(self.emit_error(
                         ErrorKind::ExpectedId(None),
                         Continue::Continue,
-                        self.current_range(),
+                        self.next_range,
                     ));
                 };
 
-                let token = self.next()?;
+                let token = self.next().transpose()?;
                 self.parse_expression(token, true)?;
                 let prepare_loop = self.code().push_jump();
                 self.emit_instruction_u8(Instruction::DuplicateTop(0));
@@ -579,32 +605,28 @@ impl<'a> Parser<'a> {
             }
             // fn <id>((<id>,)*) <statements> end
             TokenKind::Keyword(Keyword::Fn) => {
-                let function = match self.peek()? {
+                let function = match self.peek_transpose()? {
                     // named function
                     Some(Token {
                         kind: TokenKind::Id(func_name),
                         ..
                     }) => {
                         let func_name = func_name.clone();
-                        self.next()?;
-                        match self.next()? {
+                        self.next().transpose()?;
+                        match self.next().transpose()? {
                             Some(Token {
                                 kind: TokenKind::LPar,
                                 ..
                             }) => {}
-                            token => {
+                            _ => {
                                 return Err(self.emit_error(
                                     ErrorKind::Expected(TokenKind::LPar),
                                     Continue::Stop,
-                                    if let Some(token) = token {
-                                        token.range
-                                    } else {
-                                        self.current_range()
-                                    },
+                                    self.current_range,
                                 ))
                             }
                         };
-                        let line = self.current_position().line;
+                        let line = self.current_range.start.line;
                         let func = self.parse_prototype(func_name.clone(), false)?;
                         self.write_variable(func_name, line);
                         func
@@ -619,15 +641,8 @@ impl<'a> Parser<'a> {
                             .map(|_| ParseReturn::Continue);
                     }
                     token => {
-                        return Err(self.emit_error(
-                            ErrorKind::ExpectedId(token.map(|t| t.kind.clone())),
-                            Continue::Stop,
-                            if let Some(token) = token {
-                                token.range
-                            } else {
-                                self.current_range()
-                            },
-                        ))
+                        let kind = ErrorKind::ExpectedId(token.map(|t| t.kind.clone()));
+                        return Err(self.emit_error(kind, Continue::Stop, self.next_range));
                     }
                 };
                 self.function_stack.push(function);
@@ -661,7 +676,7 @@ impl<'a> Parser<'a> {
             // global <id>
             TokenKind::Keyword(Keyword::Global) => {
                 let global_start = first_token.range.start;
-                if let Some(token) = self.next()? {
+                if let Some(token) = self.next().transpose()? {
                     match token.kind {
                         TokenKind::Id(variable) => {
                             if self.scope().is_some() {
@@ -711,15 +726,15 @@ impl<'a> Parser<'a> {
                     return Err(self.emit_error(
                         ErrorKind::ExpectedId(None),
                         Continue::Continue,
-                        self.current_range(),
+                        self.next_range,
                     ));
                 }
             }
             // _ = <expression>
             TokenKind::Placeholder => {
-                if let Some(token) = self.next()? {
+                if let Some(token) = self.next().transpose()? {
                     if token.kind == TokenKind::Assign(Assign::Equal) {
-                        let token = self.next()?;
+                        let token = self.next().transpose()?;
                         self.parse_expression(token, true)?;
                         self.emit_instruction_u8(Instruction::Pop(1));
                     } else {
@@ -886,11 +901,11 @@ impl<'a> Parser<'a> {
     /// Parse a variable assignement, assuming the variable and the assignement
     /// token have already been parsed.
     fn assign_variable(&mut self, variable: Box<str>, assignement: Assign) -> Result<(), Error> {
-        let line = self.current_position().line;
+        let line = self.current_range.end.line;
         if !matches!(assignement, Assign::Equal) {
             self.parse_variable(variable.clone(), true)?;
         }
-        let token = self.next()?;
+        let token = self.next().transpose()?;
         self.parse_expression(token, true)?;
         match assignement {
             Assign::Equal => {}
@@ -915,7 +930,7 @@ impl<'a> Parser<'a> {
             self.emit_instruction_u8(Instruction::ReadTable);
         }
 
-        let token = self.next()?;
+        let token = self.next().transpose()?;
         self.parse_expression(token, true)?;
 
         match assignement {
@@ -938,12 +953,12 @@ impl<'a> Parser<'a> {
     fn parse_prototype(&mut self, name: Box<str>, closure: bool) -> Result<Function, Error> {
         let mut args = Vec::new();
         loop {
-            if let Some(token) = self.next()? {
+            if let Some(token) = self.next().transpose()? {
                 match token.kind {
                     TokenKind::RPar => break,
                     TokenKind::Id(arg) => {
                         args.push(arg);
-                        if let Some(token) = self.next()? {
+                        if let Some(token) = self.next().transpose()? {
                             match token.kind {
                                 TokenKind::Comma => {}
                                 TokenKind::RPar => break,
@@ -956,7 +971,7 @@ impl<'a> Parser<'a> {
                                 }
                             }
                         } else {
-                            return Err(self.expected_token(TokenKind::RPar));
+                            return Err(self.expected_token(TokenKind::RPar, token.range));
                         }
                     }
                     _ => {
@@ -968,7 +983,7 @@ impl<'a> Parser<'a> {
                     }
                 }
             } else {
-                return Err(self.expected_token(TokenKind::RPar));
+                return Err(self.expected_token(TokenKind::RPar, self.end_current_range()));
             }
         }
         let index = self.code().functions.len();
@@ -1005,22 +1020,22 @@ impl<'a> Parser<'a> {
     fn expression_statement(&mut self, first_token: Token) -> Result<(), Error> {
         let start = first_token.range.start;
         let expression_type = self.parse_expression(Some(first_token), false)?;
-        let expression_range = Range::new(start, self.lexer.previous_end);
+        let expression_range = Range::new(start, self.current_range.end);
         match expression_type {
             ExpressionType::Assign {
                 variable,
                 assign_type,
                 ..
             } => {
-                self.next()?;
+                self.next().transpose()?;
                 self.assign_variable(variable, assign_type)?
             }
             ExpressionType::TableWrite(ass) => {
-                self.next()?;
+                self.next().transpose()?;
                 self.assign_table(ass)?
             }
             ExpressionType::Call => {
-                if matches!(self.peek(), Ok(Some(Token { kind: TokenKind::Assign(_), .. }))) {
+                if matches!(self.lexer.peek(), Some(Ok(Token { kind: TokenKind::Assign(_), .. }))) {
                     return Err(self.emit_error(
                         ErrorKind::NonAssignable,
                         Continue::Stop,
@@ -1033,7 +1048,7 @@ impl<'a> Parser<'a> {
                 return if let Some(Token {
                     kind: TokenKind::Assign(_),
                     ..
-                }) = self.peek()?
+                }) = self.peek_transpose()?
                 {
                     Err(self.emit_error(ErrorKind::NonAssignable, Continue::Stop, expression_range))
                 } else {

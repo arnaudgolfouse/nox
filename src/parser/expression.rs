@@ -120,7 +120,7 @@ impl<'a> super::Parser<'a> {
             return Err(self.emit_error(
                 ErrorKind::ExpectExpression,
                 Continue::Stop,
-                Range::new(self.current_position(), self.current_position()),
+                self.end_current_range(),
             ));
         };
 
@@ -129,54 +129,55 @@ impl<'a> super::Parser<'a> {
             if matches!(expression_type, ExpressionType::Assign{..}) {
                 return Ok(expression_type);
             }
-            if let Some(token) = self.peek()? {
-                expression_type = match &token.kind {
-                    TokenKind::LBracket => {
-                        self.next()?;
-                        self.parse_brackets(read_only)
-                    }
-                    TokenKind::Dot => {
-                        self.next()?;
-                        self.parse_dot(read_only)
-                    }
-                    TokenKind::Op(op) => {
-                        let op = *op;
-                        let op_precedence = match op {
-                            Operation::Or | Operation::Xor => Precedence::Or,
-                            Operation::And => Precedence::And,
-                            Operation::Equal | Operation::NEqual => Precedence::Equality,
-                            Operation::Less
-                            | Operation::More
-                            | Operation::LessEq
-                            | Operation::MoreEq => Precedence::Comparison,
-                            Operation::ShiftLeft | Operation::ShiftRight => Precedence::Shifts,
-                            Operation::Plus | Operation::Minus => Precedence::Term,
-                            Operation::Multiply | Operation::Divide => Precedence::Factor,
-                            Operation::Pow => Precedence::Pow,
-                            Operation::Modulo => Precedence::Modulo,
-                            _ => {
+            match self.peek_transpose()? {
+                Some(token) => {
+                    expression_type = match &token.kind {
+                        TokenKind::LBracket => {
+                            self.next().transpose()?;
+                            self.parse_brackets(read_only)
+                        }
+                        TokenKind::Dot => {
+                            self.next().transpose()?;
+                            self.parse_dot(read_only)
+                        }
+                        TokenKind::Op(op) => {
+                            let op = *op;
+                            let op_precedence = match op {
+                                Operation::Or | Operation::Xor => Precedence::Or,
+                                Operation::And => Precedence::And,
+                                Operation::Equal | Operation::NEqual => Precedence::Equality,
+                                Operation::Less
+                                | Operation::More
+                                | Operation::LessEq
+                                | Operation::MoreEq => Precedence::Comparison,
+                                Operation::ShiftLeft | Operation::ShiftRight => Precedence::Shifts,
+                                Operation::Plus | Operation::Minus => Precedence::Term,
+                                Operation::Multiply | Operation::Divide => Precedence::Factor,
+                                Operation::Pow => Precedence::Pow,
+                                Operation::Modulo => Precedence::Modulo,
+                                _ => {
+                                    break;
+                                }
+                            };
+                            if precedence >= op_precedence {
                                 break;
                             }
-                        };
-                        if precedence >= op_precedence {
-                            break;
+                            let range = token.range;
+                            self.next().transpose()?;
+                            let token = self.next().transpose()?;
+                            self.parse_precedence(op_precedence, token, read_only)?;
+                            self.parse_binary(op, range)
+                                .map(|_| ExpressionType::BinaryOp)
                         }
-                        let range = token.range;
-                        self.next()?;
-                        let token = self.next()?;
-                        self.parse_precedence(op_precedence, token, read_only)?;
-                        self.parse_binary(op, range)
-                            .map(|_| ExpressionType::BinaryOp)
-                    }
-                    TokenKind::LPar => {
-                        self.next()?;
-                        let arg_num = self.parse_call_internal()?;
-                        self.parse_call(arg_num).map(|_| ExpressionType::Call)
-                    }
-                    _ => break,
-                }?;
-            } else {
-                break;
+                        TokenKind::LPar => {
+                            self.next().transpose()?;
+                            let arg_num = self.parse_call_internal()?;
+                            self.parse_call(arg_num).map(|_| ExpressionType::Call)
+                        }
+                        _ => break,
+                    }?;
+                }
+                None => break,
             }
         }
 
@@ -210,7 +211,7 @@ impl<'a> super::Parser<'a> {
             kind: TokenKind::Assign(ass),
             range,
             ..
-        }) = self.peek()?
+        }) = self.peek_transpose()?
         {
             let (ass, range) = (*ass, *range);
             return if read_only {
@@ -249,9 +250,9 @@ impl<'a> super::Parser<'a> {
     ///
     /// The opening `(` token has already been eaten.
     fn parse_grouping(&mut self) -> Result<ExpressionType, Error> {
-        let token = self.next()?;
+        let token = self.next().transpose()?;
         let expression_type = self.parse_expression(token, true)?;
-        match self.next()? {
+        match self.next().transpose()? {
             Some(Token {
                 kind: TokenKind::RPar,
                 ..
@@ -259,7 +260,7 @@ impl<'a> super::Parser<'a> {
             _ => Err(self.emit_error(
                 ErrorKind::Expected(TokenKind::RPar),
                 Continue::Continue,
-                self.current_range(),
+                self.next_range,
             )),
         }
     }
@@ -271,13 +272,13 @@ impl<'a> super::Parser<'a> {
         if let Some(Token {
             kind: TokenKind::LPar,
             ..
-        }) = self.next()?
+        }) = self.next().transpose()?
         {
         } else {
             return Err(self.emit_error(
                 ErrorKind::Expected(TokenKind::LPar),
                 Continue::Stop,
-                Range::new(self.current_position(), self.current_position()),
+                self.end_current_range(),
             ));
         }
         let function = self.parse_prototype(Box::from("<closure>"), true)?;
@@ -290,7 +291,7 @@ impl<'a> super::Parser<'a> {
                     return Err(self.emit_error(
                         ErrorKind::Expected(TokenKind::Keyword(Keyword::End)),
                         Continue::Continue,
-                        Range::new(self.current_position(), self.current_position()),
+                        self.end_current_range(),
                     ));
                 }
                 Err(err) => {
@@ -305,8 +306,8 @@ impl<'a> super::Parser<'a> {
 
     /// Parse a unary operation.
     fn parse_unary(&mut self, operator: Operation) -> Result<(), Error> {
-        let op_line = self.current_position().line;
-        let token = self.next()?;
+        let op_line = self.current_range.start.line;
+        let token = self.next().transpose()?;
         self.parse_precedence(Precedence::Unary, token, true)?;
         match operator {
             Operation::Minus => self
@@ -326,7 +327,7 @@ impl<'a> super::Parser<'a> {
         // easy to check which ones are already used
         let mut element_names_indices = Vec::new();
         loop {
-            if let Some(token) = self.next()? {
+            if let Some(token) = self.next().transpose()? {
                 match token.kind {
                     TokenKind::RBrace => break,
                     TokenKind::Id(member) => {
@@ -342,18 +343,23 @@ impl<'a> super::Parser<'a> {
                         }
                         element_names_indices.push(member_index);
                         self.emit_instruction(Instruction::ReadConstant(member_index));
-                        let token = self.next()?;
+                        let token = self.next().transpose()?;
                         match token {
                             Some(Token {
                                 kind: TokenKind::Assign(Assign::Equal),
                                 ..
                             }) => {}
-                            _ => return Err(self.expected_token(TokenKind::Assign(Assign::Equal))),
+                            _ => {
+                                return Err(self.expected_token(
+                                    TokenKind::Assign(Assign::Equal),
+                                    self.end_current_range(),
+                                ))
+                            }
                         }
 
-                        let token = self.next()?;
+                        let token = self.next().transpose()?;
                         self.parse_expression(token, true)?;
-                        let token = self.next()?;
+                        let token = self.next().transpose()?;
                         match token {
                             Some(Token {
                                 kind: TokenKind::Comma,
@@ -370,7 +376,10 @@ impl<'a> super::Parser<'a> {
                                     token.range,
                                 ))
                             }
-                            None => return Err(self.expected_token(TokenKind::RBrace)),
+                            None => {
+                                return Err(self
+                                    .expected_token(TokenKind::RBrace, self.end_current_range()))
+                            }
                         }
                     }
                     _ => {
@@ -382,7 +391,7 @@ impl<'a> super::Parser<'a> {
                     }
                 }
             } else {
-                return Err(self.expected_token(TokenKind::RBrace));
+                return Err(self.expected_token(TokenKind::RBrace, self.end_current_range()));
             }
         }
         self.emit_instruction(Instruction::MakeTable(elem_num));
@@ -434,9 +443,9 @@ impl<'a> super::Parser<'a> {
     ///
     /// The opening `[` token has already been eaten.
     fn parse_brackets(&mut self, read_only: bool) -> Result<ExpressionType, Error> {
-        let next_token = self.next()?;
+        let next_token = self.next().transpose()?;
         self.parse_expression(next_token, true)?;
-        let range = if let Some(token) = self.next()? {
+        let range = if let Some(token) = self.next().transpose()? {
             match token.kind {
                 TokenKind::RBracket => token.range,
                 kind => {
@@ -451,14 +460,14 @@ impl<'a> super::Parser<'a> {
             return Err(self.emit_error(
                 ErrorKind::Expected(TokenKind::RBracket),
                 Continue::Continue,
-                Range::new(self.current_position(), self.current_position()),
+                self.end_current_range(),
             ));
         };
 
         if let Some(Token {
             kind: TokenKind::Assign(ass),
             ..
-        }) = self.peek()?
+        }) = self.peek_transpose()?
         {
             let ass = *ass;
             if read_only {
@@ -481,7 +490,7 @@ impl<'a> super::Parser<'a> {
     ///
     /// Assumes we already ate the dot (`.`) token.
     fn parse_dot(&mut self, read_only: bool) -> Result<ExpressionType, Error> {
-        let range = if let Some(token) = self.next()? {
+        let range = if let Some(token) = self.next().transpose()? {
             match token.kind {
                 TokenKind::Id(member) => {
                     let member_index = self.code().add_constant(Constant::String(member));
@@ -504,14 +513,14 @@ impl<'a> super::Parser<'a> {
             return Err(self.emit_error(
                 ErrorKind::ExpectedId(None),
                 Continue::Continue,
-                Range::new(self.current_position(), self.current_position()),
+                self.end_current_range(),
             ));
         };
 
         if let Some(Token {
             kind: TokenKind::Assign(ass),
             ..
-        }) = self.peek()?
+        }) = self.peek_transpose()?
         {
             let ass = *ass;
             if read_only {
@@ -534,14 +543,14 @@ impl<'a> super::Parser<'a> {
     fn parse_call_internal(&mut self) -> Result<u32, Error> {
         let mut arg_num = 0;
         loop {
-            let next_token = self.next()?;
+            let next_token = self.next().transpose()?;
             if let Some(ref token) = next_token {
                 if token.kind == TokenKind::RPar {
                     break;
                 } else {
                     self.parse_expression(next_token, true)?;
                     arg_num += 1;
-                    if let Some(token) = self.next()? {
+                    if let Some(token) = self.next().transpose()? {
                         match token.kind {
                             TokenKind::Comma => {}
                             TokenKind::RPar => break,
@@ -557,7 +566,7 @@ impl<'a> super::Parser<'a> {
                         return Err(self.emit_error(
                             ErrorKind::Expected(TokenKind::Comma),
                             Continue::Stop,
-                            Range::new(self.current_position(), self.current_position()),
+                            self.end_current_range(),
                         ));
                     }
                 }
@@ -565,7 +574,7 @@ impl<'a> super::Parser<'a> {
                 return Err(self.emit_error(
                     ErrorKind::ExpectExpression,
                     Continue::Continue,
-                    Range::new(self.current_position(), self.current_position()),
+                    self.end_current_range(),
                 ));
             }
         }

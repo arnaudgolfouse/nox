@@ -5,30 +5,35 @@ use num_parser::{Base, NumberError};
 fn errors() {
     // multiple dots
     assert_eq!(
-        Lexer::top_level("3.1.2").next().unwrap_err().kind,
+        Lexer::top_level("3.1.2").next().unwrap().unwrap_err().kind,
         ErrorKind::NumberError(NumberError::NumberUnexpectedDot)
     );
     // unrecognised character
     assert_eq!(
-        Lexer::top_level("😬").next().unwrap_err().kind,
+        Lexer::top_level("😬").next().unwrap().unwrap_err().kind,
         ErrorKind::UnknownCharacter('😬')
     );
     // incomplete string
     assert_eq!(
-        Lexer::top_level("'hello world").next().unwrap_err().kind,
+        Lexer::top_level("'hello world")
+            .next()
+            .unwrap()
+            .unwrap_err()
+            .kind,
         ErrorKind::IncompleteString('\'')
     );
     // overflow error
     assert_eq!(
         Lexer::top_level("999999999999999999999")
             .next()
+            .unwrap()
             .unwrap_err()
             .kind,
         ErrorKind::NumberError(NumberError::Overflow)
     );
     // invalid digit
     assert_eq!(
-        Lexer::top_level("0xg").next().unwrap_err().kind,
+        Lexer::top_level("0xg").next().unwrap().unwrap_err().kind,
         ErrorKind::NumberError(NumberError::Invalid('g', Base::Hexadecimal))
     );
     assert_eq!(
