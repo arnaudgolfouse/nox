@@ -502,10 +502,11 @@ impl Chunk {
     /// This function can be quite inneficient, as operands bigger than
     /// `u8::MAX` will shift a lot of code to make room for extended
     /// instructions.
+    #[allow(clippy::panic)]
     pub(crate) fn write_jump(&mut self, mut address: usize, instruction: Instruction<u64>) {
-        // wow there cowboy !
         let initial_instruction = &mut self.code[address];
-        assert_eq!(initial_instruction, &Instruction::Jump(0));
+        // wow there cowboy !
+        debug_assert_eq!(*initial_instruction, Instruction::Jump(0));
         let (instruction, extended) = instruction.into_u8();
         *initial_instruction = instruction;
         for extended in u64::iter_extended(&extended) {
