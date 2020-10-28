@@ -27,14 +27,8 @@ pub struct Lexer<'a> {
     iterator: Peekable<Chars<'a>>,
     /// Start position of the current token
     current_start: Position,
-    /// End position of the current token
-    pub(crate) current_end: Position,
-    /// Start position of the previous token
-    pub(crate) previous_start: Position,
-    /// End position of the previous token
-    pub(crate) previous_end: Position,
     /// Current position on the source
-    pub(crate) position: Position,
+    position: Position,
     /// Next position in the source
     next_position: Position,
 }
@@ -45,9 +39,6 @@ impl<'a> Lexer<'a> {
         Self {
             iterator: source.content().chars().peekable(),
             current_start: Position::default(),
-            current_end: Position::default(),
-            previous_start: Position::default(),
-            previous_end: Position::default(),
             position: Position::default(),
             next_position: Position::default(),
             source,
@@ -59,9 +50,6 @@ impl<'a> Lexer<'a> {
         Self {
             iterator: source.chars().peekable(),
             current_start: Position::default(),
-            current_end: Position::default(),
-            previous_start: Position::default(),
-            previous_end: Position::default(),
             position: Position::default(),
             next_position: Position::default(),
             source: Source::TopLevel(source),
@@ -351,9 +339,6 @@ impl<'a> Iterator for Lexer<'a> {
     type Item = Result<'a, Token>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.previous_start = self.current_start;
-        self.previous_end = self.current_end;
-
         // skip whitespace
         let next_char = loop {
             let c = self.next_char_skip_comment()?;
@@ -438,12 +423,11 @@ impl<'a> Iterator for Lexer<'a> {
             }
         };
 
-        self.current_end = self.position;
         Some(Ok(Token {
             kind: token,
             range: Range {
                 start: self.current_start,
-                end: self.current_end,
+                end: self.position,
             },
             warning,
         }))
