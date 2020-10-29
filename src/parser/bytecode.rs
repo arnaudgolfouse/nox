@@ -5,9 +5,9 @@ use std::{convert::TryFrom, fmt, iter, mem::size_of, slice, sync::Arc};
 /// Helper trait : this should not be derived by any actual type other than u8,
 /// u16, usize... (which is already done in this library).
 #[doc(hidden)]
-pub trait Operand: fmt::Display + Sized + Default + Copy {
+pub trait Operand: fmt::Display + Sized + Default + Copy + std::cmp::PartialOrd {
     /// data for the `Extended` instructions. In theory, this is `[Option<u8>; n]`.
-    type Extended;
+    type Extended: fmt::Debug;
     /// Return the operand and the slice of (eventual) extended operands.
     fn extended(self) -> (u8, <Self as Operand>::Extended);
     /// Return an iterator over the (eventual) extended operands.
@@ -22,16 +22,18 @@ macro_rules! implement_integer_operand {
         $(
         impl Operand for $t {
             type Extended = [Option<Instruction<u8>>; size_of::<Self>() - 1];
+
             fn extended(mut self) -> (u8, <Self as Operand>::Extended) {
                 let u8_part = (self & 0xff) as u8;
-                self = self.rotate_right(8);
+                self = self.checked_shr(8).unwrap_or(0);
                 let mut extended = [None; size_of::<Self>() - 1];
-                for i in 0..extended.len() {
-                    let byte = (self & 0xff) as u8;
-                    if byte > 0 {
-                        extended[i] = Some(Instruction::Extended(byte));
+                for extended in &mut extended {
+                    if self == 0 {
+                        break
                     }
-                    self = self.rotate_right(8);
+                    let byte = (self & 0xff) as u8;
+                    *extended = Some(Instruction::Extended(byte));
+                    self = self.checked_shr(8).unwrap_or(0);
                 }
                 (u8_part, extended)
             }
@@ -303,8 +305,8 @@ instructions! {
     /// Conditional jump
     ///
     /// Pop the top of the stack, and if it is `nil`, jump the specified
-    /// offset in the instructions vector, pop an element of `loop_addresses`
-    ///, pop the top of the stack (the function), and 'clear' (unroots) the
+    /// offset in the instructions vector, pop an element of `loop_addresses`,
+    /// pop the top of the stack (the function), and 'clear' (unroots) the
     /// loop variable.
     JumpEndFor(Op) => "JUMP_END_FOR",
     /// Break for the closest enclosing loop.
@@ -490,8 +492,8 @@ impl Chunk {
         self.globals.len() - 1
     }
 
-    /// push an `Jump(0)` instruction, and returns its index in the bytecode for
-    /// future modification
+    /// push a dummy `Jump(0)` instruction, and returns its index in the bytecode
+    /// for future modification
     pub(crate) fn push_jump(&mut self) -> usize {
         self.code.push(Instruction::Jump(0));
         self.code.len() - 1
@@ -502,18 +504,17 @@ impl Chunk {
     /// This function can be quite inneficient, as operands bigger than
     /// `u8::MAX` will shift a lot of code to make room for extended
     /// instructions.
-    #[allow(clippy::panic)]
-    pub(crate) fn write_jump(&mut self, mut address: usize, instruction: Instruction<u64>) {
+    pub(crate) fn write_jump(&mut self, address: usize, instruction: Instruction<u64>) {
         let initial_instruction = &mut self.code[address];
         // wow there cowboy !
-        debug_assert_eq!(*initial_instruction, Instruction::Jump(0));
+        #[allow(clippy::panic)]
+        {
+            debug_assert_eq!(*initial_instruction, Instruction::Jump(0))
+        }
         let (instruction, extended) = instruction.into_u8();
         *initial_instruction = instruction;
-        for extended in u64::iter_extended(&extended) {
-            if let Some(extended) = extended {
-                self.code.insert(address, extended);
-                address += 1
-            }
+        for extended in extended.iter().copied().flatten() {
+            self.code.insert(address, extended);
         }
     }
 
@@ -630,6 +631,7 @@ impl fmt::Display for Chunk {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn extended_conversion() {
         let x: u8 = 5;
@@ -645,7 +647,7 @@ mod tests {
                 84,
                 [
                     Some(Instruction::Extended(6)),
-                    None,
+                    Some(Instruction::Extended(0)),
                     Some(Instruction::Extended(102))
                 ]
             )

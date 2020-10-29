@@ -56,7 +56,7 @@ return t.x * t.y
     vm.reset();
 
     // allocate / deallocate a lot + cycles
-    vm.import_all(libraries::prelude()).unwrap();
+    vm.import_all(libraries::std()).unwrap();
     vm.parse_top_level(
         r#"
 t = { x = 5, y = 6 }
@@ -231,7 +231,7 @@ fn for_loop() {
     vm.reset();
 
     // a somewhat complex example
-    vm.import_all(libraries::prelude()).unwrap();
+    vm.import_all(libraries::std()).unwrap();
     vm.parse_top_level(
         r#"
 fn some_func(a, b)
@@ -307,25 +307,27 @@ fn errors() {
 
 #[test]
 fn run_a_lot() {
-    let mut vm = VM::new();
     let mut source = String::with_capacity(10000 * "x = 0\n".len());
     for _ in 0..10000 {
         source.push_str("x = 0\n");
     }
+    let mut vm = VM::new();
     vm.parse_top_level(&source).unwrap();
     vm.run().unwrap();
 
-    let mut vm = VM::new();
-    vm.import_all(libraries::prelude()).unwrap();
-    let mut source = String::with_capacity(10000 * "for i in range(0, 1)\nend\n".len());
-    for _ in 0..10000 {
+    const FOR_LOOPS_NUMBER: usize = 10000;
+    let mut source = String::with_capacity(FOR_LOOPS_NUMBER * "for i in range(0, 1)\nend\n".len());
+    source.push_str("x = 0\n");
+    for _ in 0..FOR_LOOPS_NUMBER {
         source.push_str("for i in range(0, 1)\n");
     }
-    source.push_str("x = i\n");
-    for _ in 0..10000 {
+    source.push_str("x += 1\n");
+    for _ in 0..FOR_LOOPS_NUMBER {
         source.push_str("end\n");
     }
     source.push_str("return x");
+    let mut vm = VM::new();
+    vm.import_all(libraries::std()).unwrap();
     vm.parse_top_level(&source).unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Int(0));
+    assert_eq!(vm.run().unwrap(), Value::Int(1));
 }

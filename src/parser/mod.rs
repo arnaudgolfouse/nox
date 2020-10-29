@@ -58,7 +58,25 @@ enum Scope {
     While(usize),
     /// `for` statement. Contains the address of the jump instruction, and the
     /// index of the loop variable.
-    For(usize, usize),
+    ///
+    /// # Bytecode layout
+    ///
+    /// Assuming `for <var> in <expression> <statements> end` :
+    ///
+    /// - `<expression>`
+    /// - `PREPARE_LOOP $jump`
+    /// - `DUPLICATE_TOP 0`
+    /// - `CALL 0`
+    /// - `$jump` = `JUMP_END_FOR $end_for` // possible extended instructions
+    /// - `<statements>`
+    /// - `CONTINUE 0`
+    /// - `$end_for`
+    For {
+        /// Address of the `JUMP_END_FOR` instruction
+        jump_address: usize,
+        /// Index of the loop variable in the local variables stack
+        loop_variable_index: usize,
+    },
     /// Dummy scope. Used for continuing parsing even with errors.
     Dummy,
 }
@@ -437,7 +455,10 @@ impl<'a> Parser<'a> {
                                 Instruction::JumpEndWhile(jump_destination),
                             );
                         }
-                        Scope::For(jump_address, loop_variable_index) => {
+                        Scope::For {
+                            jump_address,
+                            loop_variable_index,
+                        } => {
                             self.emit_instruction_u8(Instruction::Continue(1));
                             let jump_destination =
                                 self.code().code.len() as u64 - jump_address as u64;
@@ -582,12 +603,16 @@ impl<'a> Parser<'a> {
                 self.emit_instruction_u8(Instruction::DuplicateTop(0));
                 self.emit_instruction_u8(Instruction::Call(0));
                 let operand = self.code().code.len() - prepare_loop - 1;
+                #[allow(clippy::panic)]
+                {
+                    debug_assert_eq!(operand, 2);
+                }
                 self.code()
                     .write_jump(prepare_loop, Instruction::PrepareLoop(operand as u64));
                 let jump_address = self.code().push_jump();
                 // the variable will be moved.
-                let placeholder = for_variable.as_ref().is_empty();
-                let index = if let Some(function) = self.function_stack.last_mut() {
+                let placeholder = for_variable.is_empty();
+                let loop_variable_index = if let Some(function) = self.function_stack.last_mut() {
                     function.variables.push(for_variable);
                     function.variables.len() - 1
                 } else {
@@ -597,11 +622,14 @@ impl<'a> Parser<'a> {
                 if placeholder {
                     self.emit_instruction_u8(Instruction::Pop(1))
                 } else {
-                    self.emit_instruction(Instruction::WriteLocal(index as u64))
+                    self.emit_instruction(Instruction::WriteLocal(loop_variable_index as u64))
                 }
                 // pop the dummy scope
                 self.pop_scope();
-                self.push_scope(Scope::For(jump_address, index))
+                self.push_scope(Scope::For {
+                    jump_address,
+                    loop_variable_index,
+                })
             }
             // fn <id>((<id>,)*) <statements> end
             TokenKind::Keyword(Keyword::Fn) => {
@@ -1009,7 +1037,7 @@ impl<'a> Parser<'a> {
         for scope in scopes.iter().rev() {
             match scope {
                 Scope::While(_) => return EnclosingLoop::While,
-                Scope::For(_, _) => return EnclosingLoop::For,
+                Scope::For { .. } => return EnclosingLoop::For,
                 _ => {}
             }
         }

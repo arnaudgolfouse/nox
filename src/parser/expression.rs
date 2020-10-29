@@ -230,7 +230,7 @@ impl<'a> super::Parser<'a> {
 
         match self.find_variable(&variable) {
             VariableLocation::Undefined => {
-                // TODO : now that we have 'global ...' statements, change this to read a local (aka nil here), as the current logic is very non-intuitive.
+                // TODO : now that we have 'global ...' statements, change this to read a local (aka nil here), as the current logic is very counter-intuitive.
                 let index = self.code().add_global(variable);
                 self.emit_instruction(Instruction::ReadGlobal(index))
             }
@@ -305,6 +305,8 @@ impl<'a> super::Parser<'a> {
     }
 
     /// Parse a unary operation.
+    ///
+    /// The operation token has already been eaten.
     fn parse_unary(&mut self, operator: Operation) -> Result<(), Error> {
         let op_line = self.current_range.start.line;
         let token = self.next().transpose()?;

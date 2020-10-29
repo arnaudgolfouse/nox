@@ -386,6 +386,11 @@ impl VM {
                     self.ip = jump_address;
                 }
                 Instruction::Continue(_) => {
+                    /*static mut NB: usize = 0;
+                    println!("NB = {}", unsafe {
+                        NB += 1;
+                        NB
+                    });*/
                     let (expr_address, _) = self.loop_address(false)?;
                     self.ip = expr_address
                 }
