@@ -32,7 +32,7 @@ end
 
 fn main() -> Result<(), VMError> {
     let mut vm = VM::new();
-    vm.import_all(libraries::prelude())?;
+    vm.import_all(libraries::std())?;
     vm.parse_top_level(_PROGRAM4)?;
     vm.run()?;
     Ok(())

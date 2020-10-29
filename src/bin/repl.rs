@@ -15,7 +15,7 @@ struct Repl {
 impl Repl {
     fn new() -> Self {
         let mut vm = VM::new();
-        vm.import_all(libraries::prelude()).unwrap();
+        vm.import_all(libraries::std()).unwrap();
         Self {
             current_phrase: String::new(),
             vm,

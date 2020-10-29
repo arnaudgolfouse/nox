@@ -2,11 +2,11 @@
 //!
 //! Contains sets of functions written in Rust.
 
-mod prelude;
+mod std;
 
 use crate::runtime::ffi::Library;
 
-/// Return a 'prelude' `Library`.
+/// Return a 'std' `Library`.
 ///
 /// It contains the following functions :
 /// - `range` : Takes two `Int` arguments `a` and `b`, and creates an iterator
@@ -18,15 +18,15 @@ use crate::runtime::ffi::Library;
 /// - `to_string` : Takes a single argument, and tries to convert it to a
 /// `String`.
 /// - `to_int` : Takes a single argument, and tries to convert it to a `Int`.
-pub fn prelude() -> Library {
-    let mut prelude = Library::new("std_prelude".to_owned());
-    prelude.add_function("range", prelude::range);
-    prelude.add_function("letters", prelude::letters);
-    prelude.add_function("print", prelude::print);
-    prelude.add_function("println", prelude::println);
-    prelude.add_function("to_string", prelude::to_string);
-    prelude.add_function("to_int", prelude::to_int);
-    prelude
+pub fn std() -> Library {
+    let mut std = Library::new("std".to_owned());
+    std.add_function("range", std::range);
+    std.add_function("letters", std::letters);
+    std.add_function("print", std::print);
+    std.add_function("println", std::println);
+    std.add_function("to_string", std::to_string);
+    std.add_function("to_int", std::to_int);
+    std
 }
 
 #[cfg(test)]
@@ -37,7 +37,7 @@ mod tests {
     #[test]
     fn test_case() {
         let mut vm = VM::new();
-        vm.import_all(prelude()).unwrap();
+        vm.import_all(std()).unwrap();
         vm.parse_top_level(
             "
             x = 0
@@ -54,7 +54,7 @@ mod tests {
         assert_eq!(vm.run().unwrap(), Value::Int(6));
 
         let mut vm = VM::new();
-        vm.import_all(prelude()).unwrap();
+        vm.import_all(std()).unwrap();
         vm.parse_top_level(
             r#"
             x = ""
@@ -70,7 +70,7 @@ mod tests {
         assert_eq!(vm.run().unwrap(), Value::String("eoo".into()));
 
         let mut vm = VM::new();
-        vm.import_all(prelude()).unwrap();
+        vm.import_all(std()).unwrap();
         vm.parse_top_level(
             r#"
             a = to_string(54)   # "54"
@@ -84,7 +84,7 @@ mod tests {
         assert_eq!(vm.run().unwrap(), Value::String("54 8.61 true".into()));
 
         let mut vm = VM::new();
-        vm.import_all(prelude()).unwrap();
+        vm.import_all(std()).unwrap();
         vm.parse_top_level(
             r#"
             a = to_int(5)    # 5
