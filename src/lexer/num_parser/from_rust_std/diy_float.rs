@@ -7,16 +7,16 @@
 /// A custom 64-bit floating point type, representing `f * 2^e`.
 #[derive(Copy, Clone, Debug)]
 #[doc(hidden)]
-pub struct Fp {
+pub(super) struct Fp {
     /// The integer mantissa.
-    pub f: u64,
+    pub(super) f: u64,
     /// The exponent in base 2.
-    pub e: i16,
+    pub(super) e: i16,
 }
 
 impl Fp {
     /// Returns a correctly rounded product of itself and `other`.
-    pub fn mul(&self, other: &Fp) -> Fp {
+    pub(super) fn mul(&self, other: &Fp) -> Fp {
         const MASK: u64 = 0xffff_ffff;
         let a = self.f >> 32;
         let b = self.f & MASK;
@@ -34,7 +34,7 @@ impl Fp {
 
     #[allow(clippy::absurd_extreme_comparisons)]
     /// Normalizes itself so that the resulting mantissa is at least `2^63`.
-    pub fn normalize(&self) -> Fp {
+    pub(super) fn normalize(&self) -> Fp {
         let mut f = self.f;
         let mut e = self.e;
         if f >> (64 - 32) == 0 {

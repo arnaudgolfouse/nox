@@ -28,13 +28,13 @@ use std::num::FpCategory::{Infinite, Nan, Normal, Subnormal, Zero};
 use std::ops::{Add, Div, Mul, Neg};
 
 #[derive(Copy, Clone, Debug)]
-pub struct Unpacked {
-    pub sig: u64,
-    pub k: i16,
+pub(super) struct Unpacked {
+    pub(super) sig: u64,
+    pub(super) k: i16,
 }
 
 impl Unpacked {
-    pub fn new(sig: u64, k: i16) -> Self {
+    pub(super) fn new(sig: u64, k: i16) -> Self {
         Unpacked { sig, k }
     }
 }
@@ -44,7 +44,7 @@ impl Unpacked {
 /// See the parent module's doc comment for why this is necessary.
 ///
 /// Should **never ever** be implemented for other types or be used outside the dec2flt module.
-pub trait RawFloat:
+pub(super) trait RawFloat:
     Copy + Debug + LowerExp + Mul<Output = Self> + Div<Output = Self> + Neg<Output = Self>
 {
     /// Type used by `to_bits` and `from_bits`.
@@ -169,7 +169,7 @@ impl RawFloat for f64 {
 }
 
 /// Converts an `Fp` to the closest machine float type.
-pub fn fp_to_float(x: Fp) -> f64 {
+pub(super) fn fp_to_float(x: Fp) -> f64 {
     let x = x.normalize();
     // x.f is 64 bit, so x.e has a mantissa shift of 63
     let e = x.e + 63;
@@ -189,7 +189,7 @@ pub fn fp_to_float(x: Fp) -> f64 {
 
 /// Round the 64-bit significand to T::SIG_BITS bits with half-to-even.
 /// Does not handle exponent overflow.
-pub fn round_normal(x: Fp) -> Unpacked {
+fn round_normal(x: Fp) -> Unpacked {
     let excess = 64 - <f64 as RawFloat>::SIG_BITS as i16;
     let half: u64 = 1 << (excess - 1);
     let (q, rem) = (x.f >> excess, x.f & ((1 << excess) - 1));
@@ -207,7 +207,7 @@ pub fn round_normal(x: Fp) -> Unpacked {
 
 /// Inverse of `RawFloat::unpack()` for normalized numbers.
 /// Panics if the significand or exponent are not valid for normalized numbers.
-pub fn encode_normal(x: Unpacked) -> f64 {
+pub(super) fn encode_normal(x: Unpacked) -> f64 {
     debug_assert!(
         <f64 as RawFloat>::MIN_SIG <= x.sig && x.sig <= <f64 as RawFloat>::MAX_SIG,
         "encode_normal: significand not normalized"
@@ -226,7 +226,7 @@ pub fn encode_normal(x: Unpacked) -> f64 {
 }
 
 /// Approximate a bignum with an Fp. Rounds within 0.5 ULP with half-to-even.
-pub fn big_to_fp(f: &Big) -> Fp {
+pub(super) fn big_to_fp(f: &Big) -> Fp {
     let end = f.bit_length();
     debug_assert!(end != 0, "big_to_fp: unexpectedly, input is zero");
     let start = end.saturating_sub(64);
@@ -251,7 +251,7 @@ pub fn big_to_fp(f: &Big) -> Fp {
 
 /// Finds the largest floating point number strictly smaller than the argument.
 /// subnormals, zero, or exponent underflow are just returned.
-pub fn prev_float(x: f64) -> f64 {
+pub(super) fn prev_float(x: f64) -> f64 {
     match x.classify() {
         Infinite | Nan | Subnormal | Zero => x,
         Normal => {
@@ -269,7 +269,7 @@ pub fn prev_float(x: f64) -> f64 {
 // This operation is saturating, i.e., next_float(inf) == inf.
 // Unlike most code in this module, this function does handle zero, subnormals, and infinities.
 // Nan is just returned however.
-pub fn next_float(x: f64) -> f64 {
+pub(super) fn next_float(x: f64) -> f64 {
     match x.classify() {
         Nan => x,
         Infinite => f64::INFINITY,

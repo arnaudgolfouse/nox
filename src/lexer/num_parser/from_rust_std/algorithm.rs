@@ -27,7 +27,7 @@ fn power_of_ten(e: i16) -> Fp {
 // precision of the computation is determined on a per-operation basis.
 #[cfg(any(not(target_arch = "x86"), target_feature = "sse2"))]
 mod fpu_precision {
-    pub fn set_precision() {}
+    pub(super) fn set_precision() {}
 }
 
 // On x86, the x87 FPU is used for float operations if the SSE/SSE2 extensions are not available.
@@ -100,7 +100,7 @@ mod fpu_precision {
 ///
 /// This is extracted into a separate function so that it can be attempted before constructing
 /// a bignum.
-pub fn fast_path(integral: &[u8], fractional: &[u8], e: i64) -> Option<f64> {
+pub(super) fn fast_path(integral: &[u8], fractional: &[u8], e: i64) -> Option<f64> {
     let num_digits = integral.len() + fractional.len();
     // log_10(f64::MAX_SIG) ~ 15.95. We compare the exact value to MAX_SIG near the end,
     // this is just a quick, cheap rejection (and also frees the rest of the code from
@@ -148,7 +148,7 @@ pub fn fast_path(integral: &[u8], fractional: &[u8], e: i64) -> Option<f64> {
 /// > accumulated during the floating point calculation of the approximation to f * 10^e. (Slop is
 /// > not a bound for the true error, but bounds the difference between the approximation z and
 /// > the best possible approximation that uses p bits of significand.)
-pub fn bellerophon(f: &Big, e: i16) -> f64 {
+pub(super) fn bellerophon(f: &Big, e: i16) -> f64 {
     let slop = if f <= &Big::from_u64(<f64 as RawFloat>::MAX_SIG) {
         // The cases abs(e) < log5(2^N) are in fast_path()
         if e >= 0 {
@@ -283,7 +283,7 @@ fn make_ratio(x: &mut Big, y: &mut Big, e: i16, k: i16) {
 ///
 /// Handling underflow and subnormals is trickier. One big problem is that, with the minimum
 /// exponent, the ratio might still be too large for a significand. See underflow() for details.
-pub fn algorithm_m(f: &Big, e: i16) -> f64 {
+pub(super) fn algorithm_m(f: &Big, e: i16) -> f64 {
     let mut u;
     let mut v;
     let e_abs = e.abs() as usize;

@@ -20,7 +20,7 @@ use crate::runtime::Value;
 /// ").unwrap();
 /// assert_eq!(vm.run().unwrap(), Value::Int(65))
 /// ```
-pub fn range(args: &mut [Value]) -> Result<Value, String> {
+pub(super) fn range(args: &mut [Value]) -> Result<Value, String> {
     if args.len() != 2 {
         return Err(format!(
             "<range> : incorrect number of arguments : expected 2, got {}",
@@ -51,7 +51,7 @@ pub fn range(args: &mut [Value]) -> Result<Value, String> {
 }
 
 /// Takes a single `String` argument, and creates an iterator over its letters.
-pub fn letters(args: &mut [Value]) -> Result<Value, String> {
+pub(super) fn letters(args: &mut [Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err(format!(
             "<letters> : incorrect number of arguments : expected 1, got {}",
@@ -75,7 +75,7 @@ pub fn letters(args: &mut [Value]) -> Result<Value, String> {
 }
 
 /// Print the given arguments
-pub fn print(args: &mut [Value]) -> Result<Value, String> {
+pub(super) fn print(args: &mut [Value]) -> Result<Value, String> {
     for arg in args {
         print!("{}", arg)
     }
@@ -83,7 +83,7 @@ pub fn print(args: &mut [Value]) -> Result<Value, String> {
 }
 
 /// Print the given arguments and a newline.
-pub fn println(args: &mut [Value]) -> Result<Value, String> {
+pub(super) fn println(args: &mut [Value]) -> Result<Value, String> {
     for arg in args {
         print!("{}", arg)
     }
@@ -92,7 +92,7 @@ pub fn println(args: &mut [Value]) -> Result<Value, String> {
 }
 
 /// Takes a single argument, and tries to convert it to a `String`.
-pub fn to_string(args: &mut [Value]) -> Result<Value, String> {
+pub(super) fn to_string(args: &mut [Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err(format!(
             "<to_string> : incorrect number of arguments : expected 1, got {}",
@@ -115,7 +115,7 @@ pub fn to_string(args: &mut [Value]) -> Result<Value, String> {
 }
 
 /// Takes a single argument, and tries to convert it to a `Int`.
-pub fn to_int(args: &mut [Value]) -> Result<Value, String> {
+pub(super) fn to_int(args: &mut [Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err(format!(
             "<to_int> : incorrect number of arguments : expected 1, received {}",

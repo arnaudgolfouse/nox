@@ -77,7 +77,7 @@ impl FullOps for u32 {
 const SMALL_POW5: [(u64, usize); 3] = [(125, 3), (15625, 6), (1_220_703_125, 13)];
 
 /// The digit type for `Big32x40`.
-pub type Digit32 = u32;
+type Digit32 = u32;
 
 /// Stack-allocated arbitrary-precision (up to certain limit) integer.
 ///
@@ -88,7 +88,7 @@ pub type Digit32 = u32;
 ///
 /// All operations available to bignums panic in the case of overflows.
 /// The caller is responsible to use large enough bignum types.
-pub struct Big32x40 {
+pub(super) struct Big32x40 {
     /// One plus the offset to the maximum "digit" in use.
     /// This does not decrease, so be aware of the computation order.
     /// `base[size..]` should be zero.
@@ -100,14 +100,14 @@ pub struct Big32x40 {
 
 impl Big32x40 {
     /// Makes a bignum from one digit.
-    pub fn from_small(v: Digit32) -> Big32x40 {
+    pub(super) fn from_small(v: Digit32) -> Big32x40 {
         let mut base = [0; 40];
         base[0] = v;
         Big32x40 { size: 1, base }
     }
 
     /// Makes a bignum from `u64` value.
-    pub fn from_u64(mut v: u64) -> Big32x40 {
+    pub(super) fn from_u64(mut v: u64) -> Big32x40 {
         let mut base = [0; 40];
         let mut sz = 0;
         while v > 0 {
@@ -121,13 +121,13 @@ impl Big32x40 {
     /// Returns the internal digits as a slice `[a, b, c, ...]` such that the numeric
     /// value is `a + b * 2^W + c * 2^(2W) + ...` where `W` is the number of bits in
     /// the digit type.
-    pub fn digits(&self) -> &[Digit32] {
+    pub(super) fn digits(&self) -> &[Digit32] {
         &self.base[..self.size]
     }
 
     /// Returns the `i`-th bit where bit 0 is the least significant one.
     /// In other words, the bit with weight `2^i`.
-    pub fn get_bit(&self, i: usize) -> u8 {
+    pub(super) fn get_bit(&self, i: usize) -> u8 {
         let digitbits = mem::size_of::<Digit32>() * 8;
         let d = i / digitbits;
         let b = i % digitbits;
@@ -135,13 +135,13 @@ impl Big32x40 {
     }
 
     /// Returns `true` if the bignum is zero.
-    pub fn is_zero(&self) -> bool {
+    pub(super) fn is_zero(&self) -> bool {
         self.digits().iter().all(|&v| v == 0)
     }
 
     /// Returns the number of bits necessary to represent this value. Note that zero
     /// is considered to need 0 bits.
-    pub fn bit_length(&self) -> usize {
+    pub(super) fn bit_length(&self) -> usize {
         // Skip over the most significant digits which are zero.
         let digits = self.digits();
         let zeros = digits.iter().rev().take_while(|&&x| x == 0).count();
@@ -162,7 +162,7 @@ impl Big32x40 {
         i + 1
     }
 
-    pub fn add_small(&mut self, other: Digit32) -> &mut Big32x40 {
+    pub(super) fn add_small(&mut self, other: Digit32) -> &mut Big32x40 {
         let (mut carry, v) = self.base[0].full_add(other, false);
         self.base[0] = v;
         let mut i = 1;
@@ -179,7 +179,7 @@ impl Big32x40 {
     }
 
     /// Subtracts `other` from itself and returns its own mutable reference.
-    pub fn sub<'a>(&'a mut self, other: &Big32x40) -> &'a mut Big32x40 {
+    pub(super) fn sub<'a>(&'a mut self, other: &Big32x40) -> &'a mut Big32x40 {
         let sz = cmp::max(self.size, other.size);
         let mut noborrow = true;
         for (a, b) in self.base[..sz].iter_mut().zip(&other.base[..sz]) {
@@ -194,7 +194,7 @@ impl Big32x40 {
 
     /// Multiplies itself by a digit-sized `other` and returns its own
     /// mutable reference.
-    pub fn mul_small(&mut self, other: Digit32) -> &mut Big32x40 {
+    pub(super) fn mul_small(&mut self, other: Digit32) -> &mut Big32x40 {
         let mut sz = self.size;
         let mut carry = 0;
         for a in &mut self.base[..sz] {
@@ -211,7 +211,7 @@ impl Big32x40 {
     }
 
     /// Multiplies itself by `2^bits` and returns its own mutable reference.
-    pub fn mul_pow2(&mut self, bits: usize) -> &mut Big32x40 {
+    pub(super) fn mul_pow2(&mut self, bits: usize) -> &mut Big32x40 {
         let digitbits = mem::size_of::<Digit32>() * 8;
         let digits = bits / digitbits;
         let bits = bits % digitbits;
@@ -249,7 +249,7 @@ impl Big32x40 {
     }
 
     /// Multiplies itself by `5^e` and returns its own mutable reference.
-    pub fn mul_pow5(&mut self, mut e: usize) -> &mut Big32x40 {
+    pub(super) fn mul_pow5(&mut self, mut e: usize) -> &mut Big32x40 {
         // There are exactly n trailing zeros on 2^n, and the only relevant digit sizes
         // are consecutive powers of two, so this is well suited index for the table.
         let table_index = mem::size_of::<Digit32>().trailing_zeros() as usize;
@@ -275,7 +275,7 @@ impl Big32x40 {
     /// Multiplies itself by a number described by `other[0] + other[1] * 2^W +
     /// other[2] * 2^(2W) + ...` (where `W` is the number of bits in the digit type)
     /// and returns its own mutable reference.
-    pub fn mul_digits<'a>(&'a mut self, other: &[Digit32]) -> &'a mut Big32x40 {
+    pub(super) fn mul_digits<'a>(&'a mut self, other: &[Digit32]) -> &'a mut Big32x40 {
         // the internal routine. works best when aa.len() <= bb.len().
         fn mul_inner(ret: &mut [Digit32; 40], aa: &[Digit32], bb: &[Digit32]) -> usize {
             let mut retsz = 0;
@@ -314,7 +314,7 @@ impl Big32x40 {
 
     /// Divide self by another bignum, overwriting `q` with the quotient and `r` with the
     /// remainder.
-    pub fn div_rem(&self, d: &Big32x40, q: &mut Big32x40, r: &mut Big32x40) {
+    pub(super) fn div_rem(&self, d: &Big32x40, q: &mut Big32x40, r: &mut Big32x40) {
         // Stupid slow base-2 long division taken from
         // https://en.wikipedia.org/wiki/Division_algorithm
         // FIXME use a greater base (Digit32) for the long division.

@@ -18,10 +18,10 @@ use num::digits_to_big;
 use rawfp::RawFloat;
 use std::convert::TryFrom;
 
-pub struct DecimalFloat<'a> {
-    pub integral: &'a [u8],
-    pub fractional: &'a [u8],
-    pub exp: i64,
+pub(super) struct DecimalFloat<'a> {
+    integral: &'a [u8],
+    fractional: &'a [u8],
+    exp: i64,
 }
 
 impl<'a> TryFrom<Decimal<'a>> for DecimalFloat<'a> {
@@ -42,7 +42,7 @@ type Big = bignum::Big32x40;
 
 /// The main workhorse for the decimal-to-float conversion: Orchestrate all the preprocessing
 /// and figure out which algorithm should do the actual conversion.
-pub fn convert(mut decimal: DecimalFloat<'_>) -> Result<f64, ParseFloatError> {
+pub(super) fn convert(mut decimal: DecimalFloat<'_>) -> Result<f64, ParseFloatError> {
     simplify(&mut decimal);
     if let Some(x) = trivial_cases(&decimal) {
         return Ok(x);

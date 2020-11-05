@@ -20,8 +20,8 @@ use crate::{
 };
 use gc::GC;
 use std::{collections::HashMap, error, fmt, marker::PhantomData, sync::Arc};
-use values::OperationError;
-pub use values::{RValue, Value};
+pub use values::Value;
+use values::{OperationError, RValue};
 
 #[derive(Default, Debug)]
 struct CallFrame {

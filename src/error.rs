@@ -39,7 +39,7 @@ fn int_width(i: u32) -> usize {
 ///
 /// error : unexpected dot
 /// ```
-pub fn display_error<T: fmt::Display, U: fmt::Display>(
+pub(crate) fn display_error<T: fmt::Display, U: fmt::Display>(
     message: T,
     note: Option<U>,
     range: Range,

@@ -6,8 +6,8 @@ use super::{
     gc::{Collectable, CollectableObject},
 };
 use crate::parser::{Chunk, Constant};
-pub use operations::OperationError;
-pub use rust_value::RValue;
+pub(crate) use operations::OperationError;
+pub(super) use rust_value::RValue;
 use std::{
     collections::HashMap,
     fmt,

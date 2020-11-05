@@ -8,7 +8,7 @@ use super::Big;
 
 /// Test whether truncating all bits less significant than `ones_place` introduces
 /// a relative error less, equal, or greater than 0.5 ULP.
-pub fn compare_with_half_ulp(f: &Big, ones_place: usize) -> Ordering {
+pub(super) fn compare_with_half_ulp(f: &Big, ones_place: usize) -> Ordering {
     if ones_place == 0 {
         return Less;
     }
@@ -36,7 +36,7 @@ pub fn compare_with_half_ulp(f: &Big, ones_place: usize) -> Ordering {
 /// 1. using `FromStr` on `&[u8]` requires `from_utf8_unchecked`, which is bad, and
 /// 2. piecing together the results of `integral.parse()` and `fractional.parse()` is
 ///    more complicated than this entire function.
-pub fn from_str_unchecked<'a, T>(bytes: T) -> u64
+pub(super) fn from_str_unchecked<'a, T>(bytes: T) -> u64
 where
     T: IntoIterator<Item = &'a u8>,
 {
@@ -50,7 +50,7 @@ where
 /// Converts a string of ASCII digits into a bignum.
 ///
 /// Like `from_str_unchecked`, this function relies on the parser to weed out non-digits.
-pub fn digits_to_big(integral: &[u8], fractional: &[u8]) -> Big {
+pub(super) fn digits_to_big(integral: &[u8], fractional: &[u8]) -> Big {
     let mut f = Big::from_small(0);
     for &c in integral.iter().chain(fractional) {
         let n = u32::from(c - b'0');
@@ -61,7 +61,7 @@ pub fn digits_to_big(integral: &[u8], fractional: &[u8]) -> Big {
 }
 
 /// Unwraps a bignum into a 64 bit integer, capping at `u64::MAX`.
-pub fn to_u64(x: &Big) -> u64 {
+pub(super) fn to_u64(x: &Big) -> u64 {
     if x.bit_length() >= 64 {
         return u64::MAX;
     }
@@ -77,7 +77,7 @@ pub fn to_u64(x: &Big) -> u64 {
 
 /// Index 0 is the least significant bit and the range is half-open as usual.
 /// Panics if asked to extract more bits than fit into the return type.
-pub fn get_bits(x: &Big, start: usize, end: usize) -> u64 {
+pub(super) fn get_bits(x: &Big, start: usize, end: usize) -> u64 {
     debug_assert!(end - start <= 64);
     let mut result: u64 = 0;
     for i in (start..end).rev() {
