@@ -1100,7 +1100,7 @@ impl<'a> Parser<'a> {
 
 /// Kinds of errors emmited by the parser.
 #[derive(Debug, PartialEq)]
-pub(crate) enum ErrorKind {
+enum ErrorKind {
     /// Error emitted by the lexer
     Lexer(lexer::ErrorKind),
     /// Expected an expression, found something else or nothing.

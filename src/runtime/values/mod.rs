@@ -1,21 +1,22 @@
 mod operations;
 mod rust_value;
 
-use super::{
-    ffi::RustFunction,
-    gc::{Collectable, CollectableObject},
+use {
+    super::{
+        ffi::RustFunction,
+        gc::{Collectable, CollectableObject},
+    },
+    crate::parser::{Chunk, Constant},
+    std::{
+        collections::HashMap,
+        fmt,
+        //mem::ManuallyDrop,
+        ops::{Deref, DerefMut},
+        ptr::NonNull,
+        sync::Arc,
+    },
 };
-use crate::parser::{Chunk, Constant};
-pub(crate) use operations::OperationError;
-pub(super) use rust_value::RValue;
-use std::{
-    collections::HashMap,
-    fmt,
-    //mem::ManuallyDrop,
-    ops::{Deref, DerefMut},
-    ptr::NonNull,
-    sync::Arc,
-};
+pub(super) use {operations::OperationError, rust_value::RValue};
 
 /// A value that a variable can take in nox.
 ///

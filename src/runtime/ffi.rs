@@ -37,8 +37,8 @@ impl<F: 'static + FnMut(&mut [Value]) -> Result<Value, String>> From<F> for Valu
 /// [`import_all`](../struct.VM.html#method.import_all) functions of the `VM`.
 #[derive(Debug)]
 pub struct Library {
-    pub(crate) name: Box<str>,
-    pub(crate) variables: Vec<(Box<str>, Value)>,
+    pub(super) name: Box<str>,
+    pub(super) variables: Vec<(Box<str>, Value)>,
 }
 
 impl Library {

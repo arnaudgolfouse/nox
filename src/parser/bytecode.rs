@@ -413,7 +413,7 @@ pub struct Chunk {
 
 impl Chunk {
     /// Create a new Chunk with the name `name`.
-    pub(crate) fn new(name: Box<str>) -> Self {
+    pub(super) fn new(name: Box<str>) -> Self {
         Self {
             name,
             lines: Vec::new(),
@@ -436,7 +436,7 @@ impl Chunk {
     ///
     /// Multiple `u8` instructions will actually be emmited if the operand is
     /// bigger than `u8::MAX`.
-    pub(crate) fn emit_instruction<Op: Operand>(
+    pub(super) fn emit_instruction<Op: Operand>(
         &mut self,
         instruction: Instruction<Op>,
         line: u32,
@@ -453,7 +453,7 @@ impl Chunk {
     /// Directly push an instruction.
     ///
     /// If you want to use bigger operands than `u8`, consider using `emit_instruction` instead.
-    pub(crate) fn emit_instruction_u8(&mut self, instruction: Instruction<u8>, line: u32) {
+    pub(super) fn emit_instruction_u8(&mut self, instruction: Instruction<u8>, line: u32) {
         match self.lines.last_mut() {
             Some((l, nb)) if *l == line => *nb += 1,
             _ => self.lines.push((line, 1)),
@@ -463,7 +463,7 @@ impl Chunk {
     }
 
     /// Add a constant to the Chunk, and return it's index for future reference.
-    pub(crate) fn add_constant(&mut self, constant: Constant) -> usize {
+    pub(super) fn add_constant(&mut self, constant: Constant) -> usize {
         if let Some((index, _)) = self
             .constants
             .iter()
@@ -478,7 +478,7 @@ impl Chunk {
     }
 
     /// Add a global to the Chunk, and return it's index for future reference.
-    pub(crate) fn add_global(&mut self, global: Box<str>) -> usize {
+    pub(super) fn add_global(&mut self, global: Box<str>) -> usize {
         if let Some((index, _)) = self
             .globals
             .iter()
@@ -494,7 +494,7 @@ impl Chunk {
 
     /// push a dummy `Jump(0)` instruction, and returns its index in the bytecode
     /// for future modification
-    pub(crate) fn push_jump(&mut self) -> usize {
+    pub(super) fn push_jump(&mut self) -> usize {
         self.code.push(Instruction::Jump(0));
         self.code.len() - 1
     }
@@ -504,7 +504,7 @@ impl Chunk {
     /// This function can be quite inneficient, as operands bigger than
     /// `u8::MAX` will shift a lot of code to make room for extended
     /// instructions.
-    pub(crate) fn write_jump(&mut self, address: usize, instruction: Instruction<u64>) {
+    pub(super) fn write_jump(&mut self, address: usize, instruction: Instruction<u64>) {
         let initial_instruction = &mut self.code[address];
         // wow there cowboy !
         #[allow(clippy::panic)]
@@ -550,6 +550,9 @@ impl Chunk {
     }
 
     /// Get the line for the instruction at `index`, or the last line.
+    ///
+    /// This function will iterate on the whole bytecode to find the correct
+    /// line, making it potentially costly.
     pub fn get_line(&self, index: usize) -> usize {
         let mut line_index = 0;
         for (line, nb) in self.lines.iter().copied() {
