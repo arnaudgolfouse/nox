@@ -168,10 +168,10 @@ impl VM {
     }
 
     /// Pop two values from the stack and applies the given operation.
-    fn binary_op(
-        &mut self,
-        op: fn(Value, Value) -> Result<Value, OperationError>,
-    ) -> Result<(), VMErrorKind> {
+    fn binary_op<F>(&mut self, op: F) -> Result<(), VMErrorKind>
+    where
+        F: Fn(Value, Value) -> Result<Value, OperationError>,
+    {
         let value_2 = self.pop_stack()?;
         let value_1 = self.pop_stack()?;
         let new_value = op(value_1.captured_value(), value_2.captured_value())?;
@@ -209,10 +209,10 @@ impl VM {
                     let value_1 = self.pop_stack()?;
                     self.stack.push(Value::Bool(value_1 != value_2))
                 }
-                Instruction::Less => self.binary_op(Value::less)?,
-                Instruction::LessEq => self.binary_op(Value::less_eq)?,
-                Instruction::More => self.binary_op(Value::more)?,
-                Instruction::MoreEq => self.binary_op(Value::more_eq)?,
+                Instruction::Less => self.binary_op(|x, y| x.less(y).map(Value::Bool))?,
+                Instruction::LessEq => self.binary_op(|x, y| x.less_eq(y).map(Value::Bool))?,
+                Instruction::More => self.binary_op(|x, y| x.more(y).map(Value::Bool))?,
+                Instruction::MoreEq => self.binary_op(|x, y| x.more_eq(y).map(Value::Bool))?,
                 Instruction::Add => self.binary_op(Value::add)?,
                 Instruction::Subtract => self.binary_op(Value::subtract)?,
                 Instruction::Multiply => self.binary_op(Value::multiply)?,
