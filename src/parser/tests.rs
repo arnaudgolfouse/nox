@@ -581,7 +581,6 @@ fn functions() {
     assert_eq!(chunk.functions[0].constants, [Constant::Int(1)]);
     assert!(chunk.functions[0].globals.is_empty());
     assert_eq!(
-        // f
         chunk.functions[0].code,
         [
             ReadConstant(0),
@@ -807,10 +806,9 @@ fn functions() {
         ]
     );
     assert_eq!(
-        // g
         chunk.functions[0].code,
         [
-            PushNil,
+            ReadGlobal(0),
             ReadConstant(0),
             Add,
             WriteLocal(0), // local
@@ -819,7 +817,6 @@ fn functions() {
         ]
     );
     assert_eq!(
-        // f
         chunk.functions[1].code,
         [
             ReadGlobal(0),

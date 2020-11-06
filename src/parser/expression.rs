@@ -230,21 +230,8 @@ impl<'a> super::Parser<'a> {
 
         match self.find_variable(&variable) {
             VariableLocation::Undefined => {
-                // top-level or function call... is this convoluted ?
-                if self.function_stack.is_empty()
-                    || matches!(
-                        self.peek_transpose()?,
-                        Some(&Token {
-                            kind: TokenKind::LPar,
-                            ..
-                        })
-                    )
-                {
-                    let index = self.code().add_global(variable);
-                    self.emit_instruction(Instruction::ReadGlobal(index))
-                } else {
-                    self.emit_instruction_u8(Instruction::PushNil)
-                }
+                let index = self.code().add_global(variable);
+                self.emit_instruction(Instruction::ReadGlobal(index))
             }
             VariableLocation::Local(index) => self.emit_instruction(Instruction::ReadLocal(index)),
             VariableLocation::Global(index) => {
