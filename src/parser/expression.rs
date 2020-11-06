@@ -230,9 +230,21 @@ impl<'a> super::Parser<'a> {
 
         match self.find_variable(&variable) {
             VariableLocation::Undefined => {
-                // TODO : now that we have 'global ...' statements, change this to read a local (aka nil here), as the current logic is very counter-intuitive.
-                let index = self.code().add_global(variable);
-                self.emit_instruction(Instruction::ReadGlobal(index))
+                // top-level or function call... is this convoluted ?
+                if self.function_stack.is_empty()
+                    || matches!(
+                        self.peek_transpose()?,
+                        Some(&Token {
+                            kind: TokenKind::LPar,
+                            ..
+                        })
+                    )
+                {
+                    let index = self.code().add_global(variable);
+                    self.emit_instruction(Instruction::ReadGlobal(index))
+                } else {
+                    self.emit_instruction_u8(Instruction::PushNil)
+                }
             }
             VariableLocation::Local(index) => self.emit_instruction(Instruction::ReadLocal(index)),
             VariableLocation::Global(index) => {
