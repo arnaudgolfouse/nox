@@ -1,6 +1,6 @@
 //! Parser for the nox language.
 //!
-//! This will generate bytecode from a [Source](../enum.Source.html).
+//! This will generate bytecode from a [`super::Source`].
 //!
 //! # Example
 //!
@@ -16,15 +16,17 @@ mod tests;
 mod bytecode;
 mod expression;
 
-use crate::{
-    error::{display_error, Continue},
-    lexer::{self, Assign, Keyword, Lexer, Token, TokenKind},
-    Range, Source,
-};
 pub use bytecode::Chunk;
 pub(crate) use bytecode::{Constant, Instruction};
-use expression::ExpressionType;
-use std::{fmt, iter::Peekable};
+use {
+    crate::{
+        error::{display_error, Continue},
+        lexer::{self, Assign, Keyword, Lexer, Token, TokenKind},
+        Range, Source,
+    },
+    expression::ExpressionType,
+    std::{fmt, iter::Peekable},
+};
 
 /// Indicate what to do after successfully parsing a statement.
 #[derive(Debug, Clone, Copy)]
@@ -194,12 +196,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /*/// Return a `Range` at the current position
-    #[inline]
-    const fn current_range(&self) -> Range {
-        Range::new(self.current_position(), self.current_position())
-    }*/
-
     /// Returns the code for the function we are currently parsing.
     #[inline]
     fn code(&mut self) -> &mut Chunk {
@@ -294,7 +290,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Emit a `Expected [token]` error at the current position, continuable.
+    /// Emit a `Expected(kind)` error at the given range, continuable.
     #[inline]
     fn expected_token(&self, kind: TokenKind, range: Range) -> Error {
         self.emit_error(ErrorKind::Expected(kind), Continue::Continue, range)
@@ -325,7 +321,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse the associated [Source](../enum.Source.html) as a top-level
+    /// Parse the associated [`Source`] as a top-level
     /// function.
     ///
     ///
@@ -1184,7 +1180,7 @@ pub struct Error {
     kind: ErrorKind,
     /// range of this error in the `Source`
     range: Range,
-    /// [Source](../enum.Source.html) of this error
+    /// Source code of this error
     source: Box<str>,
     /// Name of the `source`
     source_name: Box<str>,
@@ -1274,7 +1270,7 @@ pub struct Warning {
     kind: WarningKind,
     /// range of this error in the `Source`
     range: Range,
-    /// [Source](../enum.Source.html) of this error
+    /// Source code of this error
     source: Box<str>,
     /// Name of the `source`
     source_name: Box<str>,
