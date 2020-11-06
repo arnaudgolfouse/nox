@@ -7,7 +7,7 @@ use nox::{
 
 fn munchausen(c: &mut Criterion) {
     let mut vm = VM::new();
-    vm.import_all(libraries::prelude()).unwrap();
+    vm.import_all(libraries::std()).unwrap();
     if let Err(err) = vm.parse_top_level(
         r#"
 fn isMunchausen(n)

@@ -67,7 +67,7 @@ return x
 
     criterion.bench_function("range_native", |bencher| {
         let mut vm = VM::new();
-        vm.import_all(libraries::prelude()).unwrap();
+        vm.import_all(libraries::std()).unwrap();
         vm.parse_top_level(
             r#"
 x = 0
