@@ -22,7 +22,9 @@ f(2, 0)
 f(5, 9)
 return a + b
 ```
-returns `7`
+```
+>> 7
+```
 
 - while and for loops, capturing variables :
 ```
@@ -33,7 +35,9 @@ while i != 5
 end
 return x
 ```
-returns `10`
+```
+>> 10
+```
 
 ```
 fn range(a, b) # returns an iterator
@@ -55,7 +59,9 @@ for i in range(0, 5) # loop until iter returns nil
 end
 return x
 ```
-returns `10`
+```
+>> 10
+```
 
 - tables (via a garbage collector) :
 ```
@@ -65,7 +71,9 @@ t1.world = "hello"
 t2[8] = t1["world"] == t2.y
 return t2[8]
 ```
-returns `true`
+```
+>> true
+```
 
 ## Syntax
 
