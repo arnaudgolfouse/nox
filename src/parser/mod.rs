@@ -1,6 +1,6 @@
 //! Parser for the nox language.
 //!
-//! This will generate bytecode from a [`super::Source`].
+//! This will generate bytecode from a [`Source`].
 //!
 //! # Example
 //!
@@ -181,7 +181,7 @@ pub struct Parser<'a> {
 //     z = 8       // - x y a z
 // end             // -
 impl<'a> Parser<'a> {
-    /// Create a new `Parser` from a `Source`.
+    /// Create a new `Parser` from a [`Source`].
     pub fn new(source: Source<'a>) -> Self {
         let name = Box::from(source.name());
         Self {
@@ -206,15 +206,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// emit a new instruction at the current line.
+    /// Emit a new instruction at the current line.
     #[inline]
     fn emit_instruction<Op: bytecode::Operand>(&mut self, instruction: Instruction<Op>) {
         let line = self.current_range.start.line;
         self.code().emit_instruction(instruction, line)
     }
 
-    /// emit a new u8 instruction at the current line. Same as
-    /// `emit_instruction::<u8>`.
+    /// Emit a new u8 instruction at the current line. Same as
+    /// [`emit_instruction::<u8>`](Parser::emit_instruction).
     #[inline]
     fn emit_instruction_u8(&mut self, instruction: Instruction<u8>) {
         let line = self.current_range.start.line;
@@ -1094,10 +1094,10 @@ impl<'a> Parser<'a> {
 ====================================================
 */
 
-/// Kinds of errors emmited by the parser.
+/// Kinds of errors emmited by the [`Parser`].
 #[derive(Debug, PartialEq)]
 enum ErrorKind {
-    /// Error emitted by the lexer
+    /// Error emitted by the [`Lexer`]
     Lexer(lexer::ErrorKind),
     /// Expected an expression, found something else or nothing.
     ExpectExpression,
@@ -1239,7 +1239,7 @@ impl std::error::Error for Error {}
 /// Kind of warning encountered during parsing
 #[derive(Clone, Debug)]
 enum WarningKind {
-    /// Warning from the lexer
+    /// Warning from the [`Lexer`]
     Lexer(lexer::Warning),
     /// A `global ...` statement was in the top-level
     GlobalInTopLevel,

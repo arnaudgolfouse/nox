@@ -1,8 +1,8 @@
 //! Runtime of the nox language.
 //!
-//! Contains the [Virtual Machine](struct.VM.html), the
-//! [Garbage Collector](./gc/struct.GC.html) and the
-//! [Foreign Functions Interface](./ffi/index.html).
+//! Contains the [`Virtual Machine`](VM), the
+//! [`Garbage Collector`](gc::GC) and the
+//! [`Foreign Functions Interface`](ffi).
 
 pub mod ffi;
 pub mod gc;
@@ -73,8 +73,8 @@ impl VM {
         assert_eq!(self.gc.allocated, 0);
     }
 
-    /// Similar to `reset`, but keep the global variables, the GC and the current
-    /// chunk.
+    /// Similar to [`reset`](VM::reset), but keep the global variables, the GC
+    /// and the current chunk.
     pub fn partial_reset(&mut self) {
         self.ip = 0;
         self.stack.clear();
@@ -86,8 +86,7 @@ impl VM {
     ///
     /// # Errors
     ///
-    /// Any parsing error is converted to [`VMError`](enum.VMError.html) and
-    /// returned.
+    /// Any parsing error is converted to [`VMError`] and returned.
     pub fn parse_top_level(&mut self, source: &str) -> Result<Vec<parser::Warning>, VMError> {
         self.partial_reset();
         let parser = Parser::new(crate::Source::TopLevel(source));
@@ -100,8 +99,7 @@ impl VM {
     ///
     /// # Errors
     ///
-    /// Any parsing error is converted to [`VMError`](enum.VMError.html) and
-    /// returned.
+    /// Any parsing error is converted to [`VMError`] and returned.
     pub fn parse_source(&mut self, source: Source) -> Result<Vec<parser::Warning>, VMError> {
         self.partial_reset();
         let parser = Parser::new(source);
@@ -121,9 +119,7 @@ impl VM {
     /// # Errors
     ///
     /// If the name of the library tries to replace an already defined
-    /// global variable,
-    /// [`RuntimeError::NameAlreadyDefined`](enum.RuntimeError.html#variant.NameAlreadyDefined)
-    /// is emmited.
+    /// global variable, [`RuntimeError::NameAlreadyDefined`] is emitted.
     pub fn import(&mut self, library: ffi::Library) -> Result<(), VMError> {
         if self.global_variables.contains_key(&library.name) {
             return Err(VMError::Runtime {
@@ -148,9 +144,7 @@ impl VM {
     /// # Errors
     ///
     /// If one of the symbols of the library tries to replace an already defined
-    /// global variable,
-    /// [`RuntimeError::NameAlreadyDefined`](enum.RuntimeError.html#variant.NameAlreadyDefined)
-    /// is emmited.
+    /// global variable, [`RuntimeError::NameAlreadyDefined`] is emitted.
     pub fn import_all(&mut self, library: ffi::Library) -> Result<(), VMError> {
         for (name, value) in library.variables {
             if self.global_variables.contains_key(&name) {
@@ -173,7 +167,7 @@ impl VM {
     /// returned.
     ///
     /// Else, if the machine exhausts all code without encountering `return`,
-    /// `Value::Nil` is returned.
+    /// [`Value::Nil`] is returned.
     ///
     /// # Examples
     ///
@@ -222,7 +216,7 @@ impl VM {
     ///
     /// # Errors
     ///
-    /// See [`VMError`](enum.VMError.html)
+    /// See [`VMError`].
     pub fn run(&mut self) -> Result<RValue, VMError> {
         // for variables
         for _ in 0..self.chunk.locals_number {
@@ -238,7 +232,7 @@ impl VM {
         }
     }
 
-    /// Construct a `VMError` from a `VMErrorKind` (e.g. by doing stack
+    /// Construct a `VMError` from a `VMErrorKind` (by doing stack
     /// unwinding).
     fn make_error(&mut self, error: VMErrorKind) -> VMError {
         match error {
@@ -264,7 +258,7 @@ impl VM {
         }
     }
 
-    /// push a value onto the stack.
+    /// Push a value onto the stack.
     ///
     /// # Safety
     ///
@@ -274,7 +268,7 @@ impl VM {
         self.stack.push(value.into_raw())
     }
 
-    /// pop a value from the stack
+    /// Pop a value from the stack
     pub fn pop(&mut self) -> Option<RValue> {
         match self.stack.pop() {
             None => None,
@@ -312,7 +306,7 @@ impl VM {
         }
     }
 
-    /// Currently executing Chunk
+    /// Currently executing `Chunk`
     #[inline]
     fn chunk(&self) -> &Chunk {
         match self.call_frames.last() {
@@ -413,7 +407,7 @@ impl VM {
     ///
     /// # Errors
     ///
-    /// `InterfacingError::NotAString` is returned if the stack is incorrectly
+    /// [`InterfacingError::NotAString`] is returned if the stack is incorrectly
     /// setup.
     pub fn str_call(&mut self, nb_args: usize) -> Result<Vec<parser::Warning>, VMError> {
         let func_index = match self.stack.len().checked_sub(nb_args + 1) {
@@ -442,12 +436,12 @@ impl VM {
 
     /// Interpret the stack as `nb_args` arguments with a function below.
     ///
-    /// This will prepare the VM for the function and call it, and then push the
-    /// result on top of the stack.
+    /// This will prepare the `VM` for the function and call it, and then push
+    /// the result on top of the stack.
     ///
     /// # Errors
     ///
-    /// See [`VMError`](enum.VMError.html)
+    /// See [`VMError`].
     pub fn call(&mut self, nb_args: usize) -> Result<(), VMError> {
         self.call_internal(nb_args)
             .map_err(|err| self.make_error(err))
@@ -455,7 +449,7 @@ impl VM {
 
     /// Interpret the stack as `nb_args` arguments with a function below.
     ///
-    /// This will prepare the VM for the function and call it.
+    /// This will prepare the `VM` for the function and call it.
     fn call_internal(&mut self, nb_args: usize) -> Result<(), VMErrorKind> {
         let local_start = self
             .stack
@@ -524,7 +518,7 @@ impl Drop for VM {
 ====================================================
 */
 
-/// Error thrown by the VM at runtime.
+/// Error thrown by the [`VM`] at runtime.
 #[derive(Debug)]
 pub enum RuntimeError {
     /// Invalid unary or binary operation
@@ -609,10 +603,10 @@ pub(super) enum VMErrorKind {
     Interfacing(InterfacingError),
 }
 
-/// Error internally thrown by the VM.
+/// Error internally thrown by the [`VM`].
 ///
 /// Such errors *should* not happen in theory. If they do, that means there is a
-/// bug in the VM or parser.
+/// bug in the [`VM`] or [`Parser`].
 #[derive(Debug)]
 pub enum InternalError {
     /// The instruction pointer was out of bounds : the first number is the
@@ -620,8 +614,8 @@ pub enum InternalError {
     /// instruction vector.
     InstructionPointerOOB(usize, usize),
     /// The instruction pointer is sent out of bounds by the contained offset.
-    /// The boolean indicate whether the offset is positive (`true`) or negative
-    /// (`false`)
+    /// The boolean indicate whether the offset is positive ([`true`]) or
+    /// negative ([`false`])
     JumpOob(usize, bool),
     /// An element was requested from the `stack` but it was empty.
     EmptyStack,
@@ -630,7 +624,7 @@ pub enum InternalError {
     InvalidOperand(Instruction<usize>),
     /// A `Break` or `Continue` instruction was encountered outside of a loop.
     ///
-    /// If `true`, `break`, else `continue`.
+    /// If [`true`], `break`, else `continue`.
     BreakOrContinueOutsideLoop(bool),
 }
 

@@ -19,7 +19,7 @@ use std::{
     str::Chars,
 };
 
-/// Transform a [Source](../enum.Source.html) into [Token](struct.Token.html)s
+/// Transform a [`Source`] into [`Token`]s
 pub struct Lexer<'a> {
     /// Source code for this lexer
     pub(crate) source: Source<'a>,
@@ -34,7 +34,7 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    /// Creates a new `Lexer` from a `Source`.
+    /// Creates a new `Lexer` from a [`Source`].
     pub fn new(source: Source<'a>) -> Self {
         Self {
             iterator: source.content().chars().peekable(),
@@ -45,7 +45,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Creates a new `Lexer` from a `str`.
+    /// Creates a new `Lexer` from a [`str`].
     pub fn top_level(source: &'a str) -> Self {
         Self {
             iterator: source.chars().peekable(),
@@ -56,7 +56,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// emit an error at the currently parsed token
+    /// Emit an error at the currently parsed token
     fn emit_error(&self, kind: ErrorKind, continuable: Continue) -> Error<'a> {
         Error {
             kind,
@@ -70,7 +70,7 @@ impl<'a> Lexer<'a> {
     ///
     /// # Errors
     ///
-    /// See [`ErrorKind`](enum.ErrorKind.html)
+    /// See [`ErrorKind`].
     ///
     /// # Examples
     ///
@@ -434,7 +434,7 @@ impl<'a> Iterator for Lexer<'a> {
     }
 }
 
-/// Kind of errors returned by the lexer
+/// Kind of errors returned by the [`Lexer`]
 #[derive(Debug, PartialEq, Clone)]
 pub enum ErrorKind {
     /// Unknown character.
@@ -454,7 +454,7 @@ pub enum ErrorKind {
     UnknownEscape(char),
     /// Invalid UTF8 code point in string.
     ///
-    /// Emmitted with "\u{code}"
+    /// Emmitted by `"\u{code}"` if `code` is invalid.
     InvalidCodePoint(u32),
     /// Error while parsing an integer in `\u{...}`
     Parseint(std::num::ParseIntError),
@@ -490,10 +490,10 @@ impl Display for ErrorKind {
     }
 }
 
-/// A lexer error.
+/// A [`Lexer`] error.
 ///
-/// Contains its kind, as well as other information such as the position of the
-/// error in the input text.
+/// Contains its [kind](ErrorKind), as well as other information such as the
+/// position of the error in the input text.
 #[derive(Debug, Clone)]
 pub struct Error<'a> {
     pub(crate) kind: ErrorKind,
@@ -521,7 +521,7 @@ impl std::error::Error for Error<'_> {}
 
 pub type Result<'a, T> = std::result::Result<T, Error<'a>>;
 
-/// Kind of warnings returned by the lexer
+/// Kind of warnings returned by the [`Lexer`]
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Warning {
     /// A float had excessive precision, and some digits were ignored.

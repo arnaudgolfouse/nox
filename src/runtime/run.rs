@@ -3,7 +3,8 @@ use super::{
 };
 
 impl VM {
-    /// Read the instruction pointer, resolving any `Instruction::Extended`.
+    /// Read the instruction pointer, resolving any
+    /// [extended](Instruction::Extended) instruction.
     ///
     /// # Errors
     ///
@@ -31,9 +32,9 @@ impl VM {
         Ok((opcode, operand))
     }
 
-    /// Pop and unroot a value from the `stack`.
+    /// Pop and unroot a value from the [`stack`](VM::stack).
     ///
-    /// If `rooted` is `true`, the value will NOT be unrooted.
+    /// If `rooted` is [`true`], the value will NOT be unrooted.
     #[inline]
     pub(super) fn pop_stack(&mut self) -> Result<Value, VMErrorKind> {
         self.stack
@@ -41,7 +42,7 @@ impl VM {
             .ok_or(VMErrorKind::Internal(InternalError::EmptyStack))
     }
 
-    /// Read a value at `index` from the `stack`.
+    /// Read a value at `index` from the [`stack`](VM::stack).
     ///
     /// The returned value will have an additional root.
     #[inline]
@@ -54,7 +55,7 @@ impl VM {
         })
     }
 
-    /// Write a `value` at `index` in the `stack`.
+    /// Write a `value` at `index` in the [`stack`](VM::stack).
     ///
     /// The previous value will be unrooted.
     fn write_local(&mut self, index: usize, value: Value) -> Result<(), VMErrorKind> {
@@ -83,7 +84,7 @@ impl VM {
     /// # Return
     ///
     /// - `Ok(())` if `destination` was in bounds, or if `destination == self.code().len()`. (will be handled at the next iteration of the `run` loop).
-    /// - `Err(InternalError::JumpOob)` else.
+    /// - [`Err(InternalError::JumpOob)`](InternalError::JumpOob) else.
     #[inline]
     fn jump_to(&mut self, destination: usize) -> Result<(), VMErrorKind> {
         if destination >= self.code().len() {
@@ -94,7 +95,7 @@ impl VM {
         }
     }
 
-    /// Read a function from the current code's `functions`.
+    /// Read a function from the current code's [`functions`](Chunk::functions).
     ///
     /// This will take care of capturing variables, and the returned function
     /// will be rooted.

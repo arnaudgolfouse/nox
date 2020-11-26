@@ -16,7 +16,7 @@ pub trait Operand: fmt::Display + Sized + Default + Copy + std::cmp::PartialOrd 
     ) -> iter::Copied<slice::Iter<Option<Instruction<u8>>>>;
 }
 
-/// implement `Operand` for integer types
+/// implement [`Operand`] for integer types
 macro_rules! implement_integer_operand {
     ($($t:ty)*) => {
         $(
@@ -48,7 +48,7 @@ macro_rules! implement_integer_operand {
 
 implement_integer_operand!(u8 u16 u32 u64 usize);
 
-/// This macro helps implementing methods on `Instruction` easily.
+/// This macro helps implementing methods on [`Instruction`] easily.
 macro_rules! instructions {
     (
         $(
@@ -66,8 +66,8 @@ macro_rules! instructions {
 /// # Notes
 ///
 /// This structure is generic over the argument type to facilitate parsing
-/// (where instructions can have up to u32 operands). Only the `u8` variant will
-/// effectively be used at the end.
+/// (where instructions can have up to [`u32`] operands). Only the [`u8`]
+/// variant will effectively be used at the end.
 #[derive(Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum Instruction<Op: Operand> {
@@ -99,7 +99,7 @@ impl<Op: Operand> fmt::Debug for Instruction<Op> {
 
 impl<Op: Operand> Instruction<Op> {
     /// Return `Some(operand)` if an operand is associated with this
-    /// instruction, else it returns `None`.
+    /// instruction, else it returns [`None`].
     pub fn operand(self) -> Option<Op> {
         match self {
             $(
@@ -123,7 +123,7 @@ impl<Op: Operand> Instruction<Op> {
         }
     }
 
-    /// Convert this instruction into a `u8` instruction, and the eventual
+    /// Convert this instruction into a [`u8`] instruction, and the eventual
     /// extended operands.
     pub fn into_u8(self) -> (Instruction<u8>, Op::Extended) {
         let (operand, extended) = self.operand().unwrap_or_default().extended();
@@ -434,8 +434,8 @@ impl Chunk {
 
     /// Emit the new instruction.
     ///
-    /// Multiple `u8` instructions will actually be emmited if the operand is
-    /// bigger than `u8::MAX`.
+    /// Multiple [`u8`] instructions will actually be emmited if the operand is
+    /// bigger than [`u8::MAX`].
     pub(super) fn emit_instruction<Op: Operand>(
         &mut self,
         instruction: Instruction<Op>,
@@ -452,7 +452,8 @@ impl Chunk {
 
     /// Directly push an instruction.
     ///
-    /// If you want to use bigger operands than `u8`, consider using `emit_instruction` instead.
+    /// If you want to use bigger operands than [`u8`], consider using
+    /// [`emit_instruction`](Chunk::emit_instruction) instead.
     pub(super) fn emit_instruction_u8(&mut self, instruction: Instruction<u8>, line: u32) {
         match self.lines.last_mut() {
             Some((l, nb)) if *l == line => *nb += 1,
@@ -462,7 +463,8 @@ impl Chunk {
         self.code.push(instruction)
     }
 
-    /// Add a constant to the Chunk, and return it's index for future reference.
+    /// Add a constant to the `Chunk`, and return its index for future
+    /// reference.
     pub(super) fn add_constant(&mut self, constant: Constant) -> usize {
         if let Some((index, _)) = self
             .constants
@@ -477,7 +479,7 @@ impl Chunk {
         self.constants.len() - 1
     }
 
-    /// Add a global to the Chunk, and return it's index for future reference.
+    /// Add a global to the `Chunk`, and return its index for future reference.
     pub(super) fn add_global(&mut self, global: Box<str>) -> usize {
         if let Some((index, _)) = self
             .globals
@@ -502,7 +504,7 @@ impl Chunk {
     /// Write the (now known) operand at the given index.
     ///
     /// This function can be quite inneficient, as operands bigger than
-    /// `u8::MAX` will shift a lot of code to make room for extended
+    /// [`u8::MAX`] will shift a lot of code to make room for extended
     /// instructions.
     pub(super) fn write_jump(&mut self, address: usize, instruction: Instruction<u64>) {
         let initial_instruction = &mut self.code[address];

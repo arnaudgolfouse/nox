@@ -7,7 +7,7 @@ use std::{cell::RefCell, fmt::Debug, sync::Arc};
 ///
 /// The function receives a slice of values for its arguments.
 ///
-/// it is able to return a custom `String` error, or a single `Value`.
+/// It is able to return a custom [`String`] error, or a single [`Value`].
 #[allow(clippy::type_complexity)]
 #[derive(Clone)]
 pub struct RustFunction(pub Arc<RefCell<dyn FnMut(&mut [Value]) -> Result<Value, String>>>);
@@ -24,7 +24,10 @@ impl Debug for RustFunction {
     }
 }
 
-impl<F: 'static + FnMut(&mut [Value]) -> Result<Value, String>> From<F> for Value {
+impl<F> From<F> for Value
+where
+    F: 'static + FnMut(&mut [Value]) -> Result<Value, String>,
+{
     fn from(value: F) -> Self {
         Self::RustFunction(RustFunction(Arc::new(RefCell::new(value))))
     }
@@ -32,9 +35,11 @@ impl<F: 'static + FnMut(&mut [Value]) -> Result<Value, String>> From<F> for Valu
 
 /// Library regrouping external objects.
 ///
-/// This can be loaded into the current top-level via the
-/// [`import`](../struct.VM.html#method.import) and
-/// [`import_all`](../struct.VM.html#method.import_all) functions of the `VM`.
+/// This can be loaded into the current top-level via the [`import`] and
+/// [`import_all`] methods of the `VM`.
+///
+/// [`import`]: super::VM::import
+/// [`import_all`]: super::VM::import_all
 #[derive(Debug)]
 pub struct Library {
     pub(super) name: Box<str>,

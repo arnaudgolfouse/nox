@@ -6,11 +6,11 @@
 //! # Structure
 //!
 //! The process is made out of three major steps :
-//! - Lexing : A [Lexer](./lexer/struct.Lexer.html) turns the source code into
-//! [Tokens](./lexer/struct.Token.html).
-//! - Parsing : A [Parser](./parser/struct.Parser.html) turns source code into
+//! - Lexing : A [`Lexer`](lexer::Lexer) turns the source code into
+//! [`Tokens`](lexer::Token).
+//! - Parsing : A [`Parser`](parser::Parser) turns source code into
 //! bytecode (It includes a `Lexer` internally).
-//! - Running : A [Virtual Machine](./runtime/struct.VM.html) runs the bytecode.
+//! - Running : A [`Virtual Machine`](runtime::VM) runs the bytecode.
 //!
 //! # Features
 //!
@@ -48,7 +48,7 @@ impl<'a> Source<'a> {
 
     /// Name of the source.
     ///
-    /// Will return `"top-level"` if the Source is `TopLevel`.
+    /// Will return `"top-level"` if the Source is [`TopLevel`](Source::TopLevel).
     pub fn name(&self) -> &str {
         match self {
             Self::File { name, .. } => name,
@@ -84,7 +84,7 @@ impl fmt::Display for Position {
     }
 }
 
-/// A range of positions in the source code
+/// A range of [`positions`](Position) in the source code
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Range {
     pub start: Position,

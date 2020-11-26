@@ -82,9 +82,11 @@ impl Collectable {
         self.header.roots += 1
     }
 
+    /// Remove a root
+    ///
     /// # Safety
     ///
-    /// If the root count reaches `0` via this function, the value **must** no
+    /// If the root count reaches `0` via this function, the value **must** not
     /// be ready to be collected (aka there is a rooted object referencing this).
     #[inline]
     pub unsafe fn unroot(&mut self) {
@@ -93,7 +95,7 @@ impl Collectable {
 
     /// If `self` is a captured value, return it.
     ///
-    /// Else, return `None`.
+    /// Else, return [`None`].
     #[inline]
     pub fn as_captured(&self) -> Option<&Value> {
         match &self.object {
@@ -102,7 +104,7 @@ impl Collectable {
         }
     }
 
-    /// Returns The list of values rattached to this one.
+    /// Returns the list of values rattached to this one.
     fn to_mark(&self) -> Vec<&Self> {
         match &self.object {
             CollectableObject::Captured(value) => match value.as_collectable() {
@@ -220,8 +222,8 @@ impl GC {
         }
     }
 
-    /// Clones a collectable value, creating a new, fresh one (aka a different
-    /// pointer).
+    /// Clones a [`Collectable`] value, creating a new, fresh one (aka a
+    /// different pointer).
     ///
     /// Does not clone the GC properties (typically roots), but share any
     /// internal collectable value, such as captured variables and table keys/
@@ -264,7 +266,7 @@ impl GC {
         }
     }
 
-    /// Insert the given `Collectable` in the garbage collector.
+    /// Insert the given [`Collectable`] in the garbage collector.
     fn make_collectable(&mut self, mut collectable: Collectable) -> Value {
         let additional = collectable.size();
         self.check(additional);
@@ -275,9 +277,9 @@ impl GC {
         Value::Collectable(ptr)
     }
 
-    /// Creates a new garbage collected function.
+    /// Creates a new garbage collected function
     ///
-    /// This function will be rooted
+    /// This function will be rooted.
     pub fn new_function(&mut self, chunk: Arc<Chunk>, captured_variables: Vec<Value>) -> Value {
         self.new_function_nodrop(
             chunk,

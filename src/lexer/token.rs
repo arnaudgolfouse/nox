@@ -47,12 +47,12 @@ pub enum Operation {
 }
 
 impl Operation {
-    /// Returns `true` if this operator can be unary
+    /// Returns [`true`] if this operator can be unary
     pub const fn is_unary(self) -> bool {
         matches!(self, Self::Minus | Self::Not)
     }
 
-    /// Returns `true` if this operator can be binary
+    /// Returns [`true`] if this operator can be binary
     pub const fn is_binary(self) -> bool {
         !(matches!(self, Self::Not))
     }
@@ -105,7 +105,7 @@ pub enum Assign {
 /// # Remark
 ///
 /// `and`, `or`, `xor` and `not`, while technically keywords, are found under the
-/// [Operation](enum.Operation.html) enum.
+/// [`Operation`] enum.
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Keyword {
     /// `fn`
@@ -295,13 +295,13 @@ impl fmt::Display for TokenKind {
     }
 }
 
-/// Token returned by a [Lexer](struct.Lexer.html)
+/// Token returned by a [`Lexer`](super::Lexer)
 #[derive(Debug, PartialEq, Clone)]
 pub struct Token {
     /// kind of token.
     pub kind: TokenKind,
     /// start and end of the token in the source text.
     pub range: Range,
-    /// Eventual warning
+    /// Eventual warning.
     pub warning: Option<Warning>,
 }
