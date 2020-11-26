@@ -124,6 +124,10 @@ impl fmt::Display for Value {
 }
 
 impl Value {
+    // ===============
+    // GC manipulation
+    // ===============
+
     /// Remove a root to this value if it is collectable.
     ///
     /// # Safety
@@ -209,6 +213,10 @@ impl Value {
         }
     }
 
+    // ================
+    // Safe conversions
+    // ================
+
     pub(super) fn as_table(&self) -> Option<&HashMap<NoDropValue, NoDropValue>> {
         match self {
             Self::Collectable(ptr) => match unsafe { &ptr.as_ref().object } {
@@ -250,6 +258,46 @@ impl Value {
     pub(super) fn as_nodrop_ref(&self) -> &NoDropValue {
         unsafe { &*(self as *const Self as *const NoDropValue) }
     }
+
+    // ==================
+    // Unsafe conversions
+    // ==================
+    //
+    // Not useful yet, but we may use this with typed intructions at some point.
+
+    /*
+
+    /// Assume that `self` is a **non-captured** [`Int`].
+    ///
+    /// # Safety
+    ///
+    /// If `self` is not literally an [`Int`], behaviour is undefined.
+    ///
+    /// [`Int`]: (Value::Int)
+    unsafe fn assume_int(self) -> i64 {
+        if let Value::Int(i) = self {
+            i
+        } else {
+            std::hint::unreachable_unchecked()
+        }
+    }
+
+    /// Assume that `self` is a **non-captured** [`Float`].
+    ///
+    /// # Safety
+    ///
+    /// If `self` is not literally an [`Float`], behaviour is undefined.
+    ///
+    /// [`Float`]: (Value::Float)
+    unsafe fn assume_(self) -> f64 {
+        if let Value::Float(f) = self {
+            f
+        } else {
+            std::hint::unreachable_unchecked()
+        }
+    }
+
+    */
 }
 
 //=================================
