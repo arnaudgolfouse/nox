@@ -109,14 +109,14 @@ impl Hash for Value {
 }
 
 impl Value {
-    /// Add the two values together, returning a new value if it worked.
+    /// Add `other` to `self`, returning a new value if it worked.
     ///
     /// The new value will not be garbage collected.
     ///
     /// # Errors
     ///
-    /// If the two values can't be added, `OperationError(+, self, other)` is
-    /// returned.
+    /// If the two values can't be added,
+    /// [`OperationError(Plus, self, other)`](OperationError::Binary) is returned.
     pub(crate) fn add(self, other: Self) -> Result<Self, OperationError> {
         match self {
             Self::Int(i1) => match other {
@@ -138,6 +138,14 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Plus, s, o))
     }
 
+    /// Subtract `other` from `self`, returning a new value if it worked.
+    ///
+    /// The new value will not be garbage collected.
+    ///
+    /// # Errors
+    ///
+    /// If `other` cannot be subtracted from `self`,
+    /// [`OperationError(Minus, self, other)`](OperationError::Binary) is returned.
     pub(crate) fn subtract(self, other: Self) -> Result<Self, OperationError> {
         match self {
             Self::Int(i1) => match other {
@@ -155,6 +163,14 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Minus, s, o))
     }
 
+    /// Multiply `self` by `other`, returning a new value if it worked.
+    ///
+    /// The new value will not be garbage collected.
+    ///
+    /// # Errors
+    ///
+    /// If the two values can't be multiplied,
+    /// [`OperationError(Multiply, self, other)`](OperationError::Binary) is returned.
     pub(crate) fn multiply(self, other: Self) -> Result<Self, OperationError> {
         match self {
             Self::Int(i1) => match other {
@@ -183,6 +199,14 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Multiply, s, o))
     }
 
+    /// Divide `self` by `other`, returning a new value if it worked.
+    ///
+    /// The new value will not be garbage collected.
+    ///
+    /// # Errors
+    ///
+    /// If the two values are not numbers,
+    /// [`OperationError(Divide, self, other)`](OperationError::Binary) is returned.
     pub(crate) fn divide(self, other: Self) -> Result<Self, OperationError> {
         match self {
             Self::Int(i1) => match other {
@@ -200,6 +224,14 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Divide, s, o))
     }
 
+    /// Take `self` modulo `other`, returning a new value if it worked.
+    ///
+    /// The new value will not be garbage collected.
+    ///
+    /// # Errors
+    ///
+    /// If the two values are not integers,
+    /// [`OperationError(Modulo, self, other)`](OperationError::Binary) is returned.
     pub(crate) fn modulo(self, other: Self) -> Result<Self, OperationError> {
         match self {
             Self::Int(i1) => match other {
@@ -211,6 +243,14 @@ impl Value {
         .map_err(|(s, o)| OperationError::Binary(Operation::Modulo, s, o))
     }
 
+    /// Take `self` to the power of `other`, returning a new value if it worked.
+    ///
+    /// The new value will not be garbage collected.
+    ///
+    /// # Errors
+    ///
+    /// If the two values are not numbers,
+    /// [`OperationError(Pow, self, other)`](OperationError::Binary) is returned.
     pub(crate) fn pow(self, other: Self) -> Result<Self, OperationError> {
         match self {
             Self::Int(i1) => match other {
