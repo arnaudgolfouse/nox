@@ -21,7 +21,7 @@ pub(super) use {operations::OperationError, rust_value::RValue};
 /// A value that a variable can take in nox.
 ///
 /// This value will be unrooted as it is dropped ; as such, all creation of a
-/// `Value` **must** root it if it is collectable.
+/// `Value` **must** root it if it is [collectable](Value::Collectable).
 ///
 /// This means a `Value` will *always* have at least one root.
 pub enum Value {
@@ -153,7 +153,7 @@ impl Value {
         }
     }
 
-    /// Return `Some` with the inner value if `self` is a captured variable.
+    /// Return [`Some`] with the inner value if `self` is a captured variable.
     pub(super) fn as_captured(&self) -> Option<&Self> {
         match self {
             Self::Collectable(ptr) => match &unsafe { &ptr.as_ref() }.object {
@@ -164,7 +164,7 @@ impl Value {
         }
     }
 
-    /// Return `Some` with the inner value if `self` is a captured variable.
+    /// Return [`Some`] with the inner value if `self` is a captured variable.
     pub(super) fn as_captured_mut(&mut self) -> Option<&mut Self> {
         match self {
             Self::Collectable(ptr) => match unsafe { &mut ptr.as_mut().object } {
@@ -217,6 +217,9 @@ impl Value {
     // Safe conversions
     // ================
 
+    /// Try to cast `self` as a [`table`](CollectableObject::Table).
+    ///
+    /// Returns [`None`] if the cast is not possible.
     pub(super) fn as_table(&self) -> Option<&HashMap<NoDropValue, NoDropValue>> {
         match self {
             Self::Collectable(ptr) => match unsafe { &ptr.as_ref().object } {
@@ -227,6 +230,9 @@ impl Value {
         }
     }
 
+    /// Try to cast `self` as a mutable [`table`](CollectableObject::Table).
+    ///
+    /// Returns [`None`] if the cast is not possible.
     pub(super) fn as_table_mut(&mut self) -> Option<&mut HashMap<NoDropValue, NoDropValue>> {
         match self {
             Self::Collectable(ptr) => match unsafe { &mut ptr.as_mut().object } {
@@ -237,6 +243,9 @@ impl Value {
         }
     }
 
+    /// Try to cast `self` as a mutable [`Function`](CollectableObject::Function).
+    ///
+    /// Returns [`None`] if the cast is not possible.
     pub(super) fn as_function_mut(&mut self) -> Option<(&mut Arc<Chunk>, &mut Vec<NoDropValue>)> {
         match self {
             Self::Collectable(ptr) => match unsafe { &mut ptr.as_mut().object } {
@@ -250,7 +259,7 @@ impl Value {
         }
     }
 
-    /// Interpret this as a `NoDropValue` reference.
+    /// Interpret `self` as a [`NoDropValue`] reference.
     ///
     /// This is safe, as the `NoDropValue`'s lifetime will be tied to `self`,
     /// and the method for cloning a `NoDropValue` is unsafe.
@@ -289,7 +298,7 @@ impl Value {
     /// If `self` is not literally an [`Float`], behaviour is undefined.
     ///
     /// [`Float`]: (Value::Float)
-    unsafe fn assume_(self) -> f64 {
+    unsafe fn assume_float(self) -> f64 {
         if let Value::Float(f) = self {
             f
         } else {
@@ -304,7 +313,7 @@ impl Value {
 //========== NoDropValue ==========
 //=================================
 
-/// This is the version of `Value` that won't be unrooted on drop.
+/// This is the version of [`Value`] that won't be unrooted on drop.
 ///
 /// As such, its use is reserved for the internal of GC objects.
 ///
@@ -314,8 +323,8 @@ impl Value {
 pub struct NoDropValue(Value);
 
 impl Drop for NoDropValue {
+    /// exactly the opposite of [`Value::drop`]
     fn drop(&mut self) {
-        // exactly the opposite of Value::drop
         if let Value::Collectable(obj) = &mut self.0 {
             unsafe { obj.as_mut().root() }
         }
@@ -342,12 +351,12 @@ impl fmt::Debug for NoDropValue {
 }
 
 impl NoDropValue {
-    /// Creates a new `NoDropValue` wrapper from a `Value`.
+    /// Creates a new `NoDropValue` wrapper from a [`Value`].
     ///
     /// # Safety
     ///
     /// This will unroot `value` once : as such, this should only be used in the
-    /// internals of (GC)[../gc/struct.GC.html], when we borrow `GC` mutably, to
+    /// internals of [`GC`](super::gc::GC), when we borrow `GC` mutably, to
     /// avoid collections.
     pub(super) unsafe fn new(mut value: Value) -> Self {
         value.unroot();
@@ -358,10 +367,10 @@ impl NoDropValue {
     ///
     /// # Safety
     ///
-    /// This will duplicate `value`, which is in itself a kind of lifetime
-    /// extension (if self's lifetime was constrained in any way).
+    /// This will duplicate `self`, which is in itself a kind of lifetime
+    /// extension (if `self`'s lifetime was constrained in any way).
     ///
-    /// As such, it is reserved for the internals of (GC)[../gc/struct.GC.html],
+    /// As such, it is reserved for the internals of [`GC`](super::gc::GC),
     /// when we borrow `GC` mutably, to avoid collections.
     ///
     /// Users of this method **must** ensure that the new value will not be
