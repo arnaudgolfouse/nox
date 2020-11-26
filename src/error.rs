@@ -171,21 +171,21 @@ fn display_error_internal(
             } else {
                 write!(formatter, "{}", c)?;
                 if i < error_end && i >= error_start {
-                    underline.push_str("_")
+                    underline.push('_')
                 } else if i < error_start {
                     underline.push(' ')
                 }
             }
             if i == error_end {
-                underline.push_str("^")
+                underline.push('^')
             }
         }
         while error_end > column_max {
             column_max += 1;
-            underline.push_str("_")
+            underline.push('_')
         }
         if error_end == column_max {
-            underline.push_str("^")
+            underline.push('^')
         }
         writeln!(formatter)?;
         Ok(color_str(underline).to_string())
