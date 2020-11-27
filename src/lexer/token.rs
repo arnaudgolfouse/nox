@@ -120,7 +120,7 @@ pub(super) enum RawToken {
     #[token("_")]
     Placeholder,
 
-    #[regex(r"[0-9][0-9a-zA-Z_]*(?:\.[0-9a-zA-Z_]*)")]
+    #[regex(r"[0-9][0-9a-zA-Z_]*(\.[0-9a-zA-Z_]*)?")]
     Number,
     #[regex(r#"("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')"#)]
     Str,
