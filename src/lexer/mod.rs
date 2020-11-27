@@ -190,7 +190,8 @@ fn parse_string<'source>(
         ) -> Error<'source> {
             Error {
                 kind,
-                range: self.string_range.start + range.start..self.string_range.end + range.end,
+                range: (self.string_range.start + range.start)
+                    ..(self.string_range.start + range.end),
                 source: self.source.clone(),
                 continuable,
             }
@@ -278,6 +279,7 @@ fn parse_string<'source>(
                         }
                     }
                     let mut code_point = String::new();
+                    let start_code_point_pos = string_parser.position;
                     loop {
                         if let Some(c) = string_parser.next() {
                             match c {
@@ -285,7 +287,7 @@ fn parse_string<'source>(
                                 c if c == matching_character => {
                                     return Err(string_parser.error(
                                         ErrorKind::ExpectedFound('}', Some(matching_character)),
-                                        start_pos..string_parser.position,
+                                        string_parser.position..string_parser.position + 1,
                                         Continue::Stop,
                                     ))
                                 }
@@ -294,11 +296,12 @@ fn parse_string<'source>(
                         } else {
                             return Err(string_parser.error(
                                 ErrorKind::IncompleteString(matching_character),
-                                0..0,
+                                0..string_parser.position,
                                 Continue::Stop,
                             ));
                         }
                     }
+                    let end_code_point_pos = string_parser.position.saturating_sub(1);
                     // TODO : plug our own (very simple !) int parser here
                     match u32::from_str_radix(&code_point, 16) {
                         Ok(code) => match std::char::from_u32(code) {
@@ -306,7 +309,7 @@ fn parse_string<'source>(
                             None => {
                                 return Err(string_parser.error(
                                     ErrorKind::InvalidCodePoint(code),
-                                    start_pos..string_parser.position,
+                                    start_code_point_pos..end_code_point_pos,
                                     Continue::Stop,
                                 ))
                             }
@@ -314,9 +317,9 @@ fn parse_string<'source>(
                         Err(err) => {
                             return Err(string_parser.error(
                                 ErrorKind::Parseint(err),
-                                start_pos..string_parser.position,
+                                start_code_point_pos..end_code_point_pos,
                                 Continue::Stop,
-                            ))
+                            ));
                         }
                     }
                 }
