@@ -1,8 +1,8 @@
 use colored::{ColoredString, Colorize};
 use std::{fmt, iter::Enumerate, ops::Range, str::Lines};
 
-/// Describe what should the REPL do with this error.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Describe what should the REPL do with an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub enum Continue {
     /// Continue on a new line
     Continue,
@@ -11,8 +11,16 @@ pub enum Continue {
 }
 
 /// Helper function, return the width (in characters) of a number
-fn int_width(i: usize) -> usize {
-    format!("{}", i).chars().count()
+const fn int_width(mut i: usize) -> usize {
+    if i == 0 {
+        return 1;
+    }
+    let mut length = 0;
+    while i != 0 {
+        i /= 10;
+        length += 1
+    }
+    length
 }
 
 /// Write an error nicely on the given formatter.
