@@ -3,11 +3,6 @@ use num_parser::{Base, NumberError};
 
 #[test]
 fn errors() {
-    // multiple dots
-    assert_eq!(
-        Lexer::top_level("3.1.2").next().unwrap().unwrap_err().kind,
-        ErrorKind::NumberError(NumberError::NumberUnexpectedDot)
-    );
     // unrecognised characters and tokens
     assert_eq!(
         Lexer::top_level("😬").next().unwrap().unwrap_err().kind,

@@ -131,14 +131,22 @@ impl<'source> Iterator for Lexer<'source> {
                 }
             }
             RawToken::Id => TokenKind::Id(self.source.content()[range.clone()].into()),
-            RawToken::Error => {
-                return Some(Err(Error {
-                    kind: ErrorKind::UnknownToken,
-                    range,
-                    source: self.source.clone(),
-                    continuable: Continue::Stop,
-                }));
-            }
+            RawToken::Error => match self.source.content().as_bytes().get(range.start) {
+                Some(c) if *c == b'\'' || *c == b'"' => {
+                    match parse_string(*c as char, range.clone(), self.source.clone()) {
+                        Ok(string) => TokenKind::Str(string),
+                        Err(err) => return Some(Err(err)),
+                    }
+                }
+                _ => {
+                    return Some(Err(Error {
+                        kind: ErrorKind::UnknownToken,
+                        range,
+                        source: self.source.clone(),
+                        continuable: Continue::Stop,
+                    }))
+                }
+            },
         };
         Some(Ok(Token {
             kind,
@@ -190,7 +198,40 @@ fn parse_string<'source>(
     }
 
     // remove the string delimiters
-    let chars = source.content()[string_range.start + 1..string_range.end - 1].chars();
+
+    let chars = match source
+        .content()
+        .get(string_range.start + 1..string_range.end.saturating_sub(1))
+    {
+        Some(source_interior) => {
+            let last_char = source
+                .content()
+                .as_bytes()
+                .get(string_range.end.saturating_sub(1))
+                .copied()
+                .map(|c| c as char);
+            match last_char {
+                Some(c) if c == matching_character => {} // ok here
+                _ => {
+                    return Err(Error {
+                        kind: ErrorKind::IncompleteString(matching_character),
+                        range: string_range.end.saturating_sub(1)..string_range.end,
+                        source,
+                        continuable: Continue::Continue, // no fear
+                    });
+                }
+            }
+            source_interior.chars()
+        }
+        None => {
+            return Err(Error {
+                kind: ErrorKind::IncompleteString(matching_character),
+                range: string_range.end.saturating_sub(1)..string_range.end,
+                source,
+                continuable: Continue::Continue, // no fear
+            });
+        }
+    };
     let mut string_parser = StringParser {
         string_range,
         // 1 bc we don't take the string delimiter
