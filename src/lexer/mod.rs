@@ -18,18 +18,18 @@ use std::{
 };
 use token::RawToken;
 
-pub(super) struct Lexer<'source> {
+pub struct Lexer<'source> {
     source: Source<'source>,
     lexer: logos::Lexer<'source, RawToken>,
 }
 
 impl<'source> Lexer<'source> {
-    pub(crate) fn new(source: Source<'source>) -> Self {
+    pub fn new(source: Source<'source>) -> Self {
         let lexer = logos::Lexer::new(source.content());
         Self { source, lexer }
     }
 
-    pub(crate) fn top_level(source: &'source str) -> Self {
+    pub fn top_level(source: &'source str) -> Self {
         Self {
             source: Source::TopLevel(source),
             lexer: logos::Lexer::new(source),
