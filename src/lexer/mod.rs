@@ -3,436 +3,297 @@
 #[cfg(test)]
 mod tests;
 
-mod logos_lexer;
 mod num_parser;
 mod token;
 
-use crate::{
-    error::{display_error, Continue},
-    Position, Range, Source,
-};
 pub use token::{Assign, Keyword, Operation, Token, TokenKind};
 
-use std::{
-    convert::TryFrom,
-    fmt::{self, Debug, Display},
-    iter::Peekable,
-    str::Chars,
+use crate::{
+    error::{display_error, Continue},
+    Source,
 };
+use std::{
+    fmt::{self, Debug, Display},
+    ops::Range,
+};
+use token::RawToken;
 
-/// Transform a [`Source`] into [`Token`]s
-pub struct Lexer<'a> {
-    /// Source code for this lexer
-    pub(crate) source: Source<'a>,
-    /// Iterator over the `source`'s chars
-    iterator: Peekable<Chars<'a>>,
-    /// Start position of the current token
-    current_start: Position,
-    /// Current position on the source
-    position: Position,
-    /// Next position in the source
-    next_position: Position,
+pub(super) struct Lexer<'source> {
+    source: Source<'source>,
+    lexer: logos::Lexer<'source, RawToken>,
 }
 
-impl<'a> Lexer<'a> {
-    /// Creates a new `Lexer` from a [`Source`].
-    pub fn new(source: Source<'a>) -> Self {
-        Self {
-            iterator: source.content().chars().peekable(),
-            current_start: Position::default(),
-            position: Position::default(),
-            next_position: Position::default(),
-            source,
-        }
+impl<'source> Lexer<'source> {
+    pub(crate) fn new(source: Source<'source>) -> Self {
+        let lexer = logos::Lexer::new(source.content());
+        Self { source, lexer }
     }
 
-    /// Creates a new `Lexer` from a [`str`].
-    pub fn top_level(source: &'a str) -> Self {
+    pub(crate) fn top_level(source: &'source str) -> Self {
         Self {
-            iterator: source.chars().peekable(),
-            current_start: Position::default(),
-            position: Position::default(),
-            next_position: Position::default(),
             source: Source::TopLevel(source),
-        }
-    }
-
-    /// Emit an error at the currently parsed token
-    fn emit_error(&self, kind: ErrorKind, continuable: Continue) -> Error<'a> {
-        Error {
-            kind,
-            range: Range::new(self.current_start, self.position),
-            source: self.source.clone(),
-            continuable,
-        }
-    }
-
-    /// Parse the attached `Source` into a vector of `Token`s.
-    ///
-    /// # Errors
-    ///
-    /// See [`ErrorKind`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use nox::lexer::{Lexer, TokenKind, Operation};
-    /// let mut lexer = Lexer::top_level("def f(a, b) a + b * 4.1");
-    /// let mut tokens = lexer.tokens().unwrap();
-    /// assert_eq!(TokenKind::Float(4.1), tokens.pop().unwrap().kind);
-    /// assert_eq!(TokenKind::Op(Operation::Multiply), tokens.pop().unwrap().kind);
-    /// assert_eq!(TokenKind::Id("b".into()), tokens.pop().unwrap().kind);
-    /// ```
-    pub fn tokens(&mut self) -> Result<'a, Vec<Token>> {
-        self.into_iter().collect()
-    }
-
-    /// Will make a string out of all the next characters, until
-    /// `matching_character`.
-    fn string(&mut self, matching_character: char) -> Result<'a, Box<str>> {
-        let mut result = String::new();
-        loop {
-            let next_char = match self.next_char() {
-                None => {
-                    return Err(self.emit_error(
-                        ErrorKind::IncompleteString(matching_character),
-                        Continue::Continue,
-                    ))
-                }
-                Some('\\') => {
-                    let c = match self.next_char() {
-                        Some(c) => c,
-                        None => {
-                            return Err(self.emit_error(
-                                ErrorKind::IncompleteString(matching_character),
-                                Continue::Stop,
-                            ))
-                        }
-                    };
-                    let start_pos = self.position;
-                    match c {
-                        '\\' => '\\',
-                        '\'' => '\'',
-                        '\"' => '\"',
-                        '0' => '\0',
-                        'n' => '\n',
-                        'r' => '\r',
-                        't' => '\t',
-                        // ohhh boy, unicode
-                        // ;)
-                        // this is the same as in rust : \u{code}
-                        'u' => {
-                            match self.next_char() {
-                                Some('{') => {}
-                                c => {
-                                    return Err(Error {
-                                        kind: ErrorKind::ExpectedFound('{', c),
-                                        continuable: Continue::Stop,
-                                        source: self.source.clone(),
-                                        range: Range::new(start_pos, self.position),
-                                    })
-                                }
-                            }
-                            let mut code_point = String::new();
-                            loop {
-                                if let Some(c) = self.next_char() {
-                                    match c {
-                                        '}' => break,
-                                        c if c == matching_character => {
-                                            return Err(Error {
-                                                kind: ErrorKind::ExpectedFound(
-                                                    '}',
-                                                    Some(matching_character),
-                                                ),
-                                                source: self.source.clone(),
-                                                continuable: Continue::Stop,
-                                                range: Range::new(start_pos, self.position),
-                                            })
-                                        }
-                                        _ => code_point.push(c),
-                                    }
-                                } else {
-                                    return Err(self.emit_error(
-                                        ErrorKind::IncompleteString(matching_character),
-                                        Continue::Stop,
-                                    ));
-                                }
-                            }
-                            match u32::from_str_radix(&code_point, 16) {
-                                Ok(code) => match std::char::from_u32(code) {
-                                    Some(c) => c,
-                                    None => {
-                                        return Err(Error {
-                                            source: self.source.clone(),
-                                            continuable: Continue::Stop,
-                                            kind: ErrorKind::InvalidCodePoint(code),
-                                            range: Range::new(start_pos, self.position),
-                                        })
-                                    }
-                                },
-                                Err(err) => {
-                                    return Err(Error {
-                                        source: self.source.clone(),
-                                        continuable: Continue::Stop,
-                                        kind: ErrorKind::Parseint(err),
-                                        range: Range::new(start_pos, self.position),
-                                    })
-                                }
-                            }
-                        }
-                        c if c == matching_character => c,
-                        _ => {
-                            return Err(Error {
-                                kind: ErrorKind::UnknownEscape(c),
-                                continuable: Continue::Stop,
-                                source: self.source.clone(),
-                                range: Range::new(start_pos, self.position),
-                            })
-                        }
-                    }
-                }
-                Some(c) => {
-                    if c == matching_character {
-                        break;
-                    } else {
-                        c
-                    }
-                }
-            };
-            result.push(next_char)
-        }
-
-        Ok(result.into_boxed_str())
-    }
-
-    /// If an error is encountered in a string, we go to the end of said string
-    /// before reporting it.
-    fn string_error(&mut self, matching_character: char, error: Error<'a>) -> Error<'a> {
-        loop {
-            match self.next_char() {
-                Some(c) if c == matching_character => break,
-                Some(_) => {}
-                None => break,
-            }
-        }
-        error
-    }
-
-    /// Consume and collect all characters that match `predicate`.
-    fn eat_while<F>(&mut self, first_char: char, predicate: F) -> Box<str>
-    where
-        F: Fn(char) -> bool,
-    {
-        let mut result = String::new();
-        result.push(first_char);
-
-        while let Some(c) = self.iterator.peek().copied() {
-            if predicate(c) {
-                result.push(c);
-                self.next_char();
-            } else {
-                break;
-            }
-        }
-
-        result.into_boxed_str()
-    }
-
-    /// Parse an operator, and eventually make it an assignement.
-    ///
-    /// # Example
-    ///
-    /// ```compile_fail
-    /// assert_eq!(lexer.op_or_equal('+'), TokenKind::Op(Operation::Plus));
-    /// lexer = Lexer::top_level("=");
-    /// assert_eq!(lexer.op_or_equal('+'), TokenKind::Assign(Assign::Plus));
-    /// ```
-    fn op_or_equal(&mut self, op: char) -> TokenKind {
-        match self.iterator.peek() {
-            Some('=') => {
-                self.next_char();
-                match op {
-                    '=' => TokenKind::Op(Operation::Equal),
-                    '<' => TokenKind::Op(Operation::LessEq),
-                    '>' => TokenKind::Op(Operation::MoreEq),
-                    '+' => TokenKind::Assign(Assign::Plus),
-                    '-' => TokenKind::Assign(Assign::Minus),
-                    '*' => TokenKind::Assign(Assign::Multiply),
-                    '/' => TokenKind::Assign(Assign::Divide),
-                    '%' => TokenKind::Assign(Assign::Modulo),
-                    _ => unreachable!(),
-                }
-            }
-            Some('<') if op == '<' => {
-                self.next_char();
-                TokenKind::Op(Operation::ShiftLeft)
-            }
-            Some('>') if op == '>' => {
-                self.next_char();
-                TokenKind::Op(Operation::ShiftRight)
-            }
-            _ => match op {
-                '=' => TokenKind::Assign(Assign::Equal),
-                '<' => TokenKind::Op(Operation::Less),
-                '>' => TokenKind::Op(Operation::More),
-                '+' => TokenKind::Op(Operation::Plus),
-                '-' => TokenKind::Op(Operation::Minus),
-                '*' => TokenKind::Op(Operation::Multiply),
-                '/' => TokenKind::Op(Operation::Divide),
-                '%' => TokenKind::Op(Operation::Modulo),
-                _ => unreachable!(),
-            },
-        }
-    }
-
-    /// Gives next char and advance the position.
-    ///
-    /// It will skips commentary, and return the newline.
-    fn next_char_skip_comment(&mut self) -> Option<char> {
-        self.position = self.next_position;
-        match self.iterator.next() {
-            None => None,
-            Some('\n') => {
-                self.next_position = Position {
-                    column: 0,
-                    line: self.next_position.line + 1,
-                };
-                Some('\n')
-            }
-            Some('#') => {
-                while let Some(c) = self.iterator.next() {
-                    if c == '\n' {
-                        self.next_position = Position {
-                            column: 0,
-                            line: self.next_position.line + 1,
-                        };
-                        return Some('\n');
-                    }
-                }
-
-                None
-            }
-            Some(c) => {
-                self.next_position.column += 1;
-                Some(c)
-            }
-        }
-    }
-
-    /// Gives next char and advance the position.
-    fn next_char(&mut self) -> Option<char> {
-        self.position = self.next_position;
-        match self.iterator.next() {
-            None => None,
-            Some('\n') => {
-                self.next_position.line += 1;
-                Some('\n')
-            }
-            Some(c) => {
-                self.next_position.column += 1;
-                Some(c)
-            }
+            lexer: logos::Lexer::new(source),
         }
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
-    type Item = Result<'a, Token>;
+impl<'source> Iterator for Lexer<'source> {
+    type Item = Result<Token, Error<'source>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // skip whitespace
-        let next_char = loop {
-            let c = self.next_char_skip_comment()?;
-            if !c.is_whitespace() {
-                break c;
-            }
-        };
-
-        self.current_start = self.position;
-
+        let next_token = self.lexer.next()?;
+        let range = self.lexer.span();
         let mut warning = None;
-        let token = match next_char {
-            '(' => TokenKind::LPar,
-            ')' => TokenKind::RPar,
-            '[' => TokenKind::LBracket,
-            ']' => TokenKind::RBracket,
-            '{' => TokenKind::LBrace,
-            '}' => TokenKind::RBrace,
-            '.' => TokenKind::Dot,
-            ',' => TokenKind::Comma,
-            ';' => TokenKind::SemiColon,
-            c if c.is_ascii_digit() => {
+
+        let kind = match next_token {
+            RawToken::EqualEqual => TokenKind::Op(Operation::Equal),
+            RawToken::NEqual => TokenKind::Op(Operation::NEqual),
+            RawToken::Less => TokenKind::Op(Operation::Less),
+            RawToken::LessEq => TokenKind::Op(Operation::LessEq),
+            RawToken::More => TokenKind::Op(Operation::More),
+            RawToken::MoreEq => TokenKind::Op(Operation::MoreEq),
+            RawToken::Plus => TokenKind::Op(Operation::Plus),
+            RawToken::Minus => TokenKind::Op(Operation::Minus),
+            RawToken::Multiply => TokenKind::Op(Operation::Multiply),
+            RawToken::Divide => TokenKind::Op(Operation::Divide),
+            RawToken::Modulo => TokenKind::Op(Operation::Modulo),
+            RawToken::Pow => TokenKind::Op(Operation::Pow),
+            RawToken::Or => TokenKind::Op(Operation::Or),
+            RawToken::And => TokenKind::Op(Operation::And),
+            RawToken::Xor => TokenKind::Op(Operation::Xor),
+            RawToken::Not => TokenKind::Op(Operation::Not),
+            RawToken::ShiftLeft => TokenKind::Op(Operation::ShiftLeft),
+            RawToken::ShiftRight => TokenKind::Op(Operation::ShiftRight),
+            RawToken::Equal => TokenKind::Assign(Assign::Equal),
+            RawToken::PlusEqual => TokenKind::Assign(Assign::Plus),
+            RawToken::MinusEqual => TokenKind::Assign(Assign::Minus),
+            RawToken::MultiplyEqual => TokenKind::Assign(Assign::Multiply),
+            RawToken::DivideEqual => TokenKind::Assign(Assign::Divide),
+            RawToken::ModuloEqual => TokenKind::Assign(Assign::Modulo),
+            RawToken::Fn => TokenKind::Keyword(Keyword::Fn),
+            RawToken::Global => TokenKind::Keyword(Keyword::Global),
+            RawToken::If => TokenKind::Keyword(Keyword::If),
+            RawToken::Then => TokenKind::Keyword(Keyword::Then),
+            RawToken::Else => TokenKind::Keyword(Keyword::Else),
+            RawToken::For => TokenKind::Keyword(Keyword::For),
+            RawToken::In => TokenKind::Keyword(Keyword::In),
+            RawToken::While => TokenKind::Keyword(Keyword::While),
+            RawToken::End => TokenKind::Keyword(Keyword::End),
+            RawToken::Break => TokenKind::Keyword(Keyword::Break),
+            RawToken::Continue => TokenKind::Keyword(Keyword::Continue),
+            RawToken::Return => TokenKind::Keyword(Keyword::Return),
+            RawToken::True => TokenKind::Keyword(Keyword::True),
+            RawToken::False => TokenKind::Keyword(Keyword::False),
+            RawToken::Nil => TokenKind::Keyword(Keyword::Nil),
+            RawToken::LPar => TokenKind::LPar,
+            RawToken::RPar => TokenKind::RPar,
+            RawToken::LBracket => TokenKind::LBracket,
+            RawToken::RBracket => TokenKind::RBracket,
+            RawToken::LBrace => TokenKind::LBrace,
+            RawToken::RBrace => TokenKind::RBrace,
+            RawToken::Dot => TokenKind::Dot,
+            RawToken::Comma => TokenKind::Comma,
+            RawToken::SemiColon => TokenKind::SemiColon,
+            RawToken::Exclamation => TokenKind::Exclamation,
+            RawToken::Interrogation => TokenKind::Interrogation,
+            RawToken::Placeholder => TokenKind::Placeholder,
+            RawToken::Number => {
                 use num_parser::{parse_number, IntOrFloat};
 
-                let number =
-                    self.eat_while(c, |c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
-
-                match parse_number(&number)
-                    .map(|(int_or_float, warn)| {
+                let number = &self.source.content()[range.clone()];
+                match parse_number(number) {
+                    Ok((int_or_float, warn)) => {
                         warning = warn;
                         match int_or_float {
                             IntOrFloat::Int(i) => TokenKind::Int(i),
                             IntOrFloat::Float(f) => TokenKind::Float(f),
                         }
-                    })
-                    .map_err(|err| self.emit_error(ErrorKind::NumberError(err), Continue::Stop))
-                {
-                    Ok(ok) => ok,
-                    Err(err) => return Some(Err(err)),
-                }
-            }
-            c if c.is_alphabetic() || c == '_' => {
-                let word = self.eat_while(c, |c| c.is_alphanumeric() || c == '_');
-                match word.as_ref() {
-                    "and" => TokenKind::Op(Operation::And),
-                    "or" => TokenKind::Op(Operation::Or),
-                    "xor" => TokenKind::Op(Operation::Xor),
-                    "not" => TokenKind::Op(Operation::Not),
-                    "inf" => TokenKind::Float(f64::INFINITY),
-                    "NaN" => TokenKind::Float(f64::NAN),
-                    "_" => TokenKind::Placeholder,
-                    s => {
-                        if let Ok(keyword) = Keyword::try_from(s) {
-                            TokenKind::Keyword(keyword)
-                        } else {
-                            TokenKind::Id(word)
-                        }
+                    }
+                    Err(err) => {
+                        return Some(Err(Error {
+                            kind: ErrorKind::NumberError(err),
+                            range,
+                            source: self.source.clone(),
+                            continuable: Continue::Stop,
+                        }))
                     }
                 }
             }
-            '"' => TokenKind::Str(match self.string('"') {
-                Ok(ok) => ok,
-                Err(err) => return Some(Err(self.string_error('"', err))),
-            }),
-            '\'' => TokenKind::Str(match self.string('\'') {
-                Ok(ok) => ok,
-                Err(err) => return Some(Err(self.string_error('\'', err))),
-            }),
-            '=' | '<' | '>' | '+' | '-' | '*' | '/' | '%' => self.op_or_equal(next_char),
-            '!' => match self.iterator.peek() {
-                Some('=') => {
-                    self.next_char();
-                    TokenKind::Op(Operation::NEqual)
+            RawToken::Str => {
+                let range = range.clone();
+                match parse_string(
+                    self.source.content().as_bytes()[range.start] as char,
+                    range,
+                    self.source.clone(),
+                ) {
+                    Ok(boxed_str) => TokenKind::Str(boxed_str),
+                    Err(err) => return Some(Err(err)),
                 }
-                _ => TokenKind::Exclamation,
-            },
-            '^' => TokenKind::Op(Operation::Pow),
-            c => {
-                return Some(Err(
-                    self.emit_error(ErrorKind::UnknownCharacter(c), Continue::Stop)
-                ))
+            }
+            RawToken::Id => TokenKind::Id(self.source.content()[range.clone()].into()),
+            RawToken::Error => {
+                return Some(Err(Error {
+                    kind: todo!(), // unexpected token ?
+                    range,
+                    source: self.source.clone(),
+                    continuable: Continue::Stop,
+                }));
             }
         };
-
         Some(Ok(Token {
-            kind: token,
-            range: Range {
-                start: self.current_start,
-                end: self.position,
-            },
+            kind,
+            range,
             warning,
         }))
     }
+}
+
+/// Escape the characters in a string, and return an owned version.
+fn parse_string<'source>(
+    matching_character: char,
+    string_range: Range<usize>,
+    source: Source<'source>,
+) -> Result<Box<str>, Error<'source>> {
+    /// Helper structure to parse a string
+    struct StringParser<'source> {
+        string_range: Range<usize>,
+        position: usize,
+        source: Source<'source>,
+        chars: std::str::Chars<'source>,
+    }
+
+    impl<'source> Iterator for StringParser<'source> {
+        type Item = char;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let c = self.chars.next()?;
+            self.position += c.len_utf8();
+            Some(c)
+        }
+    }
+
+    impl<'source> StringParser<'source> {
+        /// Emit an error in the string
+        fn error(
+            &self,
+            kind: ErrorKind,
+            range: Range<usize>,
+            continuable: Continue,
+        ) -> Error<'source> {
+            Error {
+                kind,
+                range: self.string_range.start + range.start..self.string_range.end + range.end,
+                source: self.source.clone(),
+                continuable,
+            }
+        }
+    }
+
+    // remove the string delimiters
+    let chars = source.content()[string_range.start + 1..string_range.end - 1].chars();
+    let mut string_parser = StringParser {
+        string_range,
+        // 1 bc we don't take the string delimiter
+        position: 1,
+        source,
+        chars,
+    };
+
+    let mut result = String::new();
+
+    while let Some(c) = string_parser.next() {
+        let next_char = if c == '\\' {
+            let c = match string_parser.next() {
+                Some(c) => c,
+                None => {
+                    return Err(string_parser.error(
+                        ErrorKind::IncompleteString(matching_character),
+                        0..0,
+                        Continue::Continue,
+                    ))
+                }
+            };
+            let start_pos = string_parser.position;
+            match c {
+                '\\' => '\\',
+                '\'' => '\'',
+                '\"' => '\"',
+                '0' => '\0',
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                // ohhh boy, unicode
+                // ;)
+                // this is the same as in rust : \u{code}
+                'u' => {
+                    match string_parser.next() {
+                        Some('{') => {}
+                        c => {
+                            return Err(string_parser.error(
+                                ErrorKind::ExpectedFound('{', c),
+                                start_pos..string_parser.position,
+                                Continue::Stop,
+                            ))
+                        }
+                    }
+                    let mut code_point = String::new();
+                    loop {
+                        if let Some(c) = string_parser.next() {
+                            match c {
+                                '}' => break,
+                                c if c == matching_character => {
+                                    return Err(string_parser.error(
+                                        ErrorKind::ExpectedFound('}', Some(matching_character)),
+                                        start_pos..string_parser.position,
+                                        Continue::Stop,
+                                    ))
+                                }
+                                _ => code_point.push(c),
+                            }
+                        } else {
+                            return Err(string_parser.error(
+                                ErrorKind::IncompleteString(matching_character),
+                                0..0,
+                                Continue::Stop,
+                            ));
+                        }
+                    }
+                    match u32::from_str_radix(&code_point, 16) {
+                        Ok(code) => match std::char::from_u32(code) {
+                            Some(c) => c,
+                            None => {
+                                return Err(string_parser.error(
+                                    ErrorKind::InvalidCodePoint(code),
+                                    start_pos..string_parser.position,
+                                    Continue::Stop,
+                                ))
+                            }
+                        },
+                        Err(err) => {
+                            return Err(string_parser.error(
+                                ErrorKind::Parseint(err),
+                                start_pos..string_parser.position,
+                                Continue::Stop,
+                            ))
+                        }
+                    }
+                }
+                c if c == matching_character => c,
+                _ => {
+                    return Err(string_parser.error(
+                        ErrorKind::UnknownEscape(c),
+                        start_pos..string_parser.position,
+                        Continue::Stop,
+                    ))
+                }
+            }
+        } else {
+            c
+        };
+        result.push(next_char);
+    }
+
+    Ok(result.into_boxed_str())
 }
 
 /// Kind of errors returned by the [`Lexer`]
@@ -498,7 +359,7 @@ impl Display for ErrorKind {
 #[derive(Debug, Clone)]
 pub struct Error<'a> {
     pub(crate) kind: ErrorKind,
-    pub(crate) range: Range,
+    pub(crate) range: Range<usize>,
     pub(crate) source: Source<'a>,
     pub(crate) continuable: Continue,
 }
@@ -509,7 +370,7 @@ impl<'a> fmt::Display for Error<'a> {
         display_error::<_, i32>(
             &self.kind,
             None,
-            self.range,
+            self.range.clone(),
             self.source.content(),
             self.source.name(),
             false,
@@ -519,8 +380,6 @@ impl<'a> fmt::Display for Error<'a> {
 }
 
 impl std::error::Error for Error<'_> {}
-
-pub type Result<'a, T> = std::result::Result<T, Error<'a>>;
 
 /// Kind of warnings returned by the [`Lexer`]
 #[derive(Debug, PartialEq, Clone, Copy)]

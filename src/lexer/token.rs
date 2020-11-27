@@ -1,9 +1,136 @@
 use super::Warning;
-use crate::Range;
+use logos::Logos;
 use std::{
     convert,
     fmt::{self, Write},
+    ops::Range,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Logos)]
+pub(super) enum RawToken {
+    // Operations
+    #[token("==")]
+    EqualEqual,
+    #[token("!=")]
+    NEqual,
+    #[token("<")]
+    Less,
+    #[token("<=")]
+    LessEq,
+    #[token(">")]
+    More,
+    #[token(">=")]
+    MoreEq,
+    #[token("+")]
+    Plus,
+    #[token("-")]
+    Minus,
+    #[token("*")]
+    Multiply,
+    #[token("/")]
+    Divide,
+    #[token("%")]
+    Modulo,
+    #[token("^")]
+    Pow,
+    #[token("or")]
+    Or,
+    #[token("and")]
+    And,
+    #[token("xor")]
+    Xor,
+    #[token("not")]
+    Not,
+    #[token("<<")]
+    ShiftLeft,
+    #[token(">>")]
+    ShiftRight,
+
+    // Assignements
+    #[token("=")]
+    Equal,
+    #[token("+=")]
+    PlusEqual,
+    #[token("-=")]
+    MinusEqual,
+    #[token("*=")]
+    MultiplyEqual,
+    #[token("/=")]
+    DivideEqual,
+    #[token("%=")]
+    ModuloEqual,
+
+    // Keywords
+    #[token("fn")]
+    Fn,
+    #[token("global")]
+    Global,
+    #[token("if")]
+    If,
+    #[token("then")]
+    Then,
+    #[token("else")]
+    Else,
+    #[token("for")]
+    For,
+    #[token("in")]
+    In,
+    #[token("while")]
+    While,
+    #[token("end")]
+    End,
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
+    #[token("return")]
+    Return,
+    #[token("true")]
+    True,
+    #[token("false")]
+    False,
+    #[token("nil")]
+    Nil,
+
+    // Punctuation
+    #[token("(")]
+    LPar,
+    #[token(")")]
+    RPar,
+    #[token("[")]
+    LBracket,
+    #[token("]")]
+    RBracket,
+    #[token("{")]
+    LBrace,
+    #[token("}")]
+    RBrace,
+    #[token(".")]
+    Dot,
+    #[token(",")]
+    Comma,
+    #[token(";")]
+    SemiColon,
+    #[token("!")]
+    Exclamation,
+    #[token("?")]
+    Interrogation,
+
+    // Others
+    #[token("_")]
+    Placeholder,
+
+    #[regex(r"[0-9][0-9a-zA-Z_]*(?:\.[0-9a-zA-Z_]*)")]
+    Number,
+    #[regex(r#"("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')"#)]
+    Str,
+    #[regex("[a-zA-Z_][0-9a-zA-Z_]*")]
+    Id,
+
+    #[error]
+    #[regex(r"([\s]+|#[^\n]*)", logos::skip)]
+    Error,
+}
 
 /// Binary and unary operators
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -301,7 +428,7 @@ pub struct Token {
     /// kind of token.
     pub kind: TokenKind,
     /// start and end of the token in the source text.
-    pub range: Range,
+    pub range: Range<usize>,
     /// Eventual warning.
     pub warning: Option<Warning>,
 }
