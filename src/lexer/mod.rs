@@ -245,6 +245,7 @@ fn parse_string<'source>(
 
     while let Some(c) = string_parser.next() {
         let next_char = if c == '\\' {
+            let start_escape_pos = string_parser.position;
             let c = match string_parser.next() {
                 Some(c) => c,
                 None => {
@@ -255,7 +256,6 @@ fn parse_string<'source>(
                     ))
                 }
             };
-            let start_pos = string_parser.position;
             match c {
                 '\\' => '\\',
                 '\'' => '\'',
@@ -268,12 +268,13 @@ fn parse_string<'source>(
                 // ;)
                 // this is the same as in rust : \u{code}
                 'u' => {
+                    let lbrace_pos = string_parser.position;
                     match string_parser.next() {
                         Some('{') => {}
                         c => {
                             return Err(string_parser.error(
                                 ErrorKind::ExpectedFound('{', c),
-                                start_pos..string_parser.position,
+                                lbrace_pos..string_parser.position,
                                 Continue::Stop,
                             ))
                         }
@@ -327,7 +328,7 @@ fn parse_string<'source>(
                 _ => {
                     return Err(string_parser.error(
                         ErrorKind::UnknownEscape(c),
-                        start_pos..string_parser.position,
+                        start_escape_pos..string_parser.position,
                         Continue::Stop,
                     ))
                 }
