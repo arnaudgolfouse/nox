@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod tests;
 
+mod logos_lexer;
 mod num_parser;
 mod token;
 
