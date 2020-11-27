@@ -133,7 +133,7 @@ impl<'source> Iterator for Lexer<'source> {
             RawToken::Id => TokenKind::Id(self.source.content()[range.clone()].into()),
             RawToken::Error => {
                 return Some(Err(Error {
-                    kind: todo!(), // unexpected token ?
+                    kind: ErrorKind::UnknownToken,
                     range,
                     source: self.source.clone(),
                     continuable: Continue::Stop,
@@ -258,6 +258,7 @@ fn parse_string<'source>(
                             ));
                         }
                     }
+                    // TODO : plug our own (very simple !) int parser here
                     match u32::from_str_radix(&code_point, 16) {
                         Ok(code) => match std::char::from_u32(code) {
                             Some(c) => c,
@@ -299,17 +300,10 @@ fn parse_string<'source>(
 /// Kind of errors returned by the [`Lexer`]
 #[derive(Debug, PartialEq, Clone)]
 pub enum ErrorKind {
-    /// Unknown character.
-    ///
-    /// This include emoji and some unrecognised non-alphanumeric character (`$`
-    /// for example).
-    UnknownCharacter(char),
-    /// Expected a character, but the input was over
-    ExpectedCharacterAfter(char),
+    /// The parsed token does not correspond to any known token.
+    UnknownToken,
     /// Expected the first character, found the second or nothing
     ExpectedFound(char, Option<char>),
-    /// Expected a digit, found something else.
-    ExpectedDigit(char),
     /// Missing ending character in a string
     IncompleteString(char),
     /// Unknown escape character in a string
@@ -327,10 +321,7 @@ pub enum ErrorKind {
 impl Display for ErrorKind {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::UnknownCharacter(c) => write!(formatter, "unknown character : '{}'", c),
-            Self::ExpectedCharacterAfter(c) => {
-                write!(formatter, "expected character after '{}'", c)
-            }
+            Self::UnknownToken => formatter.write_str("unknown token"),
             Self::ExpectedFound(expected, found) => write!(
                 formatter,
                 "expected '{}', found {}",
@@ -340,7 +331,6 @@ impl Display for ErrorKind {
                     None => "nothing".to_owned(),
                 }
             ),
-            Self::ExpectedDigit(c) => write!(formatter, "expected a digit, found {}", c),
             Self::IncompleteString(c) => write!(formatter, "expected {} to end the string", c),
             Self::UnknownEscape(c) => {
                 write!(formatter, "unknown escape sequence in string : '\\{}'", c)

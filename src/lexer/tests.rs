@@ -8,14 +8,14 @@ fn errors() {
         Lexer::top_level("3.1.2").next().unwrap().unwrap_err().kind,
         ErrorKind::NumberError(NumberError::NumberUnexpectedDot)
     );
-    // unrecognised character
+    // unrecognised characters and tokens
     assert_eq!(
         Lexer::top_level("😬").next().unwrap().unwrap_err().kind,
-        ErrorKind::UnknownCharacter('😬')
+        ErrorKind::UnknownToken
     );
     assert_eq!(
         Lexer::top_level("&").next().unwrap().unwrap_err().kind,
-        ErrorKind::UnknownCharacter('&')
+        ErrorKind::UnknownToken
     );
     // incomplete string
     assert_eq!(
