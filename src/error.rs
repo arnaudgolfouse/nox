@@ -1,9 +1,9 @@
-use crate::Range;
 use colored::Colorize;
 use std::{
     cmp::max,
     fmt,
     io::{BufRead, BufReader},
+    ops::Range,
 };
 
 /// Describe what should the REPL do with this error.
@@ -42,7 +42,7 @@ fn int_width(i: u32) -> usize {
 pub(crate) fn display_error<T: fmt::Display, U: fmt::Display>(
     message: T,
     note: Option<U>,
-    range: Range,
+    range: Range<usize>,
     source: &str,
     source_name: &str,
     warning: bool,
@@ -59,9 +59,19 @@ pub(crate) fn display_error<T: fmt::Display, U: fmt::Display>(
     }
 }
 
-/// Avoids code duplication
 fn display_error_internal(
-    range: Range,
+    range: Range<usize>,
+    source: &str,
+    source_name: &str,
+    warning: bool,
+    formatter: &mut fmt::Formatter,
+) -> Result<(), fmt::Error> {
+    todo!()
+}
+
+// Avoids code duplication
+/*fn display_error_internal(
+    range: Range<usize>,
     source: &str,
     source_name: &str,
     warning: bool,
@@ -287,3 +297,4 @@ fn display_error_internal(
         }
     )
 }
+*/

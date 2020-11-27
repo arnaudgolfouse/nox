@@ -17,15 +17,17 @@ mod bytecode;
 mod expression;
 
 pub use bytecode::Chunk;
+
 pub(crate) use bytecode::{Constant, Instruction};
+
 use {
     crate::{
         error::{display_error, Continue},
         lexer::{self, Assign, Keyword, Lexer, Token, TokenKind},
-        Range, Source,
+        Source,
     },
     expression::ExpressionType,
-    std::{fmt, iter::Peekable},
+    std::{fmt, iter::Peekable, ops::Range},
 };
 
 /// Indicate what to do after successfully parsing a statement.
@@ -164,9 +166,9 @@ pub struct Parser<'a> {
     /// Nested functions
     function_stack: Vec<Function>,
     /// Range of the currently parsed Token
-    current_range: Range,
+    current_range: Range<usize>,
     /// Range of the next token
-    next_range: Range,
+    next_range: Range<usize>,
 }
 
 // fn f()          // -
@@ -206,19 +208,19 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Emit a new instruction at the current line.
+    /// Emit a new instruction at the current position.
     #[inline]
     fn emit_instruction<Op: bytecode::Operand>(&mut self, instruction: Instruction<Op>) {
-        let line = self.current_range.start.line;
-        self.code().emit_instruction(instruction, line)
+        let pos = self.current_range.start;
+        self.code().emit_instruction(instruction, pos)
     }
 
-    /// Emit a new u8 instruction at the current line. Same as
+    /// Emit a new u8 instruction at the current position. Same as
     /// [`emit_instruction::<u8>`](Parser::emit_instruction).
     #[inline]
     fn emit_instruction_u8(&mut self, instruction: Instruction<u8>) {
-        let line = self.current_range.start.line;
-        self.code().emit_instruction_u8(instruction, line)
+        let pos = self.current_range.start;
+        self.code().emit_instruction_u8(instruction, pos)
     }
 
     /// Returns the next token (or an error), and log an eventual warning.
@@ -226,11 +228,11 @@ impl<'a> Parser<'a> {
     /// Also update `current_range`, `next_range` with the eventual token/error range.
     #[inline]
     fn next(&mut self) -> Option<Result<Token, Error>> {
-        self.current_range = self.next_range;
+        self.current_range = self.next_range.clone();
         let result = match self.lexer.next() {
             Some(Ok(token)) => {
                 if let Some(warning) = token.warning {
-                    self.emit_warning(WarningKind::Lexer(warning), token.range)
+                    self.emit_warning(WarningKind::Lexer(warning), token.range.clone())
                 }
                 Some(Ok(token))
             }
@@ -239,11 +241,11 @@ impl<'a> Parser<'a> {
         };
         self.next_range = if let Some(t) = self.lexer.peek() {
             match t {
-                Ok(token) => token.range,
-                Err(err) => err.range,
+                Ok(token) => token.range.clone(),
+                Err(err) => err.range.clone(),
             }
         } else {
-            Range::new(self.next_range.end, self.next_range.end)
+            self.next_range.end..self.next_range.end
         };
 
         result
@@ -263,13 +265,13 @@ impl<'a> Parser<'a> {
     ///
     /// Intended for use when there are no more tokens.
     #[inline]
-    const fn end_current_range(&self) -> Range {
-        Range::new(self.current_range.end, self.current_range.end)
+    const fn end_current_range(&self) -> Range<usize> {
+        self.current_range.end..self.current_range.end
     }
 
     /// Creates an error.
     #[inline]
-    fn emit_error(&self, kind: ErrorKind, continuable: Continue, range: Range) -> Error {
+    fn emit_error(&self, kind: ErrorKind, continuable: Continue, range: Range<usize>) -> Error {
         Error {
             kind,
             continuable,
@@ -281,7 +283,7 @@ impl<'a> Parser<'a> {
 
     /// Add a warning to `warnings`.
     #[inline]
-    fn emit_warning(&mut self, kind: WarningKind, range: Range) {
+    fn emit_warning(&mut self, kind: WarningKind, range: Range<usize>) {
         self.warnings.push(Warning {
             kind,
             range,
@@ -292,7 +294,7 @@ impl<'a> Parser<'a> {
 
     /// Emit a `Expected(kind)` error at the given range, continuable.
     #[inline]
-    fn expected_token(&self, kind: TokenKind, range: Range) -> Error {
+    fn expected_token(&self, kind: TokenKind, range: Range<usize>) -> Error {
         self.emit_error(ErrorKind::Expected(kind), Continue::Continue, range)
     }
 
@@ -364,10 +366,10 @@ impl<'a> Parser<'a> {
             self.top_level.code.locals_number = self.top_level.variables.len();
             self.top_level
                 .code
-                .emit_instruction_u8(Instruction::PushNil, self.current_range.end.line);
+                .emit_instruction_u8(Instruction::PushNil, self.current_range.end);
             self.top_level
                 .code
-                .emit_instruction_u8(Instruction::Return, self.current_range.end.line);
+                .emit_instruction_u8(Instruction::Return, self.current_range.end);
             Ok((self.top_level.code, self.warnings))
         } else {
             Err(self.errors)
@@ -410,7 +412,8 @@ impl<'a> Parser<'a> {
         let first_token = match self.next() {
             None => {
                 return if self.scope().is_some() || !self.function_stack.is_empty() {
-                    Err(self.expected_token(TokenKind::Keyword(Keyword::End), self.next_range))
+                    Err(self
+                        .expected_token(TokenKind::Keyword(Keyword::End), self.next_range.clone()))
                 } else {
                     Ok(ParseReturn::Stop)
                 }
@@ -421,11 +424,10 @@ impl<'a> Parser<'a> {
         match &first_token.kind {
             // return <expression>
             TokenKind::Keyword(Keyword::Return) => {
-                let line = first_token.range.start.line;
+                let pos = first_token.range.start;
                 let token = self.next().transpose()?;
                 self.parse_expression(token, true)?;
-                self.code()
-                    .emit_instruction::<u8>(Instruction::Return, line)
+                self.code().emit_instruction::<u8>(Instruction::Return, pos)
             }
             // <...> end
             TokenKind::Keyword(Keyword::End) => {
@@ -472,11 +474,9 @@ impl<'a> Parser<'a> {
                         }
                     }
                 } else if let Some(mut function) = self.function_stack.pop() {
-                    let line = self.next_range.start.line;
-                    function
-                        .code
-                        .emit_instruction_u8(Instruction::PushNil, line);
-                    function.code.emit_instruction_u8(Instruction::Return, line);
+                    let pos = self.next_range.start;
+                    function.code.emit_instruction_u8(Instruction::PushNil, pos);
+                    function.code.emit_instruction_u8(Instruction::Return, pos);
                     function.code.locals_number = function.variables.len();
                     self.code()
                         .functions
@@ -508,9 +508,10 @@ impl<'a> Parser<'a> {
                         }
                     }
                 } else {
-                    return Err(
-                        self.expected_token(TokenKind::Keyword(Keyword::Then), self.next_range)
-                    );
+                    return Err(self.expected_token(
+                        TokenKind::Keyword(Keyword::Then),
+                        self.next_range.clone(),
+                    ));
                 }
                 let if_address = self.code().push_jump();
                 self.push_scope(Scope::If(if_address));
@@ -568,7 +569,7 @@ impl<'a> Parser<'a> {
                                 return Err(self.emit_error(
                                     ErrorKind::Expected(TokenKind::Keyword(Keyword::In)),
                                     Continue::Continue,
-                                    self.next_range,
+                                    self.next_range.clone(),
                                 ));
                             }
                             if let TokenKind::Id(variable) = token.kind {
@@ -589,7 +590,7 @@ impl<'a> Parser<'a> {
                     return Err(self.emit_error(
                         ErrorKind::ExpectedId(None),
                         Continue::Continue,
-                        self.next_range,
+                        self.next_range.clone(),
                     ));
                 };
 
@@ -646,13 +647,13 @@ impl<'a> Parser<'a> {
                                 return Err(self.emit_error(
                                     ErrorKind::Expected(TokenKind::LPar),
                                     Continue::Stop,
-                                    self.current_range,
+                                    self.current_range.clone(),
                                 ))
                             }
                         };
-                        let line = self.current_range.start.line;
+                        let pos = self.current_range.start;
                         let func = self.parse_prototype(func_name.clone(), false)?;
-                        self.write_variable(func_name, line);
+                        self.write_variable(func_name, pos);
                         func
                     }
                     // anonymous function (lambda)
@@ -666,7 +667,7 @@ impl<'a> Parser<'a> {
                     }
                     token => {
                         let kind = ErrorKind::ExpectedId(token.map(|t| t.kind.clone()));
-                        return Err(self.emit_error(kind, Continue::Stop, self.next_range));
+                        return Err(self.emit_error(kind, Continue::Stop, self.next_range.clone()));
                     }
                 };
                 self.function_stack.push(function);
@@ -707,7 +708,7 @@ impl<'a> Parser<'a> {
                                 return Err(self.emit_error(
                                     ErrorKind::GlobalNoAtRoot,
                                     Continue::Stop,
-                                    Range::new(global_start, token.range.end),
+                                    global_start..token.range.end,
                                 ));
                             }
                             if let Some(func) = self.function_stack.last_mut() {
@@ -715,7 +716,7 @@ impl<'a> Parser<'a> {
                                     if variable == func.code.globals[*index] {
                                         self.emit_warning(
                                             WarningKind::GlobalAlreadyDefined(variable),
-                                            Range::new(global_start, token.range.end),
+                                            global_start..token.range.end,
                                         );
                                         return Ok(ParseReturn::Continue);
                                     }
@@ -734,7 +735,7 @@ impl<'a> Parser<'a> {
                             } else {
                                 self.emit_warning(
                                     WarningKind::GlobalInTopLevel,
-                                    Range::new(first_token.range.start, token.range.end),
+                                    first_token.range.start..token.range.end,
                                 )
                             }
                         }
@@ -750,7 +751,7 @@ impl<'a> Parser<'a> {
                     return Err(self.emit_error(
                         ErrorKind::ExpectedId(None),
                         Continue::Continue,
-                        self.next_range,
+                        self.next_range.clone(),
                     ));
                 }
             }
@@ -903,7 +904,7 @@ impl<'a> Parser<'a> {
 
     /// Emit the correct instruction to write a variable, assuming everything
     /// else has already been parsed.
-    fn write_variable(&mut self, variable: Box<str>, line: u32) {
+    fn write_variable(&mut self, variable: Box<str>, position: usize) {
         let instruction = match self.find_variable(&variable) {
             VariableLocation::Undefined => {
                 if let Some(func) = self.function_stack.last_mut() {
@@ -919,13 +920,13 @@ impl<'a> Parser<'a> {
             VariableLocation::Global(index) => Instruction::WriteGlobal(index),
             VariableLocation::Captured(index) => Instruction::WriteCaptured(index),
         };
-        self.code().emit_instruction(instruction, line)
+        self.code().emit_instruction(instruction, position)
     }
 
     /// Parse a variable assignement, assuming the variable and the assignement
     /// token have already been parsed.
     fn assign_variable(&mut self, variable: Box<str>, assignement: Assign) -> Result<(), Error> {
-        let line = self.current_range.end.line;
+        let pos = self.current_range.end;
         if !matches!(assignement, Assign::Equal) {
             self.parse_variable(variable.clone(), true)?;
         }
@@ -940,7 +941,7 @@ impl<'a> Parser<'a> {
             Assign::Modulo => self.emit_instruction_u8(Instruction::Modulo),
         }
 
-        self.write_variable(variable, line);
+        self.write_variable(variable, pos);
         Ok(())
     }
 
@@ -1044,7 +1045,7 @@ impl<'a> Parser<'a> {
     fn expression_statement(&mut self, first_token: Token) -> Result<(), Error> {
         let start = first_token.range.start;
         let expression_type = self.parse_expression(Some(first_token), false)?;
-        let expression_range = Range::new(start, self.current_range.end);
+        let expression_range = start..self.current_range.end;
         match expression_type {
             ExpressionType::Assign {
                 variable,
@@ -1179,7 +1180,7 @@ pub struct Error {
     /// kind of error
     kind: ErrorKind,
     /// range of this error in the `Source`
-    range: Range,
+    range: Range<usize>,
     /// Source code of this error
     source: Box<str>,
     /// Name of the `source`
@@ -1193,7 +1194,7 @@ impl Error {
         match self.kind {
             ErrorKind::UnexpectedExpr => Some(format!(
                 "you can evaluate the expression by wrapping it in parenthesis -> ({})",
-                self.range.substr(&self.source)
+                &self.source[self.range.clone()]
             )),
             ErrorKind::UnexpectedStartStatement(_) => Some(String::from("authorized in this position are 'return', 'global', 'if', 'while', 'for', 'fn', an assignement, or a function call")),
             _ => None,
@@ -1219,7 +1220,7 @@ impl fmt::Display for Error {
         display_error(
             &self.kind,
             self.note(),
-            self.range,
+            self.range.clone(),
             &self.source,
             &self.source_name,
             false,
@@ -1269,7 +1270,7 @@ pub struct Warning {
     /// kind of warning
     kind: WarningKind,
     /// range of this error in the `Source`
-    range: Range,
+    range: Range<usize>,
     /// Source code of this error
     source: Box<str>,
     /// Name of the `source`
@@ -1282,7 +1283,7 @@ impl fmt::Display for Warning {
         display_error::<_, &str>(
             &self.kind,
             None,
-            self.range,
+            self.range.clone(),
             &self.source,
             &self.source_name,
             true,

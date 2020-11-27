@@ -393,8 +393,8 @@ impl fmt::Display for Constant {
 pub struct Chunk {
     /// Name of this chunk
     pub(crate) name: Box<str>,
-    /// Vector of line information for the instructions
-    pub(crate) lines: Vec<(u32, u32)>,
+    /// Vector of position information for the instructions
+    pub(crate) positions: Vec<(usize, u32)>,
     /// bytecode instructions
     pub(crate) code: Vec<Instruction<u8>>,
     /// Number of arguments for this function (0 is top-level)
@@ -416,7 +416,7 @@ impl Chunk {
     pub(super) fn new(name: Box<str>) -> Self {
         Self {
             name,
-            lines: Vec::new(),
+            positions: Vec::new(),
             code: Vec::new(),
             arg_number: 0,
             constants: Vec::new(),
@@ -439,25 +439,25 @@ impl Chunk {
     pub(super) fn emit_instruction<Op: Operand>(
         &mut self,
         instruction: Instruction<Op>,
-        line: u32,
+        position: usize,
     ) {
         let (instruction, extended) = instruction.into_u8();
         for extended in Op::iter_extended(&extended) {
             if let Some(extended) = extended {
-                self.emit_instruction_u8(extended, line)
+                self.emit_instruction_u8(extended, position)
             }
         }
-        self.emit_instruction_u8(instruction, line)
+        self.emit_instruction_u8(instruction, position)
     }
 
     /// Directly push an instruction.
     ///
     /// If you want to use bigger operands than [`u8`], consider using
     /// [`emit_instruction`](Chunk::emit_instruction) instead.
-    pub(super) fn emit_instruction_u8(&mut self, instruction: Instruction<u8>, line: u32) {
-        match self.lines.last_mut() {
-            Some((l, nb)) if *l == line => *nb += 1,
-            _ => self.lines.push((line, 1)),
+    pub(super) fn emit_instruction_u8(&mut self, instruction: Instruction<u8>, position: usize) {
+        match self.positions.last_mut() {
+            Some((pos, nb)) if *pos == position => *nb += 1,
+            _ => self.positions.push((position, 1)),
         }
 
         self.code.push(instruction)
@@ -551,20 +551,20 @@ impl Chunk {
         write!(formatter, "{:<10} {}", operand, operand_value)
     }
 
-    /// Get the line for the instruction at `index`, or the last line.
+    /// Get the position for the instruction at `index`, or the last position.
     ///
     /// This function will iterate on the whole bytecode to find the correct
-    /// line, making it potentially costly.
-    pub fn get_line(&self, index: usize) -> usize {
-        let mut line_index = 0;
-        for (line, nb) in self.lines.iter().copied() {
-            if line_index + nb as usize >= index {
-                return line as usize;
+    /// position, making it potentially costly.
+    pub fn get_pos(&self, index: usize) -> usize {
+        let mut pos_index = 0;
+        for (pos, nb) in self.positions.iter().copied() {
+            if pos_index + nb as usize >= index {
+                return pos as usize;
             }
-            line_index += nb as usize;
+            pos_index += nb as usize;
         }
 
-        self.lines.last().map_or(0, |(line, _)| *line) as usize
+        self.positions.last().map_or(0, |(pos, _)| *pos) as usize
     }
 }
 
@@ -591,17 +591,17 @@ impl fmt::Display for Chunk {
         writeln!(formatter, " - {} locals", self.locals_number)?;
         writeln!(formatter)?;
         formatter
-            .write_str("line       index      opcode            operand    operand value\n\n")?;
-        let mut lines = self.lines.iter();
-        let mut current_line = match lines.next() {
-            Some(line) => line,
+            .write_str("pos        index      opcode            operand    operand value\n\n")?;
+        let mut positions = self.positions.iter();
+        let mut current_position = match positions.next() {
+            Some(position) => position,
             None => return Ok(()),
         };
-        let mut lines_acc = 0;
+        let mut positions_acc = 0;
         let mut extended = None;
         for (i, inst) in self.code.iter().enumerate() {
-            if lines_acc == 0 {
-                write!(formatter, "{:<10} ", current_line.0)
+            if positions_acc == 0 {
+                write!(formatter, "{:<10} ", current_position.0)
             } else {
                 formatter.write_str("|          ")
             }?;
@@ -614,10 +614,10 @@ impl fmt::Display for Chunk {
                 extended = None;
             }
             writeln!(formatter)?;
-            lines_acc += 1;
-            if lines_acc == current_line.1 {
-                current_line = lines.next().unwrap_or(&(0, 0));
-                lines_acc = 0
+            positions_acc += 1;
+            if positions_acc == current_position.1 {
+                current_position = positions.next().unwrap_or(&(0, 0));
+                positions_acc = 0
             }
         }
 

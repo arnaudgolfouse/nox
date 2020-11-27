@@ -2,8 +2,8 @@ use super::{bytecode::Instruction, Constant, Error, ErrorKind, ParseReturn, Vari
 use crate::{
     error::Continue,
     lexer::{Assign, Keyword, Operation, Token, TokenKind},
-    Range,
 };
+use std::ops::Range;
 
 /// Precendence of the various binary operators
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
@@ -162,7 +162,7 @@ impl<'a> super::Parser<'a> {
                             if precedence >= op_precedence {
                                 break;
                             }
-                            let range = token.range;
+                            let range = token.range.clone();
                             self.next().transpose()?;
                             let token = self.next().transpose()?;
                             self.parse_precedence(op_precedence, token, read_only)?;
@@ -213,7 +213,7 @@ impl<'a> super::Parser<'a> {
             ..
         }) = self.peek_transpose()?
         {
-            let (ass, range) = (*ass, *range);
+            let (ass, range) = (*ass, range.clone());
             return if read_only {
                 Err(self.emit_error(
                     ErrorKind::Unexpected(TokenKind::Assign(ass)),
@@ -259,7 +259,7 @@ impl<'a> super::Parser<'a> {
             _ => Err(self.emit_error(
                 ErrorKind::Expected(TokenKind::RPar),
                 Continue::Continue,
-                self.next_range,
+                self.next_range.clone(),
             )),
         }
     }
@@ -307,14 +307,14 @@ impl<'a> super::Parser<'a> {
     ///
     /// The operation token has already been eaten.
     fn parse_unary(&mut self, operator: Operation) -> Result<(), Error> {
-        let op_line = self.current_range.start.line;
+        let op_pos = self.current_range.start;
         let token = self.next().transpose()?;
         self.parse_precedence(Precedence::Unary, token, true)?;
         match operator {
             Operation::Minus => self
                 .code()
-                .emit_instruction_u8(Instruction::Negative, op_line),
-            Operation::Not => self.code().emit_instruction_u8(Instruction::Not, op_line),
+                .emit_instruction_u8(Instruction::Negative, op_pos),
+            Operation::Not => self.code().emit_instruction_u8(Instruction::Not, op_pos),
             _ => {} // technically unreacheable ? meh
         }
         Ok(())
@@ -402,8 +402,8 @@ impl<'a> super::Parser<'a> {
     /// Parse a binary operation.
     ///
     /// `range` is the range of the operator in the text.
-    fn parse_binary(&mut self, operator: Operation, range: Range) -> Result<(), Error> {
-        let line = range.start.line;
+    fn parse_binary(&mut self, operator: Operation, range: Range<usize>) -> Result<(), Error> {
+        let pos = range.start;
 
         self.code().emit_instruction_u8(
             match operator {
@@ -426,7 +426,7 @@ impl<'a> super::Parser<'a> {
                 Operation::ShiftRight => Instruction::ShiftR,
                 Operation::Not => unreachable!(),
             },
-            line,
+            pos,
         );
         Ok(())
     }
@@ -482,7 +482,7 @@ impl<'a> super::Parser<'a> {
             }
         } else {
             self.code()
-                .emit_instruction_u8(Instruction::ReadTable, range.start.line);
+                .emit_instruction_u8(Instruction::ReadTable, range.start);
             Ok(ExpressionType::TableRead)
         }
     }
@@ -497,7 +497,7 @@ impl<'a> super::Parser<'a> {
                     let member_index = self.code().add_constant(Constant::String(member));
                     self.code().emit_instruction(
                         Instruction::ReadConstant(member_index),
-                        token.range.start.line,
+                        token.range.start,
                     );
 
                     token.range
@@ -535,7 +535,7 @@ impl<'a> super::Parser<'a> {
             }
         } else {
             self.code()
-                .emit_instruction_u8(Instruction::ReadTable, range.start.line);
+                .emit_instruction_u8(Instruction::ReadTable, range.start);
             Ok(ExpressionType::TableRead)
         }
     }
