@@ -157,11 +157,11 @@ impl<'source> Iterator for Lexer<'source> {
 }
 
 /// Escape the characters in a string, and return an owned version.
-fn parse_string<'source>(
+fn parse_string(
     matching_character: char,
     string_range: Range<usize>,
-    source: Source<'source>,
-) -> Result<Box<str>, Error<'source>> {
+    source: Source<'_>,
+) -> Result<Box<str>, Error<'_>> {
     /// Helper structure to parse a string
     struct StringParser<'source> {
         string_range: Range<usize>,
@@ -170,7 +170,7 @@ fn parse_string<'source>(
         chars: std::str::Chars<'source>,
     }
 
-    impl<'source> Iterator for StringParser<'source> {
+    impl Iterator for StringParser<'_> {
         type Item = char;
 
         fn next(&mut self) -> Option<Self::Item> {
