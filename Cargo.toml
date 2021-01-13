@@ -7,7 +7,7 @@ default-run = "repl"
 
 [dependencies]
 colored = "2.0"
-rustyline = "7.0"
+rustyline = "7.1"
 criterion = { version = "0.3", optional = true }
 logos = "0.11"
 
