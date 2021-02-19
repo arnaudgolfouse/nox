@@ -9,7 +9,7 @@ default-run = "repl"
 colored = "2.0"
 rustyline = "7.1"
 criterion = { version = "0.3", optional = true }
-logos = "0.11"
+logos = "0.12"
 
 [profile.release]
 lto = true
