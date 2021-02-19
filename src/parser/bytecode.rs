@@ -125,7 +125,7 @@ impl<Op: Operand> Instruction<Op> {
 
     /// Convert this instruction into a [`u8`] instruction, and the eventual
     /// extended operands.
-    pub fn into_u8(self) -> (Instruction<u8>, Op::Extended) {
+    pub fn into_u8_instructions(self) -> (Instruction<u8>, Op::Extended) {
         let (operand, extended) = self.operand().unwrap_or_default().extended();
 
         (
@@ -139,6 +139,28 @@ impl<Op: Operand> Instruction<Op> {
             },
             extended,
         )
+    }
+
+    /// Returns the discriminant of this instruction as `u8`.
+    pub fn discriminant(self) -> u8 {
+        #[repr(u8)]
+        enum Discriminant {
+            $(
+                $code1,
+            )*
+            $(
+                $code2,
+            )*
+        }
+
+        match self {
+            $(
+                Self::$code1 => Discriminant::$code1 as u8,
+            )*
+            $(
+                Self::$code2(_) => Discriminant::$code2 as u8,
+            )*
+        }
     }
 }
     };
@@ -432,6 +454,20 @@ impl Chunk {
         &self.name
     }
 
+    /// Efficiently serialize the bytecode of this chunk.
+    /// 
+    /// TODO: No additional information (constants, other functions...) is kept, so this is pretty much unusable at the moment.
+    pub fn serialize_bytecode(&self) -> Vec<u8> {
+        let mut result = Vec::new();
+        for instruction in self.code.iter().copied() {
+            let disc = instruction.discriminant();
+            let operand = instruction.operand().unwrap_or(0);
+            result.push(disc);
+            result.push(operand);
+        }
+        result
+    }
+
     /// Emit the new instruction.
     ///
     /// Multiple [`u8`] instructions will actually be emmited if the operand is
@@ -441,7 +477,7 @@ impl Chunk {
         instruction: Instruction<Op>,
         position: usize,
     ) {
-        let (instruction, extended) = instruction.into_u8();
+        let (instruction, extended) = instruction.into_u8_instructions();
         for extended in Op::iter_extended(&extended) {
             if let Some(extended) = extended {
                 self.emit_instruction_u8(extended, position)
@@ -513,7 +549,7 @@ impl Chunk {
         {
             debug_assert_eq!(*initial_instruction, Instruction::Jump(0))
         }
-        let (instruction, extended) = instruction.into_u8();
+        let (instruction, extended) = instruction.into_u8_instructions();
         *initial_instruction = instruction;
         for extended in extended.iter().copied().flatten() {
             self.code.insert(address, extended);
