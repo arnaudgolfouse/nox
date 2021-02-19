@@ -126,7 +126,7 @@ impl<'a> super::Parser<'a> {
 
         // infix operations : '+', '*', '/', ... but also 'a.b' and others !
         loop {
-            if matches!(expression_type, ExpressionType::Assign{..}) {
+            if matches!(expression_type, ExpressionType::Assign { .. }) {
                 return Ok(expression_type);
             }
             match self.peek_transpose()? {
@@ -166,13 +166,14 @@ impl<'a> super::Parser<'a> {
                             self.next().transpose()?;
                             let token = self.next().transpose()?;
                             self.parse_precedence(op_precedence, token, read_only)?;
-                            self.parse_binary(op, range)
-                                .map(|_| ExpressionType::BinaryOp)
+                            self.parse_binary(op, range);
+                            Ok(ExpressionType::BinaryOp)
                         }
                         TokenKind::LPar => {
                             self.next().transpose()?;
                             let arg_num = self.parse_call_internal()?;
-                            self.parse_call(arg_num).map(|_| ExpressionType::Call)
+                            self.parse_call(arg_num);
+                            Ok(ExpressionType::Call)
                         }
                         _ => break,
                     }?;
@@ -402,7 +403,11 @@ impl<'a> super::Parser<'a> {
     /// Parse a binary operation.
     ///
     /// `range` is the range of the operator in the text.
-    fn parse_binary(&mut self, operator: Operation, range: Range<usize>) -> Result<(), Error> {
+    ///
+    /// # Panics
+    ///
+    /// Panics if `operator` is not a binary operator.
+    fn parse_binary(&mut self, operator: Operation, range: Range<usize>) {
         let pos = range.start;
 
         self.code().emit_instruction_u8(
@@ -428,16 +433,14 @@ impl<'a> super::Parser<'a> {
             },
             pos,
         );
-        Ok(())
     }
 
     /// Parse a function call, e.g. `f(a, 1, 3 + 2)`.
     ///
     /// Assumes we already parsed all the arguments and the parenthesis : All
     /// that is left to do is issuing the call itself.
-    fn parse_call(&mut self, arg_num: u32) -> Result<(), Error> {
+    fn parse_call(&mut self, arg_num: u32) {
         self.emit_instruction(Instruction::Call(arg_num));
-        Ok(())
     }
 
     /// Parse an indexing operation, e.g. `table[x]`

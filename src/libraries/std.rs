@@ -75,6 +75,7 @@ pub(super) fn letters(args: &mut [Value]) -> Result<Value, String> {
 }
 
 /// Print the given arguments
+#[allow(clippy::unnecessary_wraps)]
 pub(super) fn print(args: &mut [Value]) -> Result<Value, String> {
     for arg in args {
         print!("{}", arg)
@@ -83,6 +84,7 @@ pub(super) fn print(args: &mut [Value]) -> Result<Value, String> {
 }
 
 /// Print the given arguments and a newline.
+#[allow(clippy::unnecessary_wraps)]
 pub(super) fn println(args: &mut [Value]) -> Result<Value, String> {
     for arg in args {
         print!("{}", arg)
