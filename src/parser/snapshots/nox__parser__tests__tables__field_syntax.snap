@@ -1,0 +1,23 @@
+---
+source: src/parser/tests.rs
+expression: chunk.code
+---
+[
+    ReadConstant(0),
+    ReadConstant(1),
+    MakeTable(1),
+    WriteGlobal(0),
+    ReadGlobal(0),
+    ReadConstant(0),
+    DuplicateTop(1),
+    ReadTable,
+    ReadConstant(2),
+    Subtract,
+    WriteTable,
+    ReadGlobal(0),
+    ReadConstant(0),
+    ReadTable,
+    Return,
+    PushNil,
+    Return,
+]

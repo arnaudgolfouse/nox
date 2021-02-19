@@ -1,0 +1,27 @@
+---
+source: src/parser/tests.rs
+expression: chunk.code
+---
+[
+    ReadConstant(0),
+    ReadConstant(1),
+    Add,
+    ReadConstant(2),
+    ReadConstant(3),
+    ReadConstant(4),
+    ReadConstant(5),
+    Modulo,
+    Multiply,
+    Subtract,
+    ShiftL,
+    ReadConstant(6),
+    ReadConstant(7),
+    Negative,
+    ReadConstant(8),
+    Pow,
+    Divide,
+    Equal,
+    Return,
+    PushNil,
+    Return,
+]

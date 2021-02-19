@@ -1,0 +1,40 @@
+---
+source: src/parser/tests.rs
+expression: "(chunk.code, &chunk.functions[0].code, &chunk.functions[0].functions[0].code,\n &chunk.functions[0].functions[0].functions[0].code)"
+---
+(
+    [
+        ReadConstant(0),
+        WriteGlobal(0),
+        ReadFunction(0),
+        WriteGlobal(1),
+        PushNil,
+        Return,
+    ],
+    [
+        ReadConstant(0),
+        WriteLocal(0),
+        ReadFunction(0),
+        WriteLocal(1),
+        PushNil,
+        Return,
+    ],
+    [
+        ReadFunction(0),
+        WriteLocal(0),
+        ReadLocal(0),
+        ReadConstant(0),
+        Add,
+        Return,
+        PushNil,
+        Return,
+    ],
+    [
+        ReadConstant(0),
+        WriteLocal(0),
+        ReadConstant(0),
+        WriteCaptured(0),
+        PushNil,
+        Return,
+    ],
+)

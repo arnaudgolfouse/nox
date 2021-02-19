@@ -1,0 +1,10 @@
+---
+source: src/parser/tests.rs
+expression: chunk.code
+---
+[
+    ReadConstant(0),
+    Return,
+    PushNil,
+    Return,
+]

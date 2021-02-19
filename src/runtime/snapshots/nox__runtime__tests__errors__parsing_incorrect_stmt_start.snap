@@ -1,0 +1,21 @@
+---
+source: src/runtime/tests.rs
+expression: "VM::new().parse_top_level(\"0 = x\").unwrap_err()"
+---
+
+top-level: 0
+[31m  1 | [0m0 = x
+[31m      ^[0m
+
+[1;31merror[0m : unexpected token : '0'
+
+[1;34mnote[0m : authorized in this position are 'return', 'global', 'if', 'while', 'for', 'fn', an assignement, or a function call
+
+top-level: 0
+[31m  1 | [0m0 = x
+[31m          ^[0m
+
+[1;31merror[0m : unexpected expression
+
+[1;34mnote[0m : you can evaluate the expression by wrapping it in parenthesis -> (x)
+

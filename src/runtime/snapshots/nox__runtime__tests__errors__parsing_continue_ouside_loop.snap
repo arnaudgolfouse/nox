@@ -1,0 +1,11 @@
+---
+source: src/runtime/tests.rs
+expression: "VM::new().parse_top_level(\"x = 5 continue\").unwrap_err()"
+---
+
+top-level: 0
+[31m  1 | [0mx = 5 continue
+[31m            ^^^^^^^^[0m
+
+[1;31merror[0m : unexpected 'continue' outside of loop
+

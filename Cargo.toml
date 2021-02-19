@@ -11,6 +11,9 @@ rustyline = "7.1"
 criterion = { version = "0.3", optional = true }
 logos = "0.12"
 
+[dev-dependencies]
+insta = "1.6"
+
 [profile.release]
 lto = true
 panic = "abort"

@@ -1,0 +1,22 @@
+---
+source: src/parser/tests.rs
+expression: chunk.code
+---
+[
+    PushTrue,
+    Not,
+    PushFalse,
+    And,
+    PushFalse,
+    PushTrue,
+    Equal,
+    Or,
+    PushTrue,
+    Xor,
+    PushTrue,
+    Not,
+    Or,
+    Return,
+    PushNil,
+    Return,
+]

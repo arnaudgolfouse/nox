@@ -1,0 +1,11 @@
+---
+source: src/runtime/tests.rs
+expression: "VM::new().parse_top_level(\"fn f() break end\").unwrap_err()"
+---
+
+top-level: 0
+[31m  1 | [0mfn f() break end
+[31m             ^^^^^[0m
+
+[1;31merror[0m : unexpected 'break' outside of loop
+

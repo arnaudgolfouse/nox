@@ -1,0 +1,10 @@
+---
+source: src/parser/tests.rs
+expression: chunk.code
+---
+[
+    MakeTable(0),
+    WriteGlobal(0),
+    PushNil,
+    Return,
+]

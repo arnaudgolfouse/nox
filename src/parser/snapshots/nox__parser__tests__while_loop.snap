@@ -1,0 +1,18 @@
+---
+source: src/parser/tests.rs
+expression: chunk.code
+---
+[
+    PrepareLoop(3),
+    ReadGlobal(0),
+    ReadGlobal(1),
+    More,
+    JumpEndWhile(6),
+    ReadGlobal(0),
+    ReadConstant(0),
+    Subtract,
+    WriteGlobal(0),
+    Continue(0),
+    PushNil,
+    Return,
+]

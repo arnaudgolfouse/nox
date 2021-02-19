@@ -274,38 +274,61 @@ return x
     vm.reset();
 }
 
-#[test]
-fn errors() {
-    let mut vm = VM::new();
-    // ======== parsing errors ========
-    vm.parse_top_level("0 = x").unwrap_err();
-    vm.parse_top_level("fn f() break end").unwrap_err();
-    vm.parse_top_level("x = 5 continue").unwrap_err();
-    // ======== runtime errors ========
-    // operation errors
-    vm.parse_top_level("return 5 + \"hello\"").unwrap();
-    vm.run().unwrap_err();
-    vm.parse_top_level("return nil ^ 5.2").unwrap();
-    vm.run().unwrap_err();
-    vm.parse_top_level("return { x = 5 } - fn() return 1 end")
-        .unwrap();
-    vm.run().unwrap_err();
-    vm.reset();
-    // not a table
-    vm.parse_top_level("x.a = 7").unwrap();
-    vm.run().unwrap_err();
-    vm.parse_top_level("x[789] = 9").unwrap();
-    vm.run().unwrap_err();
-    vm.reset();
-    // not a function
-    vm.parse_top_level("return 5(0, 1)").unwrap();
-    vm.run().unwrap_err();
-    vm.parse_top_level("x = nil return x()").unwrap();
-    vm.run().unwrap_err();
-    vm.reset();
+mod errors {
+    use super::*;
+
+    macro_rules! make_tests {
+        ([
+            $($name:ident: $input:expr),* $(,)?
+        ]) => {
+            $(
+                #[test]
+                fn $name() {
+                    let mut vm = VM::new();
+                    vm.parse_top_level($input).unwrap();
+                    insta::assert_display_snapshot!(vm.run().unwrap_err());
+                }
+            )*
+        };
+    }
+
+    macro_rules! make_parsing_tests {
+        ([
+            $($name:ident: $input:expr),* $(,)?
+        ]) => {
+            $(
+                #[test]
+                fn $name() {
+                    insta::assert_display_snapshot!(VM::new().parse_top_level($input).unwrap_err());
+                }
+            )*
+        };
+    }
+
+    make_tests! {
+        [
+            add_int_string: "return 5 + \"hello\"",
+            power_nil_float: "return nil ^ 5.2",
+            sub_table_function: "return { x = 5 } - fn() return 1 end",
+            nil_is_not_a_table: "x.a = 7",
+            nil_is_not_a_table2: "x[789] = 9",
+            int_is_not_a_function: "return 5(0, 1)",
+            nil_is_not_a_function: "x = nil return x()",
+        ]
+    }
+
+    make_parsing_tests! {
+        [
+            parsing_incorrect_stmt_start: "0 = x",
+            parsing_break_ouside_loop: "fn f() break end",
+            parsing_continue_ouside_loop: "x = 5 continue",
+        ]
+    }
 }
 
+/// Check that everything is well on extended instructions.
 #[test]
+#[ignore]
 fn run_a_lot() {
     let mut source = String::with_capacity(10000 * "x = 0\n".len());
     for _ in 0..10000 {
