@@ -481,7 +481,7 @@ impl VM {
             return Err(RuntimeError::InvalidArgNumber(func.0.arg_number, nb_args).into());
         }
 
-        for _ in 0..(func.0.locals_number - nb_args as usize) {
+        for _ in 0..(func.0.locals_number - nb_args as u32) {
             self.stack.push(Value::Nil)
         }
 
@@ -621,7 +621,7 @@ pub enum InternalError {
     EmptyStack,
     /// Various instruction errors. Most of the time this is caused by an
     /// incorrect `Read-` or `Write-` instruction operand.
-    InvalidOperand(Instruction<usize>),
+    InvalidOperand(Instruction<u64>),
     /// A `Break` or `Continue` instruction was encountered outside of a loop.
     ///
     /// If [`true`], `break`, else `continue`.

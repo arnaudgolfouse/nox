@@ -50,7 +50,9 @@ impl VM {
         Ok({
             self.local_vars()
                 .get(index)
-                .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(index)))?
+                .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(
+                    index as u64,
+                )))?
                 .clone()
         })
     }
@@ -63,7 +65,7 @@ impl VM {
             .local_vars_mut()
             .get_mut(index)
             .ok_or(InternalError::InvalidOperand(Instruction::WriteLocal(
-                index,
+                index as u64,
             )))? = value;
         Ok(())
     }
@@ -107,7 +109,7 @@ impl VM {
             .functions
             .get(operand)
             .ok_or(InternalError::InvalidOperand(Instruction::ReadFunction(
-                operand,
+                operand as u64,
             )))?
             .clone();
 
@@ -118,20 +120,20 @@ impl VM {
                 LocalOrCaptured::Local(index) => {
                     let to_capture = self
                         .local_vars_mut()
-                        .get_mut(*index)
+                        .get_mut(*index as usize)
                         .ok_or(InternalError::InvalidOperand(Instruction::ReadLocal(
-                            *index,
+                            *index as u64,
                         )))?
                         .clone();
                     let to_capture = self.gc.new_captured(to_capture);
                     captured.push(to_capture.clone());
-                    *self.local_vars_mut().get_mut(*index).ok_or(
-                        InternalError::InvalidOperand(Instruction::ReadLocal(*index)),
+                    *self.local_vars_mut().get_mut(*index as usize).ok_or(
+                        InternalError::InvalidOperand(Instruction::ReadLocal(*index as u64)),
                     )? = to_capture;
                 }
                 LocalOrCaptured::Captured(index) => {
-                    let to_capture = self.captured_vars_mut().get_mut(*index).ok_or(
-                        InternalError::InvalidOperand(Instruction::ReadLocal(*index)),
+                    let to_capture = self.captured_vars_mut().get_mut(*index as usize).ok_or(
+                        InternalError::InvalidOperand(Instruction::ReadLocal(*index as u64)),
                     )?;
                     captured.push(to_capture.clone())
                 }
@@ -282,7 +284,7 @@ impl VM {
                             .globals
                             .get(operand)
                             .ok_or(InternalError::InvalidOperand(Instruction::ReadGlobal(
-                                operand,
+                                operand as u64,
                             )))?;
                     let value = self
                         .global_variables
@@ -296,7 +298,7 @@ impl VM {
                         .globals
                         .get(operand)
                         .ok_or(InternalError::InvalidOperand(Instruction::ReadGlobal(
-                            operand,
+                            operand as u64,
                         )))?
                         .clone();
                     let global = self.pop_stack()?;
@@ -315,7 +317,7 @@ impl VM {
                         .captured_vars()
                         .get(operand)
                         .ok_or(InternalError::InvalidOperand(Instruction::ReadCaptured(
-                            operand,
+                            operand as u64,
                         )))?
                         .clone();
                     self.stack.push(captured)
@@ -323,7 +325,7 @@ impl VM {
                 Instruction::WriteCaptured(_) => {
                     let var = self.pop_stack()?;
                     let captured = self.captured_vars_mut().get_mut(operand).ok_or(
-                        InternalError::InvalidOperand(Instruction::ReadCaptured(operand)),
+                        InternalError::InvalidOperand(Instruction::ReadCaptured(operand as u64)),
                     )?;
                     if let Some(value) = captured.as_captured_mut() {
                         *value = var;
@@ -361,7 +363,7 @@ impl VM {
                                 }
                                 None => {
                                     return Err(InternalError::InvalidOperand(
-                                        Instruction::WriteLocal(local_index),
+                                        Instruction::WriteLocal(local_index as u64),
                                     )
                                     .into())
                                 }
@@ -379,9 +381,10 @@ impl VM {
                         0 => self.stack.push(Value::Bool(false)),
                         1 => self.stack.push(Value::Nil),
                         _ => {
-                            return Err(
-                                InternalError::InvalidOperand(Instruction::Break(operand)).into()
-                            )
+                            return Err(InternalError::InvalidOperand(Instruction::Break(
+                                operand as u64,
+                            ))
+                            .into())
                         }
                     }
                     self.ip = jump_address;

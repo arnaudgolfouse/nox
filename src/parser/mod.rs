@@ -92,9 +92,9 @@ enum Scope {
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub(crate) enum LocalOrCaptured {
     /// local variable
-    Local(usize),
+    Local(u32),
     /// captured variable
-    Captured(usize),
+    Captured(u32),
 }
 
 impl fmt::Debug for LocalOrCaptured {
@@ -366,7 +366,14 @@ impl<'a> Parser<'a> {
         }
 
         if self.errors.is_empty() {
-            self.top_level.code.locals_number = self.top_level.variables.len();
+            self.top_level.code.locals_number =
+                self.top_level.variables.len().try_into().map_err(|_| {
+                    vec![self.emit_error(
+                        ErrorKind::TooManyLocalVariables(self.top_level.variables.len()),
+                        Continue::Stop,
+                        self.current_range.clone(),
+                    )]
+                })?;
             self.top_level
                 .code
                 .emit_instruction_u8(Instruction::PushNil, self.current_range.end);
@@ -480,7 +487,14 @@ impl<'a> Parser<'a> {
                     let pos = self.next_range.start;
                     function.code.emit_instruction_u8(Instruction::PushNil, pos);
                     function.code.emit_instruction_u8(Instruction::Return, pos);
-                    function.code.locals_number = function.variables.len();
+                    function.code.locals_number =
+                        function.variables.len().try_into().map_err(|_| {
+                            self.emit_error(
+                                ErrorKind::TooManyLocalVariables(function.variables.len()),
+                                Continue::Stop,
+                                self.current_range.clone(),
+                            )
+                        })?;
                     self.code()
                         .functions
                         .push(std::sync::Arc::new(function.code));
@@ -812,10 +826,10 @@ impl<'a> Parser<'a> {
             for function in functions.iter().rev() {
                 match captured_index {
                     LocalOrCaptured::Local(index) => {
-                        return Some(&function.variables[index]);
+                        return Some(&function.variables[index as usize]);
                     }
                     LocalOrCaptured::Captured(index) => {
-                        captured_index = function.code.captures[index];
+                        captured_index = function.code.captures[index as usize];
                     }
                 }
             }
@@ -854,16 +868,17 @@ impl<'a> Parser<'a> {
             for (func_index, func) in self.function_stack.iter().enumerate().rev().skip(1) {
                 for (index, var) in func.variables.iter().enumerate() {
                     if var.as_ref() == variable {
-                        let mut captured_index = LocalOrCaptured::Local(index);
+                        let mut captured_index = LocalOrCaptured::Local(index.try_into().unwrap());
                         // capturing the variable in all subsequent function
                         for function in self.function_stack.iter_mut().skip(func_index + 1) {
                             let next_index = function.code.captures.len();
                             function.code.captures.push(captured_index);
-                            captured_index = LocalOrCaptured::Captured(next_index);
+                            captured_index =
+                                LocalOrCaptured::Captured(next_index.try_into().unwrap());
                         }
                         return VariableLocation::Captured(match captured_index {
                             LocalOrCaptured::Local(index) | LocalOrCaptured::Captured(index) => {
-                                index
+                                index as usize
                             }
                         });
                     }
@@ -873,16 +888,18 @@ impl<'a> Parser<'a> {
                     if find_captured(&self.function_stack[..func_index], var_index)
                         == Some(variable)
                     {
-                        let mut captured_index = LocalOrCaptured::Captured(index);
+                        let mut captured_index =
+                            LocalOrCaptured::Captured(index.try_into().unwrap());
                         // capturing the variable in all subsequent function
                         for function in self.function_stack.iter_mut().skip(func_index + 1) {
                             let next_index = function.code.captures.len();
                             function.code.captures.push(captured_index);
-                            captured_index = LocalOrCaptured::Captured(next_index);
+                            captured_index =
+                                LocalOrCaptured::Captured(next_index.try_into().unwrap());
                         }
                         return VariableLocation::Captured(match captured_index {
                             LocalOrCaptured::Local(index) | LocalOrCaptured::Captured(index) => {
-                                index
+                                index as usize
                             }
                         });
                     }
@@ -1149,6 +1166,8 @@ enum ErrorKind {
     GlobalNoAtRoot,
     /// A function had too many arguments
     TooManyFunctionArgs(usize),
+    /// A function had too local variable
+    TooManyLocalVariables(usize),
 }
 
 impl fmt::Display for ErrorKind {
@@ -1192,6 +1211,12 @@ impl fmt::Display for ErrorKind {
                 formatter,
                 "A function cannot have more than {} arguments, found {}",
                 u16::MAX,
+                found
+            ),
+            Self::TooManyLocalVariables(found) => write!(
+                formatter,
+                "A function cannot have more than {} local variables, found {}",
+                u32::MAX,
                 found
             ),
         }

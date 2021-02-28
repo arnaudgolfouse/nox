@@ -450,7 +450,7 @@ pub struct Chunk {
     /// Global names associated with the chunk
     pub(crate) globals: Vec<Box<str>>,
     /// Number of locals needed when loading the function
-    pub(crate) locals_number: usize,
+    pub(crate) locals_number: u32,
     /// Captured variables from this function's parent.
     pub(crate) captures: Vec<LocalOrCaptured>,
     /// functions inside this chunk
