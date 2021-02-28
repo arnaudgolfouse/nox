@@ -201,7 +201,7 @@ instructions! {
     Add => "ADD",
     /// Subtraction (`-`)
     ///
-    /// Pop two values from the stack, subtract on with the other, and push the
+    /// Pop two values from the stack, subtract one with the other, and push the
     /// result.
     Subtract => "SUBTRACT",
     /// Multiplication (`*`)
@@ -210,7 +210,7 @@ instructions! {
     Multiply => "MULTIPLY",
     /// Division (`/`)
     ///
-    /// Pop two values from the stack, divide of with the other, and push the
+    /// Pop two values from the stack, divide one with the other, and push the
     /// result.
     Divide => "DIVIDE",
     /// Modulo (`%`)
@@ -223,35 +223,35 @@ instructions! {
     /// Pop two values from the stack, take one to the power of the other, and
     /// push the result.
     Pow => "POW",
-    /// `or`
+    /// Logical OR (`or`)
     ///
     /// Pop two values from the stack, 'or' them, and push the result.
     Or => "OR",
-    /// `and`
+    /// Logical AND (`and`)
     ///
     /// Pop two values from the stack, 'and' them, and push the result.
     And => "AND",
-    /// `xor`
+    /// Logical XOR (`xor`)
     ///
     /// Pop two values from the stack, 'xor' them, and push the result.
     Xor => "XOR",
-    /// `<<`
+    /// Shift left (`<<`)
     ///
     /// Pop two values from the stack, shift the first by the second, and push
     /// the result.
     ShiftL => "SHL",
-    /// `>>`
+    /// Shift right (`>>`)
     ///
     /// Pop two values from the stack, shift the first by the second, and push
     /// the result.
     ShiftR => "SHR",
-    /// Negation (-)
+    /// Negation (`-`)
     ///
-    /// Pop one value from the stack, negate it, and push it back.
+    /// Pop one numerical value from the stack, negate it, and push it back.
     Negative => "NEG",
     /// Logical negation (not)
     ///
-    /// Pop one value from the stack, negate it logically, and push it back.
+    /// Pop one boolean value from the stack, negate it logically, and push it back.
     Not => "NOT",
     /// Push `nil` on the stack.
     PushNil => "PUSH_NIL",
@@ -455,7 +455,7 @@ impl Chunk {
     }
 
     /// Efficiently serialize the bytecode of this chunk.
-    /// 
+    ///
     /// TODO: No additional information (constants, other functions...) is kept, so this is pretty much unusable at the moment.
     pub fn serialize_bytecode(&self) -> Vec<u8> {
         let mut result = Vec::new();
