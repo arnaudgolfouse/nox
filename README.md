@@ -11,7 +11,7 @@ This is not meant to be used as a real language, but rather to serve as example 
 The following features are currently implemented :
 
 - expressions, global variables, functions with local variables :
-```lua
+```julia
 x = 0
 y = 1
 fn f(a, x)
@@ -27,7 +27,7 @@ return a + b
 ```
 
 - while and for loops, capturing variables :
-```lua
+```julia
 x = 0
 i = 0
 while i != 5
@@ -39,7 +39,7 @@ return x
 >> 10
 ```
 
-```lua
+```julia
 fn range(a, b) # returns an iterator
     it = a
     fn iter() # this function captures it and b
@@ -64,7 +64,7 @@ return x
 ```
 
 - tables (via a garbage collector) :
-```lua
+```julia
 t1 = {}
 t2 = { x = 5, y = "hello" }
 t1.world = "hello"
