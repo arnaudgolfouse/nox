@@ -15,11 +15,12 @@ mod tests;
 
 mod bytecode;
 mod expression;
-mod serialize_bytecode;
+mod serialize;
 
 use std::convert::TryInto;
 
 pub use bytecode::Chunk;
+pub use serialize::DeserializeError;
 
 pub(crate) use bytecode::{Constant, Instruction};
 

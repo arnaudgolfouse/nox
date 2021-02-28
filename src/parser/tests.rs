@@ -56,12 +56,12 @@ fn if_statement() {
 #[test]
 fn if_statement_with_expressions() {
     let parser = Parser::new(Source::TopLevel(
-        "
-    if (\"hello\" + \"world\") == \"hello world\" then
-        return f(2, true)
-    else
-        return 5 - (f - g)(6) * 8
-    end",
+        r#"
+if ("hello" + "world") == "hello world" then
+    return f(2, true)
+else
+    return 5 - (f - g)(6) * 8
+end"#,
     ));
     let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(
@@ -130,15 +130,15 @@ fn while_extended_operands() {
     // while extended operands
     let parser = Parser::new(Source::TopLevel(
         "while x > y
-                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
-                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
-                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
-                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
-                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
-                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
-                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
-                x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
-            end",
+    x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+    x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+    x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+    x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+    x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+    x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+    x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+    x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1 x -= 1
+end",
     ));
     let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1)]);
@@ -167,9 +167,9 @@ fn while_extended_operands() {
 fn for_loop() {
     let parser = Parser::new(Source::TopLevel(
         "
-        for i in range(1, 2)
-            x += 1
-        end
+for i in range(1, 2)
+    x += 1
+end
         ",
     ));
     let (chunk, _) = parser.parse_top_level().unwrap();
@@ -182,14 +182,14 @@ fn for_loop() {
 fn for_loop_complete() {
     let parser = Parser::new(Source::TopLevel(
         "
-            fn range(a, b)
-                # ...
-            end
-            x = 0
-            for i in range(1, 3)
-                x += 1
-            end
-            return x
+fn range(a, b)
+    # ...
+end
+x = 0
+for i in range(1, 3)
+    x += 1
+end
+return x
         ",
     ));
     let (chunk, _) = parser.parse_top_level().unwrap();
@@ -259,9 +259,9 @@ mod tables {
     fn field_syntax() {
         let parser = Parser::new(Source::TopLevel(
             "
-        t = { x = 5 }
-        t.x -= 3
-        return t.x
+t = { x = 5 }
+t.x -= 3
+return t.x
         ",
         ));
         let (chunk, _) = parser.parse_top_level().unwrap();
@@ -294,15 +294,15 @@ mod functions {
     fn nested_with_captured() {
         let parser = Parser::new(Source::TopLevel(
             "
-        x = 0
-        fn f()
-            y = 1
-            fn g()
-                x = 2
-                y = 2
-            end
-            return g + 1
-        end",
+x = 0
+fn f()
+    y = 1
+    fn g()
+        x = 2
+        y = 2
+    end
+    return g + 1
+end",
         ));
         let (chunk, _) = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, [Constant::Int(0)]);
@@ -328,11 +328,10 @@ mod functions {
     fn anonymous() {
         let parser = Parser::new(Source::TopLevel(
             "
-            x = fn()
-                    y = 1
-                    return (fn(a, b) return y + a + b end)(1, 2)
-                end
-            ",
+x = fn()
+        y = 1
+        return (fn(a, b) return y + a + b end)(1, 2)
+    end",
         ));
         let (chunk, _) = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, []);
@@ -349,17 +348,17 @@ mod functions {
     fn nested_with_deep_captured() {
         let parser = Parser::new(Source::TopLevel(
             "
-        x = 0
-        y = fn()
-            y = 1
-            fn f()
-                fn g()
-                    x = 2
-                    y = 2
-                end
-                return g + 1
-            end
+x = 0
+y = fn()
+    y = 1
+    fn f()
+        fn g()
+            x = 2
+            y = 2
         end
+        return g + 1
+    end
+end
         ",
         ));
         let (chunk, _) = parser.parse_top_level().unwrap();
@@ -403,17 +402,17 @@ mod functions {
     fn global_statement() {
         let parser = Parser::new(Source::TopLevel(
             "
-    x = 0
-    fn g()
-        x += 1
-    end
-    fn f()
-        global x
-        x += 1
-    end
-    g()
-    f()
-    return x
+x = 0
+fn g()
+    x += 1
+end
+fn f()
+    global x
+    x += 1
+end
+g()
+f()
+return x
     ",
         ));
         let (chunk, _) = parser.parse_top_level().unwrap();
