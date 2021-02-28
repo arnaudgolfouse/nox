@@ -81,6 +81,18 @@ pub enum Instruction<Op: Operand> {
     )*
 }
 
+/// Used to convert into and from `u8`
+#[repr(u8)]
+enum Discriminant {
+    $(
+        $code1,
+    )*
+    $(
+        $code2,
+    )*
+    __Last__
+}
+
 impl<Op: Operand> fmt::Debug for Instruction<Op> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
@@ -143,16 +155,6 @@ impl<Op: Operand> Instruction<Op> {
 
     /// Returns the discriminant of this instruction as `u8`.
     pub fn discriminant(self) -> u8 {
-        #[repr(u8)]
-        enum Discriminant {
-            $(
-                $code1,
-            )*
-            $(
-                $code2,
-            )*
-        }
-
         match self {
             $(
                 Self::$code1 => Discriminant::$code1 as u8,
@@ -160,6 +162,28 @@ impl<Op: Operand> Instruction<Op> {
             $(
                 Self::$code2(_) => Discriminant::$code2 as u8,
             )*
+        }
+    }
+}
+
+impl Instruction<u8> {
+    /// Build an `Instruction` from raw bytes.
+    ///
+    /// # Errors
+    /// Returns an error if `discriminant` does not correspond to a valid instruction.
+    pub fn from_raw(discriminant: u8, operand: u8) -> Result<Self, ()> {
+        if discriminant >= Discriminant::__Last__ as u8 {
+            return Err(())
+        }
+        let discriminant: Discriminant = unsafe { std::mem::transmute(discriminant)};
+        match discriminant {
+            $(
+                Discriminant::$code1 => Ok(Self::$code1),
+            )*
+            $(
+                Discriminant::$code2 => Ok(Self::$code2(operand)),
+            )*
+            Discriminant::__Last__ => Err(()),
         }
     }
 }
@@ -416,11 +440,11 @@ pub struct Chunk {
     /// Name of this chunk
     pub(crate) name: Box<str>,
     /// Vector of position information for the instructions
-    pub(crate) positions: Vec<(usize, u32)>,
+    pub(crate) positions: Vec<(u64, u32)>,
     /// bytecode instructions
     pub(crate) code: Vec<Instruction<u8>>,
     /// Number of arguments for this function (0 is top-level)
-    pub(crate) arg_number: usize,
+    pub(crate) arg_number: u16,
     /// Constants associated with the chunk
     pub(crate) constants: Vec<Constant>,
     /// Global names associated with the chunk
@@ -454,20 +478,6 @@ impl Chunk {
         &self.name
     }
 
-    /// Efficiently serialize the bytecode of this chunk.
-    ///
-    /// TODO: No additional information (constants, other functions...) is kept, so this is pretty much unusable at the moment.
-    pub fn serialize_bytecode(&self) -> Vec<u8> {
-        let mut result = Vec::new();
-        for instruction in self.code.iter().copied() {
-            let disc = instruction.discriminant();
-            let operand = instruction.operand().unwrap_or(0);
-            result.push(disc);
-            result.push(operand);
-        }
-        result
-    }
-
     /// Emit the new instruction.
     ///
     /// Multiple [`u8`] instructions will actually be emmited if the operand is
@@ -492,8 +502,8 @@ impl Chunk {
     /// [`emit_instruction`](Chunk::emit_instruction) instead.
     pub(super) fn emit_instruction_u8(&mut self, instruction: Instruction<u8>, position: usize) {
         match self.positions.last_mut() {
-            Some((pos, nb)) if *pos == position => *nb += 1,
-            _ => self.positions.push((position, 1)),
+            Some((pos, nb)) if *pos == position as u64 => *nb += 1,
+            _ => self.positions.push((position as u64, 1)),
         }
 
         self.code.push(instruction)

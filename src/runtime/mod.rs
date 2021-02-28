@@ -409,8 +409,8 @@ impl VM {
     ///
     /// [`InterfacingError::NotAString`] is returned if the stack is incorrectly
     /// setup.
-    pub fn str_call(&mut self, nb_args: usize) -> Result<Vec<parser::Warning>, VMError> {
-        let func_index = match self.stack.len().checked_sub(nb_args + 1) {
+    pub fn str_call(&mut self, nb_args: u16) -> Result<Vec<parser::Warning>, VMError> {
+        let func_index = match self.stack.len().checked_sub(nb_args as usize + 1) {
             None => return Err(self.make_error(InterfacingError::IncorrectStackIndex(0).into())),
             Some(index) => index,
         };
@@ -442,7 +442,7 @@ impl VM {
     /// # Errors
     ///
     /// See [`VMError`].
-    pub fn call(&mut self, nb_args: usize) -> Result<(), VMError> {
+    pub fn call(&mut self, nb_args: u16) -> Result<(), VMError> {
         self.call_internal(nb_args)
             .map_err(|err| self.make_error(err))
     }
@@ -450,11 +450,11 @@ impl VM {
     /// Interpret the stack as `nb_args` arguments with a function below.
     ///
     /// This will prepare the `VM` for the function and call it.
-    fn call_internal(&mut self, nb_args: usize) -> Result<(), VMErrorKind> {
+    fn call_internal(&mut self, nb_args: u16) -> Result<(), VMErrorKind> {
         let local_start = self
             .stack
             .len()
-            .checked_sub(nb_args)
+            .checked_sub(nb_args as usize)
             .ok_or(InternalError::EmptyStack)?;
         let mut function = self
             .stack
@@ -529,7 +529,7 @@ pub enum RuntimeError {
     /// A call operation was attempted on a value that is not a function.
     NotAFunction(String),
     /// A function received an incorrect number of arguments
-    InvalidArgNumber(usize, usize),
+    InvalidArgNumber(u16, u16),
     /// Error emitted by a Rust function
     RustFunction(String),
     /// Trying to import an already defined library

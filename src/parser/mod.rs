@@ -15,6 +15,9 @@ mod tests;
 
 mod bytecode;
 mod expression;
+mod serialize_bytecode;
+
+use std::convert::TryInto;
 
 pub use bytecode::Chunk;
 
@@ -1015,7 +1018,14 @@ impl<'a> Parser<'a> {
         self.emit_instruction(Instruction::ReadFunction(index));
 
         let mut code = Chunk::new(name);
-        code.arg_number = args.len();
+
+        code.arg_number = args.len().try_into().map_err(|_| {
+            self.emit_error(
+                ErrorKind::TooManyFunctionArgs(args.len()),
+                Continue::Stop,
+                self.current_range.clone(),
+            )
+        })?;
         Ok(Function {
             variables: args,
             globals: Vec::new(),
@@ -1060,7 +1070,13 @@ impl<'a> Parser<'a> {
                 self.assign_table(ass)?
             }
             ExpressionType::Call => {
-                if matches!(self.lexer.peek(), Some(Ok(Token { kind: TokenKind::Assign(_), .. }))) {
+                if matches!(
+                    self.lexer.peek(),
+                    Some(Ok(Token {
+                        kind: TokenKind::Assign(_),
+                        ..
+                    }))
+                ) {
                     return Err(self.emit_error(
                         ErrorKind::NonAssignable,
                         Continue::Stop,
@@ -1131,6 +1147,8 @@ enum ErrorKind {
     TableDoubleAssignement(Box<str>),
     /// `global ...` is only authorized at the root of a function
     GlobalNoAtRoot,
+    /// A function had too many arguments
+    TooManyFunctionArgs(usize),
 }
 
 impl fmt::Display for ErrorKind {
@@ -1170,6 +1188,12 @@ impl fmt::Display for ErrorKind {
             ),
             Self::GlobalNoAtRoot => formatter
                 .write_str("'global ...' statements are only authorized at the root of a function"),
+            Self::TooManyFunctionArgs(found) => write!(
+                formatter,
+                "A function cannot have more than {} arguments, found {}",
+                u16::MAX,
+                found
+            ),
         }
     }
 }

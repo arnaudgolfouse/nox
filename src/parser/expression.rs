@@ -439,7 +439,7 @@ impl<'a> super::Parser<'a> {
     ///
     /// Assumes we already parsed all the arguments and the parenthesis : All
     /// that is left to do is issuing the call itself.
-    fn parse_call(&mut self, arg_num: u32) {
+    fn parse_call(&mut self, arg_num: u16) {
         self.emit_instruction(Instruction::Call(arg_num));
     }
 
@@ -544,8 +544,8 @@ impl<'a> super::Parser<'a> {
     }
 
     /// Assumes we already ate the opening `(`.
-    fn parse_call_internal(&mut self) -> Result<u32, Error> {
-        let mut arg_num = 0;
+    fn parse_call_internal(&mut self) -> Result<u16, Error> {
+        let mut arg_num: u16 = 0;
         loop {
             let next_token = self.next().transpose()?;
             if let Some(ref token) = next_token {
@@ -553,7 +553,13 @@ impl<'a> super::Parser<'a> {
                     break;
                 } else {
                     self.parse_expression(next_token, true)?;
-                    arg_num += 1;
+                    arg_num = arg_num.checked_add(1).ok_or_else(|| {
+                        self.emit_error(
+                            ErrorKind::TooManyFunctionArgs(arg_num as usize + 1),
+                            Continue::Stop,
+                            self.current_range.clone(),
+                        )
+                    })?;
                     if let Some(token) = self.next().transpose()? {
                         match token.kind {
                             TokenKind::Comma => {}

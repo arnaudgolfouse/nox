@@ -401,7 +401,7 @@ impl VM {
                     self.push_loop_address((expr_address, jump_address));
                 }
                 Instruction::Call(_) => {
-                    self.call_internal(operand)?;
+                    self.call_internal(operand as u16)?;
                 }
                 Instruction::MakeTable(_) => {
                     let mut new_table = self.gc.new_table();
