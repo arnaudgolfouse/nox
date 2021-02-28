@@ -13,7 +13,7 @@ rustyline = "7.1"
 thiserror = "1.0"
 
 [dev-dependencies]
-insta = "1.6"
+insta = "1.7"
 
 [profile.release]
 lto = true
