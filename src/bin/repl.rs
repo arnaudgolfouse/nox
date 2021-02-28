@@ -24,7 +24,7 @@ impl Repl {
     }
 
     fn evaluate(&mut self) -> Result<(), VMError> {
-        let warnings = self.vm.parse_top_level(self.current_phrase.as_str())?;
+        let warnings = self.vm.parse_top_level(&self.current_phrase)?;
         for warning in warnings {
             println!("{}", warning)
         }
@@ -50,16 +50,14 @@ impl Repl {
         self.current_phrase.push_str(&input); // skip \n
         match self.evaluate() {
             Ok(_) => {
-                let mut new_phrase = String::new();
-                std::mem::swap(&mut new_phrase, &mut self.current_phrase);
-                self.editor.add_history_entry(new_phrase);
+                self.editor
+                    .add_history_entry(std::mem::take(&mut self.current_phrase));
             }
             Err(err) => match err.continuable() {
                 Continue::Stop => {
                     println!("{}", err);
-                    let mut new_phrase = String::new();
-                    std::mem::swap(&mut new_phrase, &mut self.current_phrase);
-                    self.editor.add_history_entry(new_phrase);
+                    self.editor
+                        .add_history_entry(std::mem::take(&mut self.current_phrase));
                 }
                 Continue::Continue => self.current_phrase.push('\n'),
             },
