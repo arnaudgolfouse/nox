@@ -12,7 +12,7 @@ use std::{collections::HashMap, fmt, mem::size_of, ptr::NonNull, sync::Arc};
 
 /// Meta-information about a collectable value.
 #[derive(Debug, Clone)]
-pub struct GCHeader {
+pub struct GcHeader {
     /// Next collectable value.
     next: Option<NonNull<Collectable>>,
     /// Is the value still reacheable ?
@@ -23,7 +23,7 @@ pub struct GCHeader {
     roots: u32,
 }
 
-impl GCHeader {
+impl GcHeader {
     /// Creates a header for a collectable object.
     ///
     /// This object will be rooted once to avoid collection.
@@ -55,7 +55,7 @@ impl Eq for CollectableObject {}
 /// A collectable value living on the heap.
 #[derive(Debug)]
 pub struct Collectable {
-    pub header: GCHeader,
+    pub header: GcHeader,
     pub object: CollectableObject,
 }
 
@@ -161,19 +161,19 @@ const INITIAL_THRESHOLD: usize = 10; // we test the behavior of the GC
 const INITIAL_THRESHOLD: usize = 10000;
 
 #[derive(Debug)]
-pub struct GC {
+pub struct GarbageCollector {
     pub(super) allocated: usize,
     threshold: usize,
     first: Option<NonNull<Collectable>>,
 }
 
-impl Default for GC {
+impl Default for GarbageCollector {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl GC {
+impl GarbageCollector {
     /// Creates a new empty garbage collector
     pub const fn new() -> Self {
         Self {
@@ -298,7 +298,7 @@ impl GC {
     ) -> Value {
         captured_variables.shrink_to_fit();
         let collectable = Collectable {
-            header: GCHeader::new(),
+            header: GcHeader::new(),
             object: CollectableObject::Function {
                 chunk,
                 captured_variables,
@@ -317,7 +317,7 @@ impl GC {
             value
         } else {
             let collectable = Collectable {
-                header: GCHeader::new(),
+                header: GcHeader::new(),
                 object: CollectableObject::Captured(unsafe { NoDropValue::new(value) }),
             };
             self.make_collectable(collectable)
@@ -329,7 +329,7 @@ impl GC {
     /// The new table will be rooted.
     pub fn new_table(&mut self) -> Value {
         let collectable = Collectable {
-            header: GCHeader::new(),
+            header: GcHeader::new(),
             object: CollectableObject::Table(HashMap::new()),
         };
         self.make_collectable(collectable)
@@ -469,7 +469,7 @@ impl GC {
     }
 }
 
-impl fmt::Display for GC {
+impl fmt::Display for GarbageCollector {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let mut ptr = self.first;
         let mut i = 0;
@@ -483,7 +483,7 @@ impl fmt::Display for GC {
     }
 }
 
-impl Drop for GC {
+impl Drop for GarbageCollector {
     fn drop(&mut self) {
         self.mark_and_sweep();
         #[cfg(debug_assertions)]

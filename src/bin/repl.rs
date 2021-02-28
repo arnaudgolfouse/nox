@@ -1,6 +1,6 @@
 use nox::{
     libraries,
-    runtime::{VMError, Value, VM},
+    runtime::{VmError, Value, VirtualMachine},
     Continue,
 };
 use rustyline::{error::ReadlineError, Editor};
@@ -8,13 +8,13 @@ use std::io::{self, Write};
 
 struct Repl {
     current_phrase: String,
-    vm: VM,
+    vm: VirtualMachine,
     editor: Editor<()>,
 }
 
 impl Repl {
     fn new() -> Self {
-        let mut vm = VM::new();
+        let mut vm = VirtualMachine::new();
         vm.import_all(libraries::std()).unwrap();
         Self {
             current_phrase: String::new(),
@@ -23,7 +23,7 @@ impl Repl {
         }
     }
 
-    fn evaluate(&mut self) -> Result<(), VMError> {
+    fn evaluate(&mut self) -> Result<(), VmError> {
         let warnings = self.vm.parse_top_level(&self.current_phrase)?;
         for warning in warnings {
             println!("{}", warning)

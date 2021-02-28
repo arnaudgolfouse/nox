@@ -1,6 +1,6 @@
 use nox::{
     libraries,
-    runtime::{VMError, VM},
+    runtime::{VmError, VirtualMachine},
 };
 
 const _PROGRAM1: &str = "
@@ -30,8 +30,8 @@ end
 (8)
 ";
 
-fn main() -> Result<(), VMError> {
-    let mut vm = VM::new();
+fn main() -> Result<(), VmError> {
+    let mut vm = VirtualMachine::new();
     vm.import_all(libraries::std())?;
     vm.parse_top_level(_PROGRAM4)?;
     vm.run()?;

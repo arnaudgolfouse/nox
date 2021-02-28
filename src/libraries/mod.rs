@@ -32,11 +32,11 @@ pub fn std() -> Library {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::{Value, VM};
+    use crate::runtime::{Value, VirtualMachine};
 
     #[test]
     fn test_case() {
-        let mut vm = VM::new();
+        let mut vm = VirtualMachine::new();
         vm.import_all(std()).unwrap();
         vm.parse_top_level(
             "
@@ -53,7 +53,7 @@ mod tests {
         .unwrap();
         assert_eq!(vm.run().unwrap(), Value::Int(6));
 
-        let mut vm = VM::new();
+        let mut vm = VirtualMachine::new();
         vm.import_all(std()).unwrap();
         vm.parse_top_level(
             r#"
@@ -69,7 +69,7 @@ mod tests {
         .unwrap();
         assert_eq!(vm.run().unwrap(), Value::String("eoo".into()));
 
-        let mut vm = VM::new();
+        let mut vm = VirtualMachine::new();
         vm.import_all(std()).unwrap();
         vm.parse_top_level(
             r#"
@@ -83,7 +83,7 @@ mod tests {
         .unwrap();
         assert_eq!(vm.run().unwrap(), Value::String("54 8.61 true".into()));
 
-        let mut vm = VM::new();
+        let mut vm = VirtualMachine::new();
         vm.import_all(std()).unwrap();
         vm.parse_top_level(
             r#"

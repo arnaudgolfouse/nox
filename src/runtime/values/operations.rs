@@ -1,7 +1,7 @@
 //! Module for the binary and unary operations on values.
 
 use super::{
-    super::{gc::CollectableObject, RuntimeError, VMErrorKind},
+    super::{gc::CollectableObject, RuntimeError, VmErrorKind},
     Value,
 };
 use crate::lexer::Operation;
@@ -40,7 +40,7 @@ impl From<OperationError> for RuntimeError {
     }
 }
 
-impl From<OperationError> for VMErrorKind {
+impl From<OperationError> for VmErrorKind {
     fn from(err: OperationError) -> Self {
         RuntimeError::OperationError(err).into()
     }

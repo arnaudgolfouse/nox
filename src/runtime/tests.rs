@@ -3,7 +3,7 @@ use crate::libraries;
 
 #[test]
 fn operations() {
-    let mut vm = VM::new();
+    let mut vm = VirtualMachine::new();
     vm.parse_top_level(
         "
 x = 5                  # x = 5
@@ -42,7 +42,7 @@ return 4 + 7 + 8 - 5 - 9 # 5
 #[test]
 fn tables() {
     // manipulate fields
-    let mut vm = VM::new();
+    let mut vm = VirtualMachine::new();
     vm.parse_top_level(
         "
 t = { x = 5, y = 6 }
@@ -89,7 +89,7 @@ return res
 
 #[test]
 fn control_flow() {
-    let mut vm = VM::new();
+    let mut vm = VirtualMachine::new();
     vm.parse_top_level(
         "
 x = 5
@@ -201,29 +201,29 @@ return x2",
 
 #[test]
 fn for_loop() {
-    let mut vm = VM::new();
+    let mut vm = VirtualMachine::new();
     vm.parse_top_level(
         "
-    fn range(a, b)
-        it = a
-        fn iter()
-            if it == b then
-                return nil
-            else
-                it += 1
-                return it - 1
-            end
-        end
-        return iter
-    end
-    x = 0
-    for i in range(1, 4)
-        while i != 0
-            i -= 1
-            x += 1
+fn range(a, b)
+    it = a
+    fn iter()
+        if it == b then
+            return nil
+        else
+            it += 1
+            return it - 1
         end
     end
-    return x
+    return iter
+end
+x = 0
+for i in range(1, 4)
+    while i != 0
+        i -= 1
+        x += 1
+    end
+end
+return x
                 ",
     )
     .unwrap();
@@ -284,7 +284,7 @@ mod errors {
             $(
                 #[test]
                 fn $name() {
-                    let mut vm = VM::new();
+                    let mut vm = VirtualMachine::new();
                     vm.parse_top_level($input).unwrap();
                     insta::assert_display_snapshot!(vm.run().unwrap_err());
                 }
@@ -299,7 +299,7 @@ mod errors {
             $(
                 #[test]
                 fn $name() {
-                    insta::assert_display_snapshot!(VM::new().parse_top_level($input).unwrap_err());
+                    insta::assert_display_snapshot!(VirtualMachine::new().parse_top_level($input).unwrap_err());
                 }
             )*
         };
@@ -334,7 +334,7 @@ fn run_a_lot() {
     for _ in 0..10000 {
         source.push_str("x = 0\n");
     }
-    let mut vm = VM::new();
+    let mut vm = VirtualMachine::new();
     vm.parse_top_level(&source).unwrap();
     vm.run().unwrap();
 
@@ -349,7 +349,7 @@ fn run_a_lot() {
         source.push_str("end\n");
     }
     source.push_str("return x");
-    let mut vm = VM::new();
+    let mut vm = VirtualMachine::new();
     vm.import_all(libraries::std()).unwrap();
     vm.parse_top_level(&source).unwrap();
     assert_eq!(vm.run().unwrap(), Value::Int(1));

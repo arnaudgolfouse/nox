@@ -6,8 +6,8 @@ use crate::runtime::Value;
 /// # Example
 ///
 /// ```
-///  # use nox::{runtime::{VM, Value}, libraries};
-/// let mut vm = VM::new();
+///  # use nox::{runtime::{VirtualMachine, Value}, libraries};
+/// let mut vm = VirtualMachine::new();
 /// vm.import(libraries::std()).unwrap();
 /// vm.parse_top_level(r"
 /// x = 0

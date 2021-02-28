@@ -10,10 +10,10 @@
 //!
 //! The following code is definitively NOT safe :
 //! ```no_run
-//! use nox::runtime::VM;
+//! use nox::runtime::VirtualMachine;
 //!
-//! let mut vm = VM::new();
-//! let mut other_vm = VM::new();
+//! let mut vm = VirtualMachine::new();
+//! let mut other_vm = VirtualMachine::new();
 //! let table = {
 //!     vm.parse_top_level("return { x = 0 }").unwrap();
 //!     vm.run().unwrap()
@@ -36,7 +36,7 @@ use std::{fmt, marker::PhantomData, ops::Deref};
 #[repr(transparent)]
 pub struct RValue<'a>(
     pub(crate) Value,
-    pub(crate) PhantomData<&'a crate::runtime::VM>,
+    pub(crate) PhantomData<&'a crate::runtime::VirtualMachine>,
 );
 
 impl fmt::Debug for RValue<'_> {

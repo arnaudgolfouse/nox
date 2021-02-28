@@ -2,11 +2,11 @@ use criterion::{criterion_group, criterion_main, Criterion};
 
 use nox::{
     libraries,
-    runtime::{Value, VM},
+    runtime::{Value, VirtualMachine},
 };
 
 fn munchausen(c: &mut Criterion) {
-    let mut vm = VM::new();
+    let mut vm = VirtualMachine::new();
     vm.import_all(libraries::std()).unwrap();
     if let Err(err) = vm.parse_top_level(
         r#"

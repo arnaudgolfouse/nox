@@ -1,20 +1,20 @@
 use super::{
-    Constant, Instruction, InternalError, OperationError, RuntimeError, VMErrorKind, Value, VM,
+    Constant, Instruction, InternalError, OperationError, RuntimeError, VmErrorKind, Value, VirtualMachine,
 };
 
-impl VM {
+impl VirtualMachine {
     /// Read the instruction pointer, resolving any
     /// [extended](Instruction::Extended) instruction.
     ///
     /// # Errors
     ///
     /// An error is emitted is the instruction pointer is out of bounds.
-    fn read_ip(&mut self) -> Result<(Instruction<u8>, usize), VMErrorKind> {
+    fn read_ip(&mut self) -> Result<(Instruction<u8>, usize), VmErrorKind> {
         let mut operand = 0;
         let opcode =
             loop {
                 match self.code().get(self.ip).copied().ok_or_else(|| {
-                    InternalError::InstructionPointerOOB(self.ip, self.code().len())
+                    InternalError::InstructionPointerOob(self.ip, self.code().len())
                 })? {
                     // extended operand
                     Instruction::Extended(extended) => {
@@ -36,17 +36,17 @@ impl VM {
     ///
     /// If `rooted` is [`true`], the value will NOT be unrooted.
     #[inline]
-    pub(super) fn pop_stack(&mut self) -> Result<Value, VMErrorKind> {
+    pub(super) fn pop_stack(&mut self) -> Result<Value, VmErrorKind> {
         self.stack
             .pop()
-            .ok_or(VMErrorKind::Internal(InternalError::EmptyStack))
+            .ok_or(VmErrorKind::Internal(InternalError::EmptyStack))
     }
 
     /// Read a value at `index` from the [`stack`](VM::stack).
     ///
     /// The returned value will have an additional root.
     #[inline]
-    fn read_local(&mut self, index: usize) -> Result<Value, VMErrorKind> {
+    fn read_local(&mut self, index: usize) -> Result<Value, VmErrorKind> {
         Ok({
             self.local_vars()
                 .get(index)
@@ -60,7 +60,7 @@ impl VM {
     /// Write a `value` at `index` in the [`stack`](VM::stack).
     ///
     /// The previous value will be unrooted.
-    fn write_local(&mut self, index: usize, value: Value) -> Result<(), VMErrorKind> {
+    fn write_local(&mut self, index: usize, value: Value) -> Result<(), VmErrorKind> {
         *self
             .local_vars_mut()
             .get_mut(index)
@@ -88,7 +88,7 @@ impl VM {
     /// - `Ok(())` if `destination` was in bounds, or if `destination == self.code().len()`. (will be handled at the next iteration of the `run` loop).
     /// - [`Err(InternalError::JumpOob)`](InternalError::JumpOob) else.
     #[inline]
-    fn jump_to(&mut self, destination: usize) -> Result<(), VMErrorKind> {
+    fn jump_to(&mut self, destination: usize) -> Result<(), VmErrorKind> {
         if destination >= self.code().len() {
             Err(InternalError::JumpOob(destination, true).into())
         } else {
@@ -101,7 +101,7 @@ impl VM {
     ///
     /// This will take care of capturing variables, and the returned function
     /// will be rooted.
-    fn read_function(&mut self, operand: usize) -> Result<Value, VMErrorKind> {
+    fn read_function(&mut self, operand: usize) -> Result<Value, VmErrorKind> {
         use crate::parser::LocalOrCaptured;
 
         let function = self
@@ -171,7 +171,7 @@ impl VM {
     }
 
     /// Pop two values from the stack and applies the given operation.
-    fn binary_op<F>(&mut self, op: F) -> Result<(), VMErrorKind>
+    fn binary_op<F>(&mut self, op: F) -> Result<(), VmErrorKind>
     where
         F: Fn(Value, Value) -> Result<Value, OperationError>,
     {
@@ -183,7 +183,7 @@ impl VM {
         Ok(())
     }
 
-    pub(super) fn run_internal(&mut self) -> Result<(), VMErrorKind> {
+    pub(super) fn run_internal(&mut self) -> Result<(), VmErrorKind> {
         loop {
             let (opcode, operand) = self.read_ip()?;
             match opcode {

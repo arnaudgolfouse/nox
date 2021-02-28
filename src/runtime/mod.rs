@@ -18,7 +18,7 @@ use crate::{
     parser::{self, Chunk, Constant, Instruction, Parser},
     Source,
 };
-use gc::GC;
+use gc::GarbageCollector;
 use std::{collections::HashMap, error, fmt, marker::PhantomData, sync::Arc};
 pub use values::Value;
 use values::{OperationError, RValue};
@@ -39,7 +39,7 @@ struct CallFrame {
 
 /// The Nox Virtual Machine
 #[derive(Default, Debug)]
-pub struct VM {
+pub struct VirtualMachine {
     /// Currently executing code
     chunk: Arc<Chunk>,
     /// Instruction pointer
@@ -53,10 +53,10 @@ pub struct VM {
     /// Stack of loop addresses used in `Continue` and `Break`
     loop_addresses: Vec<(usize, usize)>,
     /// Garbage collector
-    gc: GC,
+    gc: GarbageCollector,
 }
 
-impl VM {
+impl VirtualMachine {
     pub fn new() -> Self {
         Self::default()
     }
@@ -87,7 +87,7 @@ impl VM {
     /// # Errors
     ///
     /// Any parsing error is converted to [`VMError`] and returned.
-    pub fn parse_top_level(&mut self, source: &str) -> Result<Vec<parser::Warning>, VMError> {
+    pub fn parse_top_level(&mut self, source: &str) -> Result<Vec<parser::Warning>, VmError> {
         self.partial_reset();
         let parser = Parser::new(crate::Source::TopLevel(source));
         let (chunk, warnings) = parser.parse_top_level()?;
@@ -100,7 +100,7 @@ impl VM {
     /// # Errors
     ///
     /// Any parsing error is converted to [`VMError`] and returned.
-    pub fn parse_source(&mut self, source: Source) -> Result<Vec<parser::Warning>, VMError> {
+    pub fn parse_source(&mut self, source: Source) -> Result<Vec<parser::Warning>, VmError> {
         self.partial_reset();
         let parser = Parser::new(source);
         let (chunk, warnings) = parser.parse_top_level()?;
@@ -120,9 +120,9 @@ impl VM {
     ///
     /// If the name of the library tries to replace an already defined
     /// global variable, [`RuntimeError::NameAlreadyDefined`] is emitted.
-    pub fn import(&mut self, library: ffi::Library) -> Result<(), VMError> {
+    pub fn import(&mut self, library: ffi::Library) -> Result<(), VmError> {
         if self.global_variables.contains_key(&library.name) {
-            return Err(VMError::Runtime {
+            return Err(VmError::Runtime {
                 kind: RuntimeError::NameAlreadyDefined(library.name),
                 position: 0,
                 unwind_message: String::new(),
@@ -145,10 +145,10 @@ impl VM {
     ///
     /// If one of the symbols of the library tries to replace an already defined
     /// global variable, [`RuntimeError::NameAlreadyDefined`] is emitted.
-    pub fn import_all(&mut self, library: ffi::Library) -> Result<(), VMError> {
+    pub fn import_all(&mut self, library: ffi::Library) -> Result<(), VmError> {
         for (name, value) in library.variables {
             if self.global_variables.contains_key(&name) {
-                return Err(VMError::Runtime {
+                return Err(VmError::Runtime {
                     kind: RuntimeError::NameAlreadyDefined(name),
                     position: 0,
                     unwind_message: String::new(),
@@ -173,8 +173,8 @@ impl VM {
     ///
     /// **Example 1**
     /// ```
-    /// # use nox::runtime::{VM, Value};
-    /// let mut vm = VM::new();
+    /// # use nox::runtime::{VirtualMachine, Value};
+    /// let mut vm = VirtualMachine::new();
     /// vm.parse_top_level(
     /// "
     /// t = { x = 5, y = 6 }
@@ -190,8 +190,8 @@ impl VM {
     /// ```
     /// **Example 2**
     /// ```
-    /// # use nox::runtime::{VM, Value};
-    /// let mut vm = VM::new();
+    /// # use nox::runtime::{VirtualMachine, Value};
+    /// let mut vm = VirtualMachine::new();
     /// vm.parse_top_level(
     /// "
     /// fn f()
@@ -217,7 +217,7 @@ impl VM {
     /// # Errors
     ///
     /// See [`VMError`].
-    pub fn run(&mut self) -> Result<RValue, VMError> {
+    pub fn run(&mut self) -> Result<RValue, VmError> {
         // for variables
         for _ in 0..self.chunk.locals_number {
             self.stack.push(Value::Nil)
@@ -234,23 +234,23 @@ impl VM {
 
     /// Construct a `VMError` from a `VMErrorKind` (by doing stack
     /// unwinding).
-    fn make_error(&mut self, error: VMErrorKind) -> VMError {
+    fn make_error(&mut self, error: VmErrorKind) -> VmError {
         match error {
-            VMErrorKind::Runtime(err) => {
+            VmErrorKind::Runtime(err) => {
                 let err = self.unwind(err);
                 self.gc.mark_and_sweep();
                 err
             }
-            VMErrorKind::Interfacing(err) => {
+            VmErrorKind::Interfacing(err) => {
                 self.partial_reset();
-                VMError::Interfacing {
+                VmError::Interfacing {
                     kind: err,
                     position: self.chunk().get_pos(self.ip),
                 }
             }
-            VMErrorKind::Internal(err) => {
+            VmErrorKind::Internal(err) => {
                 self.partial_reset();
-                VMError::Internal {
+                VmError::Internal {
                     kind: err,
                     position: self.chunk().get_pos(self.ip),
                 }
@@ -356,13 +356,13 @@ impl VM {
     /// Create an unwind message for a runtime error.
     ///
     /// This will pop every call frame, but keep anything below.
-    fn unwind(&mut self, error: RuntimeError) -> VMError {
+    fn unwind(&mut self, error: RuntimeError) -> VmError {
         let mut unwind_message = String::new();
         let position = self.chunk().get_pos(self.ip.saturating_sub(1));
         while let Some(frame) = self.call_frames.pop() {
             self.unwind_frame(&frame, &mut unwind_message);
         }
-        VMError::Runtime {
+        VmError::Runtime {
             kind: error,
             position,
             unwind_message,
@@ -409,7 +409,7 @@ impl VM {
     ///
     /// [`InterfacingError::NotAString`] is returned if the stack is incorrectly
     /// setup.
-    pub fn str_call(&mut self, nb_args: u16) -> Result<Vec<parser::Warning>, VMError> {
+    pub fn str_call(&mut self, nb_args: u16) -> Result<Vec<parser::Warning>, VmError> {
         let func_index = match self.stack.len().checked_sub(nb_args as usize + 1) {
             None => return Err(self.make_error(InterfacingError::IncorrectStackIndex(0).into())),
             Some(index) => index,
@@ -442,7 +442,7 @@ impl VM {
     /// # Errors
     ///
     /// See [`VMError`].
-    pub fn call(&mut self, nb_args: u16) -> Result<(), VMError> {
+    pub fn call(&mut self, nb_args: u16) -> Result<(), VmError> {
         self.call_internal(nb_args)
             .map_err(|err| self.make_error(err))
     }
@@ -450,7 +450,7 @@ impl VM {
     /// Interpret the stack as `nb_args` arguments with a function below.
     ///
     /// This will prepare the `VM` for the function and call it.
-    fn call_internal(&mut self, nb_args: u16) -> Result<(), VMErrorKind> {
+    fn call_internal(&mut self, nb_args: u16) -> Result<(), VmErrorKind> {
         let local_start = self
             .stack
             .len()
@@ -505,7 +505,7 @@ impl VM {
     }
 }
 
-impl Drop for VM {
+impl Drop for VirtualMachine {
     fn drop(&mut self) {
         self.stack.clear();
         self.global_variables.clear();
@@ -584,20 +584,20 @@ impl fmt::Display for InterfacingError {
 
 impl error::Error for InterfacingError {}
 
-impl From<InterfacingError> for VMErrorKind {
+impl From<InterfacingError> for VmErrorKind {
     fn from(err: InterfacingError) -> Self {
         Self::Interfacing(err)
     }
 }
 
-impl From<RuntimeError> for VMErrorKind {
+impl From<RuntimeError> for VmErrorKind {
     fn from(err: RuntimeError) -> Self {
         Self::Runtime(err)
     }
 }
 
 #[derive(Debug)]
-pub(super) enum VMErrorKind {
+pub(super) enum VmErrorKind {
     Internal(InternalError),
     Runtime(RuntimeError),
     Interfacing(InterfacingError),
@@ -612,7 +612,7 @@ pub enum InternalError {
     /// The instruction pointer was out of bounds : the first number is the
     /// value of the instruction pointer, and the second is the length of the
     /// instruction vector.
-    InstructionPointerOOB(usize, usize),
+    InstructionPointerOob(usize, usize),
     /// The instruction pointer is sent out of bounds by the contained offset.
     /// The boolean indicate whether the offset is positive ([`true`]) or
     /// negative ([`false`])
@@ -631,7 +631,7 @@ pub enum InternalError {
 impl fmt::Display for InternalError {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            Self::InstructionPointerOOB(ptr, max_ptr) => write!(
+            Self::InstructionPointerOob(ptr, max_ptr) => write!(
                 formatter,
                 "!!! instruction pointer '{}' is out of bounds for chunk of len {} !!!",
                 ptr, max_ptr
@@ -666,7 +666,7 @@ impl fmt::Display for InternalError {
     }
 }
 
-impl From<InternalError> for VMErrorKind {
+impl From<InternalError> for VmErrorKind {
     fn from(err: InternalError) -> Self {
         Self::Internal(err)
     }
@@ -676,7 +676,7 @@ impl error::Error for InternalError {}
 
 /// Various errors thrown by the Virtual Machine.
 #[derive(Debug)]
-pub enum VMError {
+pub enum VmError {
     /// Internal error : indicate a bug in the VM
     Internal {
         kind: InternalError,
@@ -697,7 +697,7 @@ pub enum VMError {
     Parser(Vec<parser::Error>),
 }
 
-impl<'a> VMError {
+impl<'a> VmError {
     pub fn continuable(&self) -> Continue {
         match self {
             Self::Runtime { .. } | Self::Interfacing { .. } | Self::Internal { .. } => {
@@ -717,13 +717,13 @@ impl<'a> VMError {
     }
 }
 
-impl<'a> From<Vec<parser::Error>> for VMError {
+impl<'a> From<Vec<parser::Error>> for VmError {
     fn from(err: Vec<parser::Error>) -> Self {
         Self::Parser(err)
     }
 }
 
-impl<'a> fmt::Display for VMError {
+impl<'a> fmt::Display for VmError {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         use colored::Colorize;
         match self {
@@ -776,4 +776,4 @@ impl<'a> fmt::Display for VMError {
     }
 }
 
-impl error::Error for VMError {}
+impl error::Error for VmError {}
