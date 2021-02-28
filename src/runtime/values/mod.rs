@@ -1,21 +1,20 @@
 mod operations;
 mod rust_value;
 
-use {
-    super::{
-        ffi::RustFunction,
-        gc::{Collectable, CollectableObject},
-    },
-    crate::parser::{Chunk, Constant},
-    std::{
-        collections::HashMap,
-        fmt,
-        //mem::ManuallyDrop,
-        ops::{Deref, DerefMut},
-        ptr::NonNull,
-        sync::Arc,
-    },
+use super::{
+    ffi::RustFunction,
+    gc::{Collectable, CollectableObject},
 };
+use crate::parser::{Chunk, Constant};
+use std::{
+    collections::HashMap,
+    fmt,
+    mem::ManuallyDrop,
+    ops::{Deref, DerefMut},
+    ptr::NonNull,
+    sync::Arc,
+};
+
 pub(super) use {operations::OperationError, rust_value::RValue};
 
 /// A value that a variable can take in nox.
@@ -320,16 +319,7 @@ impl Value {
 /// A `NoDropValue` *can* have 0 roots, but then it **must** be referenced by a
 /// rooted object, or be ready to be collected.
 #[derive(Hash, PartialEq, Eq)]
-pub struct NoDropValue(Value);
-
-impl Drop for NoDropValue {
-    /// exactly the opposite of [`Value::drop`]
-    fn drop(&mut self) {
-        if let Value::Collectable(obj) = &mut self.0 {
-            unsafe { obj.as_mut().root() }
-        }
-    }
-}
+pub struct NoDropValue(ManuallyDrop<Value>);
 
 impl Deref for NoDropValue {
     type Target = Value;
@@ -360,7 +350,7 @@ impl NoDropValue {
     /// avoid collections.
     pub(super) unsafe fn new(mut value: Value) -> Self {
         value.unroot();
-        Self(value)
+        Self(ManuallyDrop::new(value))
     }
 
     /// Acts like an unsafe `clone` method for `NoDropValue`.
@@ -376,7 +366,7 @@ impl NoDropValue {
     /// Users of this method **must** ensure that the new value will not be
     /// collected and then used.
     pub(super) unsafe fn duplicate(&self) -> Self {
-        Self(match &self.0 {
+        Self(ManuallyDrop::new(match self.0.deref() {
             Value::Nil => Value::Nil,
             Value::Bool(b) => Value::Bool(*b),
             Value::Int(i) => Value::Int(*i),
@@ -384,6 +374,6 @@ impl NoDropValue {
             Value::String(s) => Value::String(s.clone()),
             Value::Collectable(ptr) => Value::Collectable(*ptr),
             Value::RustFunction(func) => Value::RustFunction(func.clone()),
-        })
+        }))
     }
 }
