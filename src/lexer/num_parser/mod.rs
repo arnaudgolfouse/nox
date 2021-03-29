@@ -5,8 +5,8 @@
 
 mod from_rust_std;
 
+use self::from_rust_std::{DecimalFloat, ParseFloatError};
 use super::Warning;
-use from_rust_std::{DecimalFloat, ParseFloatError};
 use std::{convert::TryFrom, fmt};
 
 #[derive(Clone, Debug, Copy, PartialEq)]

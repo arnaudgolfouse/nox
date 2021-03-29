@@ -1,13 +1,13 @@
 //! Lexer for the nox language.
 
+mod num_parser;
 #[cfg(test)]
 mod tests;
-
-mod num_parser;
 mod token;
 
-pub use token::{Assign, Keyword, Operation, Token, TokenKind};
+pub use self::token::{Assign, Keyword, Operation, Token, TokenKind};
 
+use self::token::RawToken;
 use crate::{
     error::{display_error, Continue},
     Source,
@@ -16,7 +16,6 @@ use std::{
     fmt::{self, Debug, Display},
     ops::Range,
 };
-use token::RawToken;
 
 pub struct Lexer<'source> {
     source: Source<'source>,

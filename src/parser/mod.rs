@@ -17,23 +17,19 @@ mod bytecode;
 mod expression;
 mod serialize;
 
-use bytecode::Operand;
-use std::convert::TryInto;
-
-pub use bytecode::Chunk;
-pub use serialize::DeserializeError;
-
-pub(crate) use bytecode::{Constant, Instruction};
-
-use {
-    crate::{
-        error::{display_error, Continue},
-        lexer::{self, Assign, Keyword, Lexer, Token, TokenKind},
-        Source,
-    },
-    expression::ExpressionType,
-    std::{fmt, iter::Peekable, ops::Range},
+use self::bytecode::Operand;
+use self::expression::ExpressionType;
+use crate::{
+    error::{display_error, Continue},
+    lexer::{self, Assign, Keyword, Lexer, Token, TokenKind},
+    Source,
 };
+use std::{convert::TryInto, fmt, iter::Peekable, ops::Range};
+
+pub use self::bytecode::Chunk;
+pub use self::serialize::DeserializeError;
+
+pub(crate) use self::bytecode::{Constant, Instruction};
 
 /// Indicate what to do after successfully parsing a statement.
 #[derive(Debug, Clone, Copy)]

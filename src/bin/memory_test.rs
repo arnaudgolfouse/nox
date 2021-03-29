@@ -1,6 +1,6 @@
 use nox::{
     libraries,
-    runtime::{VmError, VirtualMachine},
+    runtime::{VirtualMachine, VmError},
 };
 
 const _PROGRAM1: &str = "

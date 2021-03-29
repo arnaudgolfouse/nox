@@ -25,7 +25,7 @@ pub mod libraries;
 pub mod parser;
 pub mod runtime;
 
-pub use error::Continue;
+pub use self::error::Continue;
 
 /// Source of the code given to the interpreter.
 #[derive(Debug, Clone)]

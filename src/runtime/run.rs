@@ -1,5 +1,6 @@
 use super::{
-    Constant, Instruction, InternalError, OperationError, RuntimeError, VmErrorKind, Value, VirtualMachine,
+    Constant, Instruction, InternalError, OperationError, RuntimeError, Value, VirtualMachine,
+    VmErrorKind,
 };
 
 impl VirtualMachine {

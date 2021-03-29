@@ -15,7 +15,8 @@ use std::{
     sync::Arc,
 };
 
-pub(super) use {operations::OperationError, rust_value::RValue};
+pub(super) use self::operations::OperationError;
+pub(super) use self::rust_value::RValue;
 
 /// A value that a variable can take in nox.
 ///

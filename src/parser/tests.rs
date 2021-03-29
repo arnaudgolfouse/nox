@@ -1,5 +1,4 @@
 use super::*;
-
 use Instruction::*;
 
 mod errors {

@@ -6,22 +6,22 @@
 
 pub mod ffi;
 pub mod gc;
-mod values;
-
-#[cfg(test)]
-mod tests;
 
 mod run;
+#[cfg(test)]
+mod tests;
+mod values;
 
+use self::gc::GarbageCollector;
+use self::values::{OperationError, RValue};
 use crate::{
     error::Continue,
     parser::{self, Chunk, Constant, Instruction, Parser},
     Source,
 };
-use gc::GarbageCollector;
 use std::{collections::HashMap, error, fmt, marker::PhantomData, sync::Arc};
-pub use values::Value;
-use values::{OperationError, RValue};
+
+pub use self::values::Value;
 
 #[derive(Default, Debug)]
 struct CallFrame {

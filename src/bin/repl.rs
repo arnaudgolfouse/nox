@@ -1,6 +1,6 @@
 use nox::{
     libraries,
-    runtime::{VmError, Value, VirtualMachine},
+    runtime::{Value, VirtualMachine, VmError},
     Continue,
 };
 use rustyline::{error::ReadlineError, Editor};
