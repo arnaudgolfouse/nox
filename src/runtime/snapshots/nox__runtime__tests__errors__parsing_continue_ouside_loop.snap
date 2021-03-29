@@ -1,9 +1,10 @@
 ---
 source: src/runtime/tests.rs
-expression: "VM::new().parse_top_level(\"x = 5 continue\").unwrap_err()"
+expression: "VirtualMachine::new().parse_top_level(\"x = 5 continue\").unwrap_err()"
+
 ---
 
-top-level: 0
+top-level:
 [31m  1 | [0mx = 5 continue
 [31m            ^^^^^^^^[0m
 

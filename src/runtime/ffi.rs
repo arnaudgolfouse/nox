@@ -1,16 +1,31 @@
 //! Foreign Functions Interface
 
 use super::Value;
-use std::{cell::RefCell, fmt::Debug, sync::Arc};
+use std::{
+    fmt::Debug,
+    sync::{Arc, Mutex},
+};
 
 /// Representation of a Rust function in nox.
 ///
-/// The function receives a slice of values for its arguments.
+/// The function receives a slice of values for its arguments, and returns a custom
+/// [`String`] error, or a single [`Value`].
 ///
-/// It is able to return a custom [`String`] error, or a single [`Value`].
+/// It is thread-safe.
 #[allow(clippy::type_complexity)]
 #[derive(Clone)]
-pub struct RustFunction(pub Arc<RefCell<dyn FnMut(&mut [Value]) -> Result<Value, String>>>);
+pub struct RustFunction(Arc<Mutex<dyn FnMut(&mut [Value]) -> Result<Value, String>>>);
+
+impl RustFunction {
+    /// Call the `RustFunction` with the given values.
+    pub fn call(&self, args: &mut [Value]) -> Result<Value, String> {
+        self.0.lock().unwrap()(args)
+    }
+
+    pub(crate) fn as_ptr(&self) -> *const Mutex<dyn FnMut(&mut [Value]) -> Result<Value, String>> {
+        Arc::as_ptr(&self.0)
+    }
+}
 
 impl PartialEq for RustFunction {
     fn eq(&self, _: &Self) -> bool {
@@ -29,7 +44,7 @@ where
     F: 'static + FnMut(&mut [Value]) -> Result<Value, String>,
 {
     fn from(value: F) -> Self {
-        Self::RustFunction(RustFunction(Arc::new(RefCell::new(value))))
+        Self::RustFunction(RustFunction(Arc::new(Mutex::new(value))))
     }
 }
 

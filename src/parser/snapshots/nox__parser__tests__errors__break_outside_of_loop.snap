@@ -1,9 +1,10 @@
 ---
 source: src/parser/tests.rs
-expression: "parser.parse_top_level().unwrap_err()[0]"
+expression: "Parser::new(Source::TopLevel(\"break\")).parse_top_level().unwrap_err()[0]"
+
 ---
 
-top-level: 0
+top-level:
 [31m  1 | [0mbreak
 [31m      ^^^^^[0m
 

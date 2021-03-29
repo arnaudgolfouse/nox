@@ -1,9 +1,10 @@
 ---
 source: src/runtime/tests.rs
-expression: "VM::new().parse_top_level(\"fn f() break end\").unwrap_err()"
+expression: "VirtualMachine::new().parse_top_level(\"fn f() break end\").unwrap_err()"
+
 ---
 
-top-level: 0
+top-level:
 [31m  1 | [0mfn f() break end
 [31m             ^^^^^[0m
 

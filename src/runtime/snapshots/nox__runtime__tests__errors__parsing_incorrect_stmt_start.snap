@@ -1,9 +1,10 @@
 ---
 source: src/runtime/tests.rs
-expression: "VM::new().parse_top_level(\"0 = x\").unwrap_err()"
+expression: "VirtualMachine::new().parse_top_level(\"0 = x\").unwrap_err()"
+
 ---
 
-top-level: 0
+top-level:
 [31m  1 | [0m0 = x
 [31m      ^[0m
 
@@ -11,7 +12,7 @@ top-level: 0
 
 [1;34mnote[0m : authorized in this position are 'return', 'global', 'if', 'while', 'for', 'fn', an assignement, or a function call
 
-top-level: 0
+top-level:
 [31m  1 | [0m0 = x
 [31m          ^[0m
 

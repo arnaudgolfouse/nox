@@ -465,7 +465,7 @@ impl VirtualMachine {
         let func = if let Some(function) = function.as_function_mut() {
             function
         } else if let Value::RustFunction(ref function) = function {
-            match function.0.borrow_mut()(&mut self.stack[local_start..]) {
+            match function.call(&mut self.stack[local_start..]) {
                 Ok(value) => {
                     for _ in self.stack.drain(local_start - 1..) {}
                     self.stack.push(value);

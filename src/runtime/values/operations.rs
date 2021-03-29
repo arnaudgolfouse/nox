@@ -102,8 +102,8 @@ impl Hash for Value {
                 CollectableObject::Captured(value) => value.hash(hasher),
                 _ => ptr.hash(hasher),
             },
-            // two RustFunction's are never equal, so we don't really care about what is hashed
-            Self::RustFunction(func) => func.0.as_ptr().hash(hasher),
+            // two RustFunction's are only equal if their pointers match.
+            Self::RustFunction(func) => func.as_ptr().hash(hasher),
         }
     }
 }
