@@ -73,7 +73,7 @@ impl Library {
     /// Add a Rust function to the library
     pub fn add_function<Name: Into<Box<str>>, F>(&mut self, function_name: Name, function: F)
     where
-        for<'a> F: FnMut(&mut [Value]) -> Result<Value, String> + 'static,
+        F: FnMut(&mut [Value]) -> Result<Value, String> + 'static,
     {
         self.variables
             .push((function_name.into(), Value::from(function)))
