@@ -439,10 +439,12 @@ impl fmt::Display for Constant {
 pub struct Chunk {
     /// Name of this chunk
     pub(crate) name: Box<str>,
-    /// Vector of position information for the instructions
-    pub(crate) positions: Vec<(u64, u32)>,
+    /// Vector of line position information for the instructions
+    ///
+    /// These are `(line, number of instructions on this line)`.
+    pub(crate) line: Vec<(u64, u32)>,
     /// bytecode instructions
-    pub(crate) code: Vec<Instruction<u8>>,
+    pub(crate) instructions: Vec<Instruction<u8>>,
     /// Number of arguments for this function (0 is top-level)
     pub(crate) arg_number: u16,
     /// Constants associated with the chunk
@@ -462,8 +464,8 @@ impl Chunk {
     pub(super) fn new(name: Box<str>) -> Self {
         Self {
             name,
-            positions: Vec::new(),
-            code: Vec::new(),
+            line: Vec::new(),
+            instructions: Vec::new(),
             arg_number: 0,
             constants: Vec::new(),
             globals: Vec::new(),
@@ -476,37 +478,6 @@ impl Chunk {
     /// Return the name of this chunk.
     pub const fn name(&self) -> &str {
         &self.name
-    }
-
-    /// Emit the new instruction.
-    ///
-    /// Multiple [`u8`] instructions will actually be emmited if the operand is
-    /// bigger than [`u8::MAX`].
-    pub(super) fn emit_instruction<Op: Operand>(
-        &mut self,
-        instruction: Instruction<Op>,
-        position: usize,
-    ) {
-        let (instruction, extended) = instruction.into_u8_instructions();
-        for extended in Op::iter_extended(&extended) {
-            if let Some(extended) = extended {
-                self.emit_instruction_u8(extended, position)
-            }
-        }
-        self.emit_instruction_u8(instruction, position)
-    }
-
-    /// Directly push an instruction.
-    ///
-    /// If you want to use bigger operands than [`u8`], consider using
-    /// [`emit_instruction`](Chunk::emit_instruction) instead.
-    pub(super) fn emit_instruction_u8(&mut self, instruction: Instruction<u8>, position: usize) {
-        match self.positions.last_mut() {
-            Some((pos, nb)) if *pos == position as u64 => *nb += 1,
-            _ => self.positions.push((position as u64, 1)),
-        }
-
-        self.code.push(instruction)
     }
 
     /// Add a constant to the `Chunk`, and return its index for future
@@ -543,8 +514,8 @@ impl Chunk {
     /// push a dummy `Jump(0)` instruction, and returns its index in the bytecode
     /// for future modification
     pub(super) fn push_jump(&mut self) -> usize {
-        self.code.push(Instruction::Jump(0));
-        self.code.len() - 1
+        self.instructions.push(Instruction::Jump(0));
+        self.instructions.len() - 1
     }
 
     /// Write the (now known) operand at the given index.
@@ -553,7 +524,7 @@ impl Chunk {
     /// [`u8::MAX`] will shift a lot of code to make room for extended
     /// instructions.
     pub(super) fn write_jump(&mut self, address: usize, instruction: Instruction<u64>) {
-        let initial_instruction = &mut self.code[address];
+        let initial_instruction = &mut self.instructions[address];
         // wow there cowboy !
         #[allow(clippy::panic)]
         {
@@ -562,7 +533,7 @@ impl Chunk {
         let (instruction, extended) = instruction.into_u8_instructions();
         *initial_instruction = instruction;
         for extended in extended.iter().copied().flatten() {
-            self.code.insert(address, extended);
+            self.instructions.insert(address, extended);
         }
     }
 
@@ -597,20 +568,20 @@ impl Chunk {
         write!(formatter, "{:<10} {}", operand, operand_value)
     }
 
-    /// Get the position for the instruction at `index`, or the last position.
+    /// Get the line for the instruction at `index`, or the last line.
     ///
     /// This function will iterate on the whole bytecode to find the correct
-    /// position, making it potentially costly.
-    pub fn get_pos(&self, index: usize) -> usize {
+    /// line, making it potentially costly.
+    pub fn get_line(&self, index: usize) -> usize {
         let mut pos_index = 0;
-        for (pos, nb) in self.positions.iter().copied() {
+        for (pos, nb) in self.line.iter().copied() {
             if pos_index + nb as usize >= index {
                 return pos as usize;
             }
             pos_index += nb as usize;
         }
 
-        self.positions.last().map_or(0, |(pos, _)| *pos) as usize
+        self.line.last().map_or(0, |(pos, _)| *pos) as usize
     }
 }
 
@@ -637,15 +608,15 @@ impl fmt::Display for Chunk {
         writeln!(formatter, " - {} locals", self.locals_number)?;
         writeln!(formatter)?;
         formatter
-            .write_str("pos        index      opcode            operand    operand value\n\n")?;
-        let mut positions = self.positions.iter();
+            .write_str("line       index      opcode            operand    operand value\n\n")?;
+        let mut positions = self.line.iter();
         let mut current_position = match positions.next() {
             Some(position) => position,
             None => return Ok(()),
         };
         let mut positions_acc = 0;
         let mut extended = None;
-        for (i, inst) in self.code.iter().enumerate() {
+        for (i, inst) in self.instructions.iter().enumerate() {
             if positions_acc == 0 {
                 write!(formatter, "{:<10} ", current_position.0)
             } else {

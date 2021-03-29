@@ -14,6 +14,8 @@ pub enum DeserializeError {
     UnexpectedByte(u8),
     #[error("Length does not fit in `usize`: {0}")]
     DoesNotFitInUsize(u64),
+    #[error("An incorrect utf8 byte sequence was found: {0:?}")]
+    IncorrectChar([u8; 4]),
 }
 
 impl Chunk {
@@ -27,8 +29,8 @@ impl Chunk {
         use serialize::*;
 
         serialize_str(&self.name, buffer);
-        serialize_positions(&self.positions, buffer);
-        serialize_code(&self.code, buffer);
+        serialize_positions(&self.line, buffer);
+        serialize_code(&self.instructions, buffer);
         buffer.extend(&self.arg_number.to_le_bytes());
         serialize_constants(&self.constants, buffer);
         serialize_globals(&self.globals, buffer);
@@ -40,7 +42,11 @@ impl Chunk {
         }
     }
 
-    pub fn deserialize(buffer: &mut &[u8]) -> Result<Self, DeserializeError> {
+    pub fn deserialize(mut buffer: &[u8]) -> Result<Self, DeserializeError> {
+        Self::deserialize_internal(&mut buffer)
+    }
+
+    fn deserialize_internal(buffer: &mut &[u8]) -> Result<Self, DeserializeError> {
         use deserialize::*;
 
         let name = deserialize_str(buffer)?;
@@ -55,13 +61,13 @@ impl Chunk {
         let functions_len = deserialize_len(buffer)?;
         let mut functions = Vec::with_capacity(functions_len);
         for _ in 0..functions_len {
-            functions.push(Arc::new(Self::deserialize(buffer)?))
+            functions.push(Arc::new(Self::deserialize_internal(buffer)?))
         }
 
         Ok(Self {
             name,
-            positions,
-            code,
+            line: positions,
+            instructions: code,
             arg_number,
             constants,
             globals,
@@ -76,9 +82,10 @@ impl Chunk {
 mod serialize {
     use super::*;
 
+    /// Serialize `s` as a null-terminated string in the given `buffer`.
     pub(super) fn serialize_str(s: &str, buffer: &mut Vec<u8>) {
-        buffer.extend(&(s.len() as u64).to_le_bytes());
         buffer.extend(s.as_bytes());
+        buffer.push(0);
     }
 
     pub(super) fn serialize_positions(positions: &[(u64, u32)], buffer: &mut Vec<u8>) {
@@ -90,6 +97,10 @@ mod serialize {
         }
     }
 
+    /// Serialize the `code` vector in the given `buffer`.
+    ///
+    /// Instructions take as much space as they need (so an instruction without
+    /// operand take 1 byte).
     pub(super) fn serialize_code(code: &[Instruction<u8>], buffer: &mut Vec<u8>) {
         buffer.extend(&(code.len() as u64).to_le_bytes());
         for instruction in code.iter().copied() {
@@ -209,14 +220,34 @@ mod deserialize {
             .map_err(|_| DeserializeError::DoesNotFitInUsize(len))
     }
 
+    /// Deserialize a null-terminated string stored in `buffer`.
     pub(super) fn deserialize_str(buffer: &mut &[u8]) -> Result<Box<str>, DeserializeError> {
-        let len = deserialize_len(buffer)?;
-        let bytes = buffer.get(0..len).ok_or(DeserializeError::EndOfInput)?;
-        *buffer = &buffer[len..];
-        match std::str::from_utf8(bytes) {
-            Ok(s) => Ok(s.into()),
-            Err(error) => Err(DeserializeError::UnexpectedByte(bytes[error.valid_up_to()])),
+        let mut result = String::new();
+        let bytes = buffer.iter().copied();
+        let mut char_buffer = [0u8; 4];
+        let mut char_buffer_idx = 0;
+        for byte in bytes {
+            if byte == 0 {
+                if char_buffer_idx != 0 {
+                    return Err(DeserializeError::IncorrectChar(char_buffer));
+                }
+                break;
+            } else {
+                char_buffer[char_buffer_idx] = byte;
+                if byte & 0b1000_0000 == 0 {
+                    result.push(match std::char::from_u32(u32::from_ne_bytes(char_buffer)) {
+                        Some(c) => c,
+                        None => return Err(DeserializeError::IncorrectChar(char_buffer)),
+                    });
+                    char_buffer_idx = 0;
+                    char_buffer = [0; 4];
+                } else {
+                    char_buffer_idx = (char_buffer_idx + 1) % 4;
+                }
+            }
         }
+        *buffer = &buffer[result.len() + 1..];
+        Ok(result.into())
     }
 
     pub(super) fn deserialize_positions(
@@ -324,8 +355,8 @@ end"#;
         let (chunk, _) = parser.parse_top_level().unwrap();
         let mut buffer = Vec::new();
         chunk.serialize(&mut buffer);
-        let new_chunk = Chunk::deserialize(&mut buffer.as_slice()).unwrap();
-        assert_eq!(chunk, new_chunk)
+        let new_chunk = Chunk::deserialize(buffer.as_slice()).unwrap();
+        assert_eq!(chunk, new_chunk);
     }
 
     #[test]
@@ -340,12 +371,17 @@ say_hello(name)
 name = "Bob"
 say_hello(name)
 say_hello("Celine")
-        "#;
+"#;
         let parser = Parser::new(Source::TopLevel(SOURCE));
         let (chunk, _) = parser.parse_top_level().unwrap();
         let mut buffer = Vec::new();
         chunk.serialize(&mut buffer);
-        let new_chunk = Chunk::deserialize(&mut buffer.as_slice()).unwrap();
-        assert_eq!(chunk, new_chunk)
+        println!(
+            "SOURCE.len() = {}, buffer.len() = {}",
+            SOURCE.len(),
+            buffer.len()
+        );
+        let new_chunk = Chunk::deserialize(buffer.as_slice()).unwrap();
+        assert_eq!(chunk, new_chunk);
     }
 }

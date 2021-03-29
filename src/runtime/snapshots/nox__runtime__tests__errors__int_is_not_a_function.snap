@@ -1,7 +1,8 @@
 ---
 source: src/runtime/tests.rs
 expression: vm.run().unwrap_err()
+
 ---
-[1;31merror[0m pos 12 :
+[1;31merror[0m line 1:
 5 is not a function
 

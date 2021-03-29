@@ -40,7 +40,7 @@ const fn int_width(mut i: usize) -> usize {
 /// 1 | 1.0.2
 ///        ^
 ///
-/// error : unexpected dot
+/// error: unexpected dot
 /// ```
 pub(crate) fn display_error<T: fmt::Display, U: fmt::Display>(
     message: T,
@@ -82,7 +82,7 @@ fn display_error_internal(
 ) -> Result<(), fmt::Error> {
     let mut lines = LinesRange::new(source, range).peekable();
     let (line, line_index, line_cols) = lines.next().unwrap_or_default();
-    writeln!(formatter, "{}: {}", source_name, line_index)?;
+    writeln!(formatter, "{}:", source_name)?;
 
     let multiline = lines.peek().is_some();
     // take two more chars just in case, because we don't know the index of the last line yet.

@@ -196,7 +196,7 @@ impl<'a> super::Parser<'a> {
                 self.emit_instruction_u8(Instruction::PushNil);
             }
             constant => {
-                let index = self.code().add_constant(constant);
+                let index = self.func().chunk.add_constant(constant);
                 self.emit_instruction(Instruction::ReadConstant(index));
             }
         }
@@ -231,7 +231,7 @@ impl<'a> super::Parser<'a> {
 
         match self.find_variable(&variable) {
             VariableLocation::Undefined => {
-                let index = self.code().add_global(variable);
+                let index = self.func().chunk.add_global(variable);
                 self.emit_instruction(Instruction::ReadGlobal(index))
             }
             VariableLocation::Local(index) => self.emit_instruction(Instruction::ReadLocal(index)),
@@ -313,9 +313,9 @@ impl<'a> super::Parser<'a> {
         self.parse_precedence(Precedence::Unary, token, true)?;
         match operator {
             Operation::Minus => self
-                .code()
+                .func()
                 .emit_instruction_u8(Instruction::Negative, op_pos),
-            Operation::Not => self.code().emit_instruction_u8(Instruction::Not, op_pos),
+            Operation::Not => self.func().emit_instruction_u8(Instruction::Not, op_pos),
             _ => {} // technically unreacheable ? meh
         }
         Ok(())
@@ -334,8 +334,10 @@ impl<'a> super::Parser<'a> {
                     TokenKind::RBrace => break,
                     TokenKind::Id(member) => {
                         elem_num += 1;
-                        let member_index =
-                            self.code().add_constant(Constant::String(member.clone()));
+                        let member_index = self
+                            .func()
+                            .chunk
+                            .add_constant(Constant::String(member.clone()));
                         if element_names_indices.contains(&member_index) {
                             return Err(self.emit_error(
                                 ErrorKind::TableDoubleAssignement(member),
@@ -410,7 +412,7 @@ impl<'a> super::Parser<'a> {
     fn parse_binary(&mut self, operator: Operation, range: Range<usize>) {
         let pos = range.start;
 
-        self.code().emit_instruction_u8(
+        self.func().emit_instruction_u8(
             match operator {
                 Operation::Plus => Instruction::Add,
                 Operation::Minus => Instruction::Subtract,
@@ -484,7 +486,7 @@ impl<'a> super::Parser<'a> {
                 Ok(ExpressionType::TableWrite(ass))
             }
         } else {
-            self.code()
+            self.func()
                 .emit_instruction_u8(Instruction::ReadTable, range.start);
             Ok(ExpressionType::TableRead)
         }
@@ -497,8 +499,8 @@ impl<'a> super::Parser<'a> {
         let range = if let Some(token) = self.next().transpose()? {
             match token.kind {
                 TokenKind::Id(member) => {
-                    let member_index = self.code().add_constant(Constant::String(member));
-                    self.code().emit_instruction(
+                    let member_index = self.func().chunk.add_constant(Constant::String(member));
+                    self.func().emit_instruction(
                         Instruction::ReadConstant(member_index),
                         token.range.start,
                     );
@@ -537,7 +539,7 @@ impl<'a> super::Parser<'a> {
                 Ok(ExpressionType::TableWrite(ass))
             }
         } else {
-            self.code()
+            self.func()
                 .emit_instruction_u8(Instruction::ReadTable, range.start);
             Ok(ExpressionType::TableRead)
         }

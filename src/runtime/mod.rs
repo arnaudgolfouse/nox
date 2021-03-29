@@ -124,7 +124,7 @@ impl VirtualMachine {
         if self.global_variables.contains_key(&library.name) {
             return Err(VmError::Runtime {
                 kind: RuntimeError::NameAlreadyDefined(library.name),
-                position: 0,
+                line: 0,
                 unwind_message: String::new(),
             });
         }
@@ -150,7 +150,7 @@ impl VirtualMachine {
             if self.global_variables.contains_key(&name) {
                 return Err(VmError::Runtime {
                     kind: RuntimeError::NameAlreadyDefined(name),
-                    position: 0,
+                    line: 0,
                     unwind_message: String::new(),
                 });
             }
@@ -245,14 +245,14 @@ impl VirtualMachine {
                 self.partial_reset();
                 VmError::Interfacing {
                     kind: err,
-                    position: self.chunk().get_pos(self.ip),
+                    line: self.chunk().get_line(self.ip),
                 }
             }
             VmErrorKind::Internal(err) => {
                 self.partial_reset();
                 VmError::Internal {
                     kind: err,
-                    position: self.chunk().get_pos(self.ip),
+                    line: self.chunk().get_line(self.ip),
                 }
             }
         }
@@ -301,8 +301,8 @@ impl VirtualMachine {
     #[inline]
     fn code(&self) -> &Vec<Instruction<u8>> {
         match self.call_frames.last() {
-            Some(frame) => &frame.chunk.code,
-            None => &self.chunk.code,
+            Some(frame) => &frame.chunk.instructions,
+            None => &self.chunk.instructions,
         }
     }
 
@@ -358,13 +358,13 @@ impl VirtualMachine {
     /// This will pop every call frame, but keep anything below.
     fn unwind(&mut self, error: RuntimeError) -> VmError {
         let mut unwind_message = String::new();
-        let position = self.chunk().get_pos(self.ip.saturating_sub(1));
+        let line = self.chunk().get_line(self.ip.saturating_sub(1));
         while let Some(frame) = self.call_frames.pop() {
             self.unwind_frame(&frame, &mut unwind_message);
         }
         VmError::Runtime {
             kind: error,
-            position,
+            line,
             unwind_message,
         }
     }
@@ -373,7 +373,7 @@ impl VirtualMachine {
     fn unwind_frame(&mut self, frame: &CallFrame, unwind_message: &mut String) {
         unwind_message.push_str(&format!(
             "  line {:<6} -> {}(",
-            self.chunk().get_pos(frame.previous_ip.saturating_sub(1)) + 1,
+            self.chunk().get_line(frame.previous_ip.saturating_sub(1)) + 1,
             frame.chunk.name
         ));
         // captured
@@ -678,21 +678,15 @@ impl error::Error for InternalError {}
 #[derive(Debug)]
 pub enum VmError {
     /// Internal error : indicate a bug in the VM
-    Internal {
-        kind: InternalError,
-        position: usize,
-    },
+    Internal { kind: InternalError, line: usize },
     /// Error encountered at runtime
     Runtime {
         kind: RuntimeError,
-        position: usize,
+        line: usize,
         unwind_message: String,
     },
     /// Error encountered while interfacing with Rust
-    Interfacing {
-        kind: InterfacingError,
-        position: usize,
-    },
+    Interfacing { kind: InterfacingError, line: usize },
     /// Error(s) encountered while parsing
     Parser(Vec<parser::Error>),
 }
@@ -729,33 +723,33 @@ impl<'a> fmt::Display for VmError {
         match self {
             Self::Runtime {
                 kind,
-                position,
+                line,
                 unwind_message,
             } => {
                 if !unwind_message.is_empty() {
-                    writeln!(formatter, "stack trace :\n{}", unwind_message)?;
+                    writeln!(formatter, "stack trace:\n{}", unwind_message)?;
                 }
                 writeln!(
                     formatter,
-                    "{} pos {} :\n{}",
+                    "{} line {}:\n{}",
                     "error".red().bold(),
-                    position,
+                    line + 1,
                     kind
                 )
             }
-            Self::Interfacing { kind, position } => writeln!(
+            Self::Interfacing { kind, line } => writeln!(
                 formatter,
-                "{} pos {} :\n{}",
+                "{} line {}:\n{}",
                 "error".red().bold(),
-                position,
+                line + 1,
                 kind
             ),
-            Self::Internal { kind, position } => {
+            Self::Internal { kind, line } => {
                 writeln!(
                     formatter,
-                    "{} pos {} :\n{}",
+                    "{} line {}:\n{}",
                     "INTERNAL ERROR".red().bold(),
-                    position,
+                    line + 1,
                     kind
                 )?;
                 writeln!(formatter)?;

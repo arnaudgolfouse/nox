@@ -17,6 +17,7 @@ mod bytecode;
 mod expression;
 mod serialize;
 
+use bytecode::Operand;
 use std::convert::TryInto;
 
 pub use bytecode::Chunk;
@@ -133,8 +134,12 @@ struct Function {
     globals: Vec<usize>,
     /// Stack of scopes
     scopes: Vec<Scope>,
+    /// Positions where the instruction of `code` were emitted.
+    ///
+    /// These will be used to construct line information later on.
+    positions: Vec<usize>,
     /// Bytecode
-    code: Chunk,
+    chunk: Chunk,
     /// Indicate if this function is a closure.
     closure: bool,
 }
@@ -145,7 +150,8 @@ impl Function {
             scopes: Vec::new(),
             variables: Vec::new(),
             globals: Vec::new(),
-            code: Chunk::new(name),
+            positions: Vec::new(),
+            chunk: Chunk::new(name),
             closure: false,
         }
     }
@@ -154,10 +160,63 @@ impl Function {
     fn scope(&self) -> Option<&Scope> {
         self.scopes.last()
     }
+
+    fn emit_instruction<Op: Operand>(&mut self, instruction: Instruction<Op>, position: usize) {
+        let (instruction, extended) = instruction.into_u8_instructions();
+        for extended in Op::iter_extended(&extended) {
+            if let Some(extended) = extended {
+                self.emit_instruction_u8(extended, position)
+            }
+        }
+        self.emit_instruction_u8(instruction, position)
+    }
+
+    fn emit_instruction_u8(&mut self, instruction: Instruction<u8>, position: usize) {
+        self.positions.push(position);
+        self.chunk.instructions.push(instruction)
+    }
+
+    /// Compute the lines informations for the function's chunk and returns it.
+    fn finish_chunk(mut self, source: &str) -> Chunk {
+        let char_indices = source.char_indices();
+        let mut line = 0;
+        let mut positions = self.positions.into_iter();
+        let mut next_position = positions.next();
+        let mut lines = Vec::new();
+        'char_indices: for (pos, c) in char_indices {
+            if c == '\n' {
+                line += 1;
+            }
+            loop {
+                if let Some(next_pos) = next_position {
+                    if next_pos <= pos {
+                        if let Some((prev_line, nb)) = lines.last_mut() {
+                            if *prev_line == line {
+                                *nb += 1
+                            } else {
+                                lines.push((line, 1))
+                            }
+                        } else {
+                            lines.push((line, 1))
+                        }
+                        next_position = positions.next();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break 'char_indices;
+                }
+            }
+        }
+
+        self.chunk.line = lines;
+        self.chunk
+    }
 }
 
 /// Parser for the nox language.
 pub struct Parser<'a> {
+    /// Holds the source code
     source: Source<'a>,
     /// Associated lexer
     lexer: Peekable<Lexer<'a>>,
@@ -202,13 +261,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Returns the code for the function we are currently parsing.
+    /// Returns the function we are currently parsing.
     #[inline]
-    fn code(&mut self) -> &mut Chunk {
+    fn func(&mut self) -> &mut Function {
         if let Some(func) = self.function_stack.last_mut() {
-            &mut func.code
+            func
         } else {
-            &mut self.top_level.code
+            &mut self.top_level
         }
     }
 
@@ -216,7 +275,7 @@ impl<'a> Parser<'a> {
     #[inline]
     fn emit_instruction<Op: bytecode::Operand>(&mut self, instruction: Instruction<Op>) {
         let pos = self.current_range.start;
-        self.code().emit_instruction(instruction, pos)
+        self.func().emit_instruction(instruction, pos)
     }
 
     /// Emit a new u8 instruction at the current position. Same as
@@ -224,7 +283,7 @@ impl<'a> Parser<'a> {
     #[inline]
     fn emit_instruction_u8(&mut self, instruction: Instruction<u8>) {
         let pos = self.current_range.start;
-        self.code().emit_instruction_u8(instruction, pos)
+        self.func().emit_instruction_u8(instruction, pos)
     }
 
     /// Returns the next token (or an error), and log an eventual warning.
@@ -281,7 +340,7 @@ impl<'a> Parser<'a> {
             continuable,
             range,
             source: self.source.content().into(),
-            source_name: self.source.name().into(),
+            source_name: Box::from(self.source.name()),
         }
     }
 
@@ -292,7 +351,7 @@ impl<'a> Parser<'a> {
             kind,
             range,
             source: self.source.content().into(),
-            source_name: self.source.name().into(),
+            source_name: Box::from(self.source.name()),
         })
     }
 
@@ -367,7 +426,7 @@ impl<'a> Parser<'a> {
         }
 
         if self.errors.is_empty() {
-            self.top_level.code.locals_number =
+            self.top_level.chunk.locals_number =
                 self.top_level.variables.len().try_into().map_err(|_| {
                     vec![self.emit_error(
                         ErrorKind::TooManyLocalVariables(self.top_level.variables.len()),
@@ -376,12 +435,13 @@ impl<'a> Parser<'a> {
                     )]
                 })?;
             self.top_level
-                .code
                 .emit_instruction_u8(Instruction::PushNil, self.current_range.end);
             self.top_level
-                .code
                 .emit_instruction_u8(Instruction::Return, self.current_range.end);
-            Ok((self.top_level.code, self.warnings))
+            Ok((
+                self.top_level.finish_chunk(self.source.content()),
+                self.warnings,
+            ))
         } else {
             Err(self.errors)
         }
@@ -438,7 +498,7 @@ impl<'a> Parser<'a> {
                 let pos = first_token.range.start;
                 let token = self.next().transpose()?;
                 self.parse_expression(token, true)?;
-                self.code().emit_instruction::<u8>(Instruction::Return, pos)
+                self.func().emit_instruction_u8(Instruction::Return, pos)
             }
             // <...> end
             TokenKind::Keyword(Keyword::End) => {
@@ -446,20 +506,23 @@ impl<'a> Parser<'a> {
                     match scope {
                         Scope::Dummy => {}
                         Scope::If(if_address) => {
-                            let offset = (self.code().code.len() - if_address) as u64;
-                            self.code()
+                            let offset = (self.func().chunk.instructions.len() - if_address) as u64;
+                            self.func()
+                                .chunk
                                 .write_jump(if_address, Instruction::JumpPopFalse(offset))
                         }
                         Scope::Else(else_address) => {
-                            let offset = (self.code().code.len() - else_address) as u64;
-                            self.code()
+                            let offset =
+                                (self.func().chunk.instructions.len() - else_address) as u64;
+                            self.func()
+                                .chunk
                                 .write_jump(else_address, Instruction::Jump(offset))
                         }
                         Scope::While(jump_address) => {
                             self.emit_instruction_u8(Instruction::Continue(0));
                             let jump_destination =
-                                self.code().code.len() as u64 - jump_address as u64;
-                            self.code().write_jump(
+                                self.func().chunk.instructions.len() as u64 - jump_address as u64;
+                            self.func().chunk.write_jump(
                                 jump_address,
                                 Instruction::JumpEndWhile(jump_destination),
                             );
@@ -470,8 +533,8 @@ impl<'a> Parser<'a> {
                         } => {
                             self.emit_instruction_u8(Instruction::Continue(1));
                             let jump_destination =
-                                self.code().code.len() as u64 - jump_address as u64;
-                            self.code().write_jump(
+                                self.func().chunk.instructions.len() as u64 - jump_address as u64;
+                            self.func().chunk.write_jump(
                                 jump_address,
                                 Instruction::JumpEndFor(jump_destination),
                             );
@@ -485,10 +548,10 @@ impl<'a> Parser<'a> {
                         }
                     }
                 } else if let Some(mut function) = self.function_stack.pop() {
-                    let pos = self.next_range.start;
-                    function.code.emit_instruction_u8(Instruction::PushNil, pos);
-                    function.code.emit_instruction_u8(Instruction::Return, pos);
-                    function.code.locals_number =
+                    let pos = self.current_range.start;
+                    function.emit_instruction_u8(Instruction::PushNil, pos);
+                    function.emit_instruction_u8(Instruction::Return, pos);
+                    function.chunk.locals_number =
                         function.variables.len().try_into().map_err(|_| {
                             self.emit_error(
                                 ErrorKind::TooManyLocalVariables(function.variables.len()),
@@ -496,10 +559,13 @@ impl<'a> Parser<'a> {
                                 self.current_range.clone(),
                             )
                         })?;
-                    self.code()
+                    let is_closure = function.closure;
+                    let new_chunk = function.finish_chunk(self.source.content());
+                    self.func()
+                        .chunk
                         .functions
-                        .push(std::sync::Arc::new(function.code));
-                    if function.closure {
+                        .push(std::sync::Arc::new(new_chunk));
+                    if is_closure {
                         return Ok(ParseReturn::StopClosure); // weird edge case : we need to stop parsing now and return to the caller (parse_lambda)
                     }
                 } else {
@@ -531,16 +597,17 @@ impl<'a> Parser<'a> {
                         self.next_range.clone(),
                     ));
                 }
-                let if_address = self.code().push_jump();
+                let if_address = self.func().chunk.push_jump();
                 self.push_scope(Scope::If(if_address));
             }
             // <...> else <statements> end
             TokenKind::Keyword(Keyword::Else) => {
                 if let Some(Scope::If(if_address)) = self.pop_scope() {
-                    let else_address = self.code().push_jump();
+                    let else_address = self.func().chunk.push_jump();
                     self.push_scope(Scope::Else(else_address));
-                    let offset = (self.code().code.len() - if_address) as u64;
-                    self.code()
+                    let offset = (self.func().chunk.instructions.len() - if_address) as u64;
+                    self.func()
+                        .chunk
                         .write_jump(if_address, Instruction::JumpPopFalse(offset));
                 } else {
                     return Err(self.emit_error(
@@ -552,15 +619,16 @@ impl<'a> Parser<'a> {
             }
             // while <expression> <statements> end
             TokenKind::Keyword(Keyword::While) => {
-                let prepare_loop = self.code().push_jump();
+                let prepare_loop = self.func().chunk.push_jump();
                 let token = self.next().transpose()?;
                 self.parse_expression(token, true)?;
                 // We **can** subtract 1 because parsing an expression always produces instructions.
                 // We **need** to because the offset is from the instruction right AFTER the `PrepareWhile`
-                let operand = self.code().code.len() - prepare_loop - 1;
-                self.code()
+                let operand = self.func().chunk.instructions.len() - prepare_loop - 1;
+                self.func()
+                    .chunk
                     .write_jump(prepare_loop, Instruction::PrepareLoop(operand as u64));
-                let jump_address = self.code().push_jump();
+                let jump_address = self.func().chunk.push_jump();
                 self.push_scope(Scope::While(jump_address))
             }
             // for <id> in <expression> <statements> end
@@ -614,17 +682,18 @@ impl<'a> Parser<'a> {
 
                 let token = self.next().transpose()?;
                 self.parse_expression(token, true)?;
-                let prepare_loop = self.code().push_jump();
+                let prepare_loop = self.func().chunk.push_jump();
                 self.emit_instruction_u8(Instruction::DuplicateTop(0));
                 self.emit_instruction_u8(Instruction::Call(0));
-                let operand = self.code().code.len() - prepare_loop - 1;
+                let operand = self.func().chunk.instructions.len() - prepare_loop - 1;
                 #[allow(clippy::panic)]
                 {
                     debug_assert_eq!(operand, 2);
                 }
-                self.code()
+                self.func()
+                    .chunk
                     .write_jump(prepare_loop, Instruction::PrepareLoop(operand as u64));
-                let jump_address = self.code().push_jump();
+                let jump_address = self.func().chunk.push_jump();
                 // the variable will be moved.
                 let placeholder = for_variable.is_empty();
                 let loop_variable_index = if let Some(function) = self.function_stack.last_mut() {
@@ -731,7 +800,7 @@ impl<'a> Parser<'a> {
                             }
                             if let Some(func) = self.function_stack.last_mut() {
                                 for index in &func.globals {
-                                    if variable == func.code.globals[*index] {
+                                    if variable == func.chunk.globals[*index] {
                                         self.emit_warning(
                                             WarningKind::GlobalAlreadyDefined(variable),
                                             global_start..token.range.end,
@@ -748,7 +817,7 @@ impl<'a> Parser<'a> {
                                         ));
                                     }
                                 }
-                                let index = func.code.add_global(variable);
+                                let index = func.chunk.add_global(variable);
                                 func.globals.push(index as usize)
                             } else {
                                 self.emit_warning(
@@ -830,7 +899,7 @@ impl<'a> Parser<'a> {
                         return Some(&function.variables[index as usize]);
                     }
                     LocalOrCaptured::Captured(index) => {
-                        captured_index = function.code.captures[index as usize];
+                        captured_index = function.chunk.captures[index as usize];
                     }
                 }
             }
@@ -840,7 +909,7 @@ impl<'a> Parser<'a> {
         if let Some(func) = self.function_stack.last() {
             // global ?
             for global_index in &func.globals {
-                if func.code.globals[*global_index].as_ref() == variable {
+                if func.chunk.globals[*global_index].as_ref() == variable {
                     return VariableLocation::Global(*global_index);
                 }
             }
@@ -854,7 +923,7 @@ impl<'a> Parser<'a> {
             }
 
             // already captured ?
-            for (index, var_index) in func.code.captures.iter().copied().enumerate() {
+            for (index, var_index) in func.chunk.captures.iter().copied().enumerate() {
                 if Some(variable)
                     == find_captured(
                         &self.function_stack[..self.function_stack.len() - 1],
@@ -872,8 +941,8 @@ impl<'a> Parser<'a> {
                         let mut captured_index = LocalOrCaptured::Local(index.try_into().unwrap());
                         // capturing the variable in all subsequent function
                         for function in self.function_stack.iter_mut().skip(func_index + 1) {
-                            let next_index = function.code.captures.len();
-                            function.code.captures.push(captured_index);
+                            let next_index = function.chunk.captures.len();
+                            function.chunk.captures.push(captured_index);
                             captured_index =
                                 LocalOrCaptured::Captured(next_index.try_into().unwrap());
                         }
@@ -885,7 +954,7 @@ impl<'a> Parser<'a> {
                     }
                 }
 
-                for (index, var_index) in func.code.captures.iter().copied().enumerate() {
+                for (index, var_index) in func.chunk.captures.iter().copied().enumerate() {
                     if find_captured(&self.function_stack[..func_index], var_index)
                         == Some(variable)
                     {
@@ -893,8 +962,8 @@ impl<'a> Parser<'a> {
                             LocalOrCaptured::Captured(index.try_into().unwrap());
                         // capturing the variable in all subsequent function
                         for function in self.function_stack.iter_mut().skip(func_index + 1) {
-                            let next_index = function.code.captures.len();
-                            function.code.captures.push(captured_index);
+                            let next_index = function.chunk.captures.len();
+                            function.chunk.captures.push(captured_index);
                             captured_index =
                                 LocalOrCaptured::Captured(next_index.try_into().unwrap());
                         }
@@ -914,7 +983,7 @@ impl<'a> Parser<'a> {
                     return VariableLocation::Local(index);
                 }
             }
-            for (index, var) in self.top_level.code.globals.iter().enumerate() {
+            for (index, var) in self.top_level.chunk.globals.iter().enumerate() {
                 if var.as_ref() == variable {
                     return VariableLocation::Global(index);
                 }
@@ -933,7 +1002,7 @@ impl<'a> Parser<'a> {
                     func.variables.push(variable);
                     Instruction::WriteLocal(index)
                 } else {
-                    let index = self.code().add_global(variable);
+                    let index = self.func().chunk.add_global(variable);
                     Instruction::WriteGlobal(index)
                 }
             }
@@ -941,7 +1010,7 @@ impl<'a> Parser<'a> {
             VariableLocation::Global(index) => Instruction::WriteGlobal(index),
             VariableLocation::Captured(index) => Instruction::WriteCaptured(index),
         };
-        self.code().emit_instruction(instruction, position)
+        self.func().emit_instruction(instruction, position)
     }
 
     /// Parse a variable assignement, assuming the variable and the assignement
@@ -1032,12 +1101,12 @@ impl<'a> Parser<'a> {
                 return Err(self.expected_token(TokenKind::RPar, self.end_current_range()));
             }
         }
-        let index = self.code().functions.len();
+        let index = self.func().chunk.functions.len();
         self.emit_instruction(Instruction::ReadFunction(index));
 
-        let mut code = Chunk::new(name);
+        let mut chunk = Chunk::new(name);
 
-        code.arg_number = args.len().try_into().map_err(|_| {
+        chunk.arg_number = args.len().try_into().map_err(|_| {
             self.emit_error(
                 ErrorKind::TooManyFunctionArgs(args.len()),
                 Continue::Stop,
@@ -1048,7 +1117,8 @@ impl<'a> Parser<'a> {
             variables: args,
             globals: Vec::new(),
             scopes: Vec::new(),
-            code,
+            positions: Vec::new(),
+            chunk,
             closure,
         })
     }
@@ -1101,7 +1171,7 @@ impl<'a> Parser<'a> {
                         expression_range,
                     ));
                 }
-                self.emit_instruction_u8(Instruction::Pop(1))
+                self.func().emit_instruction_u8(Instruction::Pop(1), start)
             }
             _ => {
                 return if let Some(Token {
@@ -1257,8 +1327,8 @@ impl From<lexer::Error<'_>> for Error {
         Self {
             kind: ErrorKind::Lexer(lexer_error.kind),
             range: lexer_error.range,
-            source: lexer_error.source.content().into(),
-            source_name: lexer_error.source.name().into(),
+            source: Box::from(lexer_error.source.content()),
+            source_name: Box::from(lexer_error.source.name()),
             continuable: lexer_error.continuable,
         }
     }

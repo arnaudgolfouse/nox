@@ -39,7 +39,7 @@ fn return_statement() {
     let parser = Parser::new(Source::TopLevel("return 1"));
     let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1)]);
-    insta::assert_debug_snapshot!(chunk.code)
+    insta::assert_debug_snapshot!(chunk.instructions)
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn if_statement() {
         chunk.constants,
         [Constant::Int(1), Constant::Int(2), Constant::Int(3)]
     );
-    insta::assert_debug_snapshot!(chunk.code);
+    insta::assert_debug_snapshot!(chunk.instructions);
 }
 
 #[test]
@@ -77,7 +77,7 @@ end"#,
         ]
     );
     assert_eq!(chunk.globals, [Box::from("f"), Box::from("g")]);
-    insta::assert_debug_snapshot!(chunk.code);
+    insta::assert_debug_snapshot!(chunk.instructions);
 }
 
 mod binary_ops {
@@ -87,7 +87,7 @@ mod binary_ops {
     fn simple_arithmetics() {
         let parser = Parser::new(Source::TopLevel("return 1 + 2 * 3 + 4"));
         let (chunk, _) = parser.parse_top_level().unwrap();
-        insta::assert_debug_snapshot!(chunk.code);
+        insta::assert_debug_snapshot!(chunk.instructions);
     }
 
     #[test]
@@ -96,7 +96,7 @@ mod binary_ops {
             "return (1 + 2) << 3 - 4 * 5 % 6 == 7 / -8 ^ 9",
         ));
         let (chunk, _) = parser.parse_top_level().unwrap();
-        insta::assert_debug_snapshot!(chunk.code);
+        insta::assert_debug_snapshot!(chunk.instructions);
     }
 
     #[test]
@@ -105,14 +105,14 @@ mod binary_ops {
             "return not true and false or false == true xor true or not true",
         ));
         let (chunk, _) = parser.parse_top_level().unwrap();
-        insta::assert_debug_snapshot!(chunk.code);
+        insta::assert_debug_snapshot!(chunk.instructions);
     }
 
     #[test]
     fn left_associativity() {
         let parser = Parser::new(Source::TopLevel("return 5 + 9 + 2 - 3 - 1"));
         let (chunk, _) = parser.parse_top_level().unwrap();
-        insta::assert_debug_snapshot!(chunk.code);
+        insta::assert_debug_snapshot!(chunk.instructions);
     }
 }
 
@@ -122,7 +122,7 @@ fn while_loop() {
     let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1)]);
     assert_eq!(chunk.globals, [Box::from("x"), Box::from("y")]);
-    insta::assert_debug_snapshot!(chunk.code);
+    insta::assert_debug_snapshot!(chunk.instructions);
 }
 
 #[test]
@@ -144,7 +144,7 @@ end",
     assert_eq!(chunk.constants, [Constant::Int(1)]);
     assert_eq!(chunk.globals, [Box::from("x"), Box::from("y")]);
     assert_eq!(
-        chunk.code[0..6],
+        chunk.instructions[0..6],
         [
             PrepareLoop(3),
             ReadGlobal(0),
@@ -156,11 +156,11 @@ end",
     );
     for i in 1..65 {
         assert_eq!(
-            chunk.code[(i * 4 + 2)..(i + 1) * 4 + 2],
+            chunk.instructions[(i * 4 + 2)..(i + 1) * 4 + 2],
             [ReadGlobal(0), ReadConstant(0), Subtract, WriteGlobal(0),]
         );
     }
-    assert_eq!(chunk.code[262..], [Continue(0), PushNil, Return]);
+    assert_eq!(chunk.instructions[262..], [Continue(0), PushNil, Return]);
 }
 
 #[test]
@@ -175,7 +175,7 @@ end
     let (chunk, _) = parser.parse_top_level().unwrap();
     assert_eq!(chunk.constants, [Constant::Int(1), Constant::Int(2)]);
     assert_eq!(chunk.globals, [Box::from("range"), Box::from("x")]);
-    insta::assert_debug_snapshot!(chunk.code);
+    insta::assert_debug_snapshot!(chunk.instructions);
 }
 
 #[test]
@@ -198,7 +198,7 @@ return x
         [Constant::Int(0), Constant::Int(1), Constant::Int(3)]
     );
     assert_eq!(chunk.globals, [Box::from("range"), Box::from("x")]);
-    insta::assert_debug_snapshot!(chunk.code);
+    insta::assert_debug_snapshot!(chunk.instructions);
 }
 
 mod tables {
@@ -210,7 +210,7 @@ mod tables {
         let (chunk, _) = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, []);
         assert_eq!(chunk.globals, [Box::from("t")]);
-        insta::assert_debug_snapshot!(chunk.code);
+        insta::assert_debug_snapshot!(chunk.instructions);
     }
 
     #[test]
@@ -228,7 +228,7 @@ mod tables {
             ]
         );
         assert_eq!(chunk.globals, [Box::from("t")]);
-        insta::assert_debug_snapshot!(chunk.code);
+        insta::assert_debug_snapshot!(chunk.instructions);
     }
 
     #[test]
@@ -252,7 +252,7 @@ mod tables {
                 Box::from("t3")
             ]
         );
-        insta::assert_debug_snapshot!(chunk.code);
+        insta::assert_debug_snapshot!(chunk.instructions);
     }
 
     #[test]
@@ -274,7 +274,7 @@ return t.x
             ]
         );
         assert_eq!(chunk.globals, [Box::from("t")]);
-        insta::assert_debug_snapshot!(chunk.code);
+        insta::assert_debug_snapshot!(chunk.instructions);
     }
 }
 
@@ -287,7 +287,7 @@ mod functions {
         let (chunk, _) = parser.parse_top_level().unwrap();
         assert_eq!(chunk.constants, []);
         assert_eq!(chunk.globals, [Box::from("f"), Box::from("x")]);
-        insta::assert_debug_snapshot!((chunk.code, &chunk.functions[0].code));
+        insta::assert_debug_snapshot!((chunk.instructions, &chunk.functions[0].instructions));
     }
 
     #[test]
@@ -318,9 +318,9 @@ end",
         assert_eq!(chunk.functions[0].functions[0].globals, []);
 
         insta::assert_debug_snapshot!((
-            chunk.code,
-            &chunk.functions[0].code,
-            &chunk.functions[0].functions[0].code
+            chunk.instructions,
+            &chunk.functions[0].instructions,
+            &chunk.functions[0].functions[0].instructions
         ));
     }
 
@@ -338,9 +338,9 @@ x = fn()
         assert_eq!(chunk.globals, [Box::from("x")]);
 
         insta::assert_debug_snapshot!((
-            chunk.code,
-            &chunk.functions[0].code,
-            &chunk.functions[0].functions[0].code
+            chunk.instructions,
+            &chunk.functions[0].instructions,
+            &chunk.functions[0].functions[0].instructions
         ));
     }
 
@@ -391,10 +391,10 @@ end
         assert_eq!(chunk.functions[0].functions[0].functions[0].globals, []);
 
         insta::assert_debug_snapshot!((
-            chunk.code,
-            &chunk.functions[0].code,
-            &chunk.functions[0].functions[0].code,
-            &chunk.functions[0].functions[0].functions[0].code
+            chunk.instructions,
+            &chunk.functions[0].instructions,
+            &chunk.functions[0].functions[0].instructions,
+            &chunk.functions[0].functions[0].functions[0].instructions
         ));
     }
 
@@ -423,9 +423,9 @@ return x
         );
 
         insta::assert_debug_snapshot!((
-            chunk.code,
-            &chunk.functions[0].code,
-            &chunk.functions[1].code,
+            chunk.instructions,
+            &chunk.functions[0].instructions,
+            &chunk.functions[1].instructions,
         ));
     }
 }
